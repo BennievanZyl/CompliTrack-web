@@ -685,16 +685,21 @@ body {
     </div>
     <h1>CompliTrack</h1>
     <p>Franchise compliance & store management</p>
+    <div id="login-alert" style="margin-bottom:12px;"></div>
     <div class="field">
       <label>Email address</label>
-      <input type="email" id="login-email" value="owner@complitrack.co.za" placeholder="you@store.co.za">
+      <input type="email" id="login-email" placeholder="you@store.co.za" onkeydown="if(event.key==='Enter')doLogin()">
     </div>
     <div class="field">
       <label>Password</label>
-      <input type="password" id="login-password" value="••••••••" placeholder="Your password">
+      <input type="password" id="login-password" placeholder="Your password" onkeydown="if(event.key==='Enter')doLogin()">
     </div>
-    <button class="btn btn-primary" onclick="doLogin()">Sign in to CompliTrack</button>
-    <p class="login-demo">Demo mode — click sign in to explore the dashboard</p>
+    <button class="btn btn-primary" id="login-btn" onclick="doLogin()">Sign in to CompliTrack</button>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px;">
+      <a href="register.html" style="font-size:13px;color:#0F6E56;font-weight:500;text-decoration:none;">Create an account →</a>
+      <button onclick="showForgotPassword()" style="font-size:13px;color:#4A6358;background:none;border:none;cursor:pointer;padding:0;">Forgot password?</button>
+    </div>
+    <p class="login-demo" id="demo-note" style="display:none;">Demo mode — add your Supabase keys to connect live data</p>
   </div>
 </div>
 
@@ -1364,8 +1369,8 @@ body {
 //  Replace the two values below with your credentials from:
 //  Supabase → Settings → API
 // ════════════════════════════════════════════════════════════
-const SUPABASE_URL  = 'https://fdixocuxhpafxkfytvxu.supabase.co'
-const SUPABASE_KEY  = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZkaXhvY3V4aHBhZnhrZnl0dnh1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0ODI2NzgsImV4cCI6MjA5MzA1ODY3OH0.ZsStIc18riGDkmcuRvgKfnAMol6DMKZF2y2br8RAfl0'
+const SUPABASE_URL  = 'https://YOUR_PROJECT_REF.supabase.co'
+const SUPABASE_KEY  = 'your-anon-public-key-here'
 
 // Detect if real credentials have been added
 const USE_SUPABASE = !SUPABASE_URL.includes('YOUR_PROJECT_REF')
@@ -1398,54 +1403,83 @@ const state = {
 };
 
 // ── SUPABASE AUTH ─────────────────────────────────────────────
+function showLoginAlert(msg, type = 'error') {
+  const el = document.getElementById('login-alert')
+  if (!el) return
+  el.innerHTML = `<div style="padding:10px 14px;border-radius:8px;font-size:13px;margin-bottom:4px;
+    background:${type==='error'?'#FCEBEB':'#E1F5EE'};
+    color:${type==='error'?'#8B1A1A':'#085041'};
+    border:1px solid ${type==='error'?'rgba(226,75,74,0.2)':'rgba(15,110,86,0.2)'};">
+    ${msg}
+  </div>`
+  setTimeout(() => { if(el) el.innerHTML = '' }, 5000)
+}
+
+async function showForgotPassword() {
+  const email = document.getElementById('login-email').value.trim()
+  if (!email) { showLoginAlert('Enter your email address first, then click forgot password'); return }
+  if (!USE_SUPABASE) { showLoginAlert('Add your Supabase keys to enable password reset', 'error'); return }
+  const { error } = await sb.auth.resetPasswordForEmail(email, {
+    redirectTo: window.location.origin + '/index.html'
+  })
+  if (error) { showLoginAlert('Could not send reset email: ' + error.message); return }
+  showLoginAlert('Password reset email sent — check your inbox', 'success')
+}
+
 async function doLogin() {
   if (!USE_SUPABASE) {
-    // Demo mode — skip auth
-    document.getElementById('login-screen').style.display = 'none';
-    document.getElementById('app').style.display = 'block';
-    initApp();
-    return;
+    // Demo mode
+    document.getElementById('demo-note').style.display = 'block'
+    document.getElementById('login-screen').style.display = 'none'
+    document.getElementById('app').style.display = 'block'
+    initApp()
+    return
   }
 
-  const email = document.getElementById('login-email').value.trim();
-  const password = document.getElementById('login-password').value;
-  const btn = document.querySelector('#login-screen .btn-primary');
-  btn.textContent = 'Signing in...';
-  btn.disabled = true;
+  const email = document.getElementById('login-email').value.trim()
+  const password = document.getElementById('login-password').value
+  const btn = document.getElementById('login-btn')
+
+  if (!email) { showLoginAlert('Please enter your email address'); return }
+  if (!password) { showLoginAlert('Please enter your password'); return }
+
+  btn.textContent = 'Signing in...'
+  btn.disabled = true
 
   try {
-    const { data, error } = await sb.auth.signInWithPassword({ email, password });
-    if (error) throw error;
+    const { data, error } = await sb.auth.signInWithPassword({ email, password })
+    if (error) throw error
 
-    // Fetch profile for role + store info
     const { data: profile, error: pErr } = await sb
       .from('profiles')
       .select('*, stores(name, organisation_id)')
       .eq('id', data.user.id)
-      .single();
-    if (pErr) throw pErr;
+      .single()
+    if (pErr) throw pErr
 
-    state.user    = data.user;
-    state.profile = profile;
-    state.storeId = profile.store_id;
-    state.orgId   = profile.organisation_id;
-    state.role    = profile.role;
+    state.user    = data.user
+    state.profile = profile
+    state.storeId = profile.store_id
+    state.orgId   = profile.organisation_id
+    state.role    = profile.role
 
-    // Update sidebar user display
     if (profile.full_name) {
-      document.querySelector('.user-name').textContent = profile.full_name;
-      document.querySelector('.user-role').textContent = profile.role;
-      const initials = profile.full_name.split(' ').map(n=>n[0]).join('').slice(0,2).toUpperCase();
-      document.querySelector('.sidebar-footer .avatar').textContent = initials;
+      document.querySelector('.user-name').textContent = profile.full_name
+      document.querySelector('.user-role').textContent = profile.role
+      const initials = profile.full_name.split(' ').map(n=>n[0]).join('').slice(0,2).toUpperCase()
+      document.querySelector('.sidebar-footer .avatar').textContent = initials
     }
 
-    document.getElementById('login-screen').style.display = 'none';
-    document.getElementById('app').style.display = 'block';
-    initApp();
+    document.getElementById('login-screen').style.display = 'none'
+    document.getElementById('app').style.display = 'block'
+    initApp()
   } catch (e) {
-    showToast('Login failed: ' + e.message, 'error');
-    btn.textContent = 'Sign in to CompliTrack';
-    btn.disabled = false;
+    const msg = e.message.includes('Invalid login') 
+      ? 'Incorrect email or password — please try again'
+      : 'Login failed: ' + e.message
+    showLoginAlert(msg)
+    btn.textContent = 'Sign in to CompliTrack'
+    btn.disabled = false
   }
 }
 
