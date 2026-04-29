@@ -1,0 +1,2432 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CompliTrack — Franchise Compliance Dashboard</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<style>
+:root {
+  --green:       #0F6E56;
+  --green-mid:   #1D9E75;
+  --green-light: #E1F5EE;
+  --green-dark:  #085041;
+  --amber:       #EF9F27;
+  --amber-light: #FAEEDA;
+  --red:         #E24B4A;
+  --red-light:   #FCEBEB;
+  --blue:        #185FA5;
+  --blue-light:  #E6F1FB;
+  --bg:          #F4F6F4;
+  --surface:     #FFFFFF;
+  --surface2:    #F0F4F1;
+  --border:      #E2EAE5;
+  --text:        #0D1F18;
+  --text2:       #4A6358;
+  --text3:       #8AA898;
+  --sidebar-w:   240px;
+  --header-h:    60px;
+  --radius:      12px;
+  --radius-sm:   8px;
+  --shadow:      0 1px 3px rgba(15,110,86,0.08), 0 1px 2px rgba(15,110,86,0.04);
+  --shadow-md:   0 4px 12px rgba(15,110,86,0.12);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'DM Sans', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* ── LOGIN ─────────────────────────────────── */
+#login-screen {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #0D3D2E 0%, #0F6E56 50%, #1D9E75 100%);
+}
+
+.login-card {
+  background: var(--surface);
+  border-radius: 20px;
+  padding: 48px 40px;
+  width: 100%;
+  max-width: 400px;
+  box-shadow: 0 24px 64px rgba(0,0,0,0.2);
+}
+
+.login-logo {
+  width: 56px; height: 56px;
+  background: var(--green);
+  border-radius: 16px;
+  display: flex; align-items: center; justify-content: center;
+  margin: 0 auto 24px;
+}
+
+.login-logo svg { width: 28px; height: 28px; }
+
+.login-card h1 {
+  text-align: center;
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+
+.login-card p {
+  text-align: center;
+  color: var(--text2);
+  font-size: 13px;
+  margin-bottom: 32px;
+}
+
+.field { margin-bottom: 16px; }
+.field label { display: block; font-size: 12px; font-weight: 500; color: var(--text2); margin-bottom: 6px; letter-spacing: 0.02em; }
+.field input {
+  width: 100%;
+  padding: 11px 14px;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  font-size: 14px;
+  color: var(--text);
+  background: var(--surface);
+  transition: border-color 0.15s;
+  outline: none;
+}
+.field input:focus { border-color: var(--green); }
+
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 11px 20px;
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  border: none;
+  transition: all 0.15s;
+  text-decoration: none;
+}
+.btn-primary { background: var(--green); color: white; width: 100%; }
+.btn-primary:hover { background: var(--green-dark); }
+.btn-secondary { background: var(--surface2); color: var(--text); border: 1.5px solid var(--border); }
+.btn-secondary:hover { background: var(--border); }
+.btn-ghost { background: transparent; color: var(--text2); padding: 8px 12px; font-size: 13px; }
+.btn-ghost:hover { color: var(--green); }
+.btn-sm { padding: 7px 14px; font-size: 13px; }
+.btn-danger { background: var(--red-light); color: var(--red); border: 1.5px solid rgba(226,75,74,0.2); }
+
+.login-demo {
+  margin-top: 16px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text3);
+}
+
+/* ── LAYOUT ────────────────────────────────── */
+#app { display: none; min-height: 100vh; }
+
+.sidebar {
+  position: fixed; left: 0; top: 0; bottom: 0;
+  width: var(--sidebar-w);
+  background: var(--green-dark);
+  display: flex; flex-direction: column;
+  z-index: 100;
+}
+
+.sidebar-brand {
+  padding: 20px 20px 16px;
+  display: flex; align-items: center; gap: 10px;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+
+.brand-icon {
+  width: 36px; height: 36px;
+  background: var(--green-mid);
+  border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+
+.brand-icon svg { width: 20px; height: 20px; }
+
+.brand-text { font-size: 15px; font-weight: 600; color: white; }
+.brand-sub { font-size: 10px; color: rgba(255,255,255,0.45); letter-spacing: 0.08em; text-transform: uppercase; }
+
+.sidebar-section {
+  padding: 12px 12px 4px;
+  font-size: 10px;
+  font-weight: 600;
+  color: rgba(255,255,255,0.35);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.nav-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px;
+  margin: 1px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: rgba(255,255,255,0.65);
+  font-size: 13px;
+  font-weight: 400;
+  transition: all 0.12s;
+  position: relative;
+}
+.nav-item:hover { background: rgba(255,255,255,0.08); color: white; }
+.nav-item.active { background: rgba(255,255,255,0.12); color: white; font-weight: 500; }
+.nav-item svg { width: 16px; height: 16px; flex-shrink: 0; opacity: 0.8; }
+.nav-item.active svg { opacity: 1; }
+
+.nav-badge {
+  margin-left: auto;
+  background: var(--red);
+  color: white;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 99px;
+}
+
+.sidebar-footer {
+  margin-top: auto;
+  padding: 12px;
+  border-top: 1px solid rgba(255,255,255,0.08);
+}
+
+.user-pill {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.user-pill:hover { background: rgba(255,255,255,0.08); }
+
+.avatar {
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  background: var(--green-mid);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 600; color: white;
+  flex-shrink: 0;
+}
+
+.user-name { font-size: 13px; font-weight: 500; color: white; }
+.user-role { font-size: 11px; color: rgba(255,255,255,0.45); }
+
+/* ── HEADER ────────────────────────────────── */
+.header {
+  position: fixed; top: 0;
+  left: var(--sidebar-w); right: 0;
+  height: var(--header-h);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center;
+  padding: 0 24px;
+  gap: 16px;
+  z-index: 50;
+  box-shadow: var(--shadow);
+}
+
+.header-title { font-size: 16px; font-weight: 600; color: var(--text); }
+.header-sub { font-size: 12px; color: var(--text2); }
+.header-spacer { flex: 1; }
+
+.conn-indicator {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 12px;
+  border-radius: 99px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  font-size: 12px; font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.conn-indicator:hover { border-color: var(--green); }
+.conn-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--green);
+  animation: pulse-dot 2s infinite;
+}
+.conn-dot.offline { background: var(--red); animation: none; }
+.conn-dot.pending { background: var(--amber); }
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.6; transform: scale(0.85); }
+}
+
+/* ── MAIN CONTENT ──────────────────────────── */
+.main {
+  margin-left: var(--sidebar-w);
+  margin-top: var(--header-h);
+  padding: 28px;
+  min-height: calc(100vh - var(--header-h));
+}
+
+.page { display: none; }
+.page.active { display: block; }
+
+/* ── CARDS ─────────────────────────────────── */
+.card {
+  background: var(--surface);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+}
+
+.card-header {
+  padding: 16px 20px 12px;
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 10px;
+}
+.card-title { font-size: 14px; font-weight: 600; color: var(--text); }
+.card-sub { font-size: 12px; color: var(--text2); margin-top: 1px; }
+.card-body { padding: 20px; }
+.card-actions { margin-left: auto; display: flex; gap: 8px; }
+
+/* ── METRICS ───────────────────────────────── */
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 14px;
+  margin-bottom: 24px;
+}
+
+.metric {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px 20px;
+  box-shadow: var(--shadow);
+}
+.metric-label { font-size: 11px; font-weight: 500; color: var(--text2); letter-spacing: 0.04em; text-transform: uppercase; margin-bottom: 8px; }
+.metric-value { font-size: 26px; font-weight: 600; color: var(--text); line-height: 1; }
+.metric-sub { font-size: 12px; color: var(--text2); margin-top: 4px; }
+.metric-good { border-left: 3px solid var(--green); }
+.metric-warn { border-left: 3px solid var(--amber); }
+.metric-bad  { border-left: 3px solid var(--red); }
+
+/* ── BADGES ────────────────────────────────── */
+.badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 9px;
+  border-radius: 99px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.badge-green  { background: var(--green-light); color: var(--green-dark); }
+.badge-amber  { background: var(--amber-light); color: #7A4F00; }
+.badge-red    { background: var(--red-light); color: #8B1A1A; }
+.badge-blue   { background: var(--blue-light); color: var(--blue); }
+.badge-grey   { background: var(--surface2); color: var(--text2); }
+
+/* ── PROGRESS BAR ──────────────────────────── */
+.progress-track {
+  height: 6px; background: var(--surface2);
+  border-radius: 99px; overflow: hidden;
+}
+.progress-fill {
+  height: 100%; background: var(--green);
+  border-radius: 99px;
+  transition: width 0.4s ease;
+}
+.progress-fill.warn { background: var(--amber); }
+.progress-fill.bad  { background: var(--red); }
+
+/* ── STORE CARDS ───────────────────────────── */
+.store-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.store-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  box-shadow: var(--shadow);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.store-card:hover { border-color: var(--green); box-shadow: var(--shadow-md); transform: translateY(-1px); }
+
+.store-card-head { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 14px; }
+.store-name { font-size: 15px; font-weight: 600; }
+.store-meta { font-size: 12px; color: var(--text2); margin-top: 2px; }
+
+.store-progress-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.store-progress-label { font-size: 12px; color: var(--text2); min-width: 80px; }
+.store-progress-track { flex: 1; height: 6px; background: var(--surface2); border-radius: 99px; overflow: hidden; }
+.store-progress-fill { height: 100%; border-radius: 99px; background: var(--green); }
+.store-progress-pct { font-size: 12px; font-weight: 600; color: var(--text); min-width: 32px; text-align: right; }
+
+.store-stats { display: flex; gap: 16px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); }
+.store-stat { text-align: center; }
+.store-stat-val { font-size: 18px; font-weight: 600; color: var(--text); }
+.store-stat-lbl { font-size: 10px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.04em; margin-top: 1px; }
+
+/* ── CHECKLIST ─────────────────────────────── */
+.section-group { margin-bottom: 16px; }
+.section-head {
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px 16px;
+  background: var(--surface2);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  user-select: none;
+  border: 1px solid var(--border);
+}
+.section-head:hover { background: var(--green-light); border-color: rgba(15,110,86,0.2); }
+.section-name { font-size: 13px; font-weight: 600; color: var(--text); flex: 1; }
+.section-count { font-size: 12px; color: var(--text2); }
+.section-chevron { color: var(--text3); transition: transform 0.2s; }
+.section-chevron.open { transform: rotate(90deg); }
+
+.task-list { margin-top: 2px; border-left: 2px solid var(--border); margin-left: 16px; }
+.task-item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  transition: background 0.1s;
+}
+.task-item:last-child { border-bottom: none; border-radius: 0 0 var(--radius-sm) var(--radius-sm); }
+.task-item:hover { background: var(--surface2); }
+
+.task-check {
+  width: 22px; height: 22px; border-radius: 6px;
+  border: 2px solid var(--border);
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0; cursor: pointer; transition: all 0.15s;
+  background: var(--surface);
+}
+.task-check.done { background: var(--green); border-color: var(--green); }
+.task-check.done svg { display: block; }
+.task-check svg { display: none; width: 12px; height: 12px; }
+
+.task-name { flex: 1; font-size: 13px; color: var(--text); }
+.task-name.done { color: var(--text3); text-decoration: line-through; }
+
+.task-photo-btn {
+  width: 28px; height: 28px;
+  border-radius: 6px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; transition: all 0.15s;
+  flex-shrink: 0;
+}
+.task-photo-btn:hover { background: var(--green-light); border-color: var(--green); }
+.task-photo-btn svg { width: 14px; height: 14px; color: var(--text2); }
+.task-photo-btn.has-photo { background: var(--green-light); border-color: var(--green); }
+.task-photo-btn.has-photo svg { color: var(--green); }
+
+/* ── FINANCIALS ────────────────────────────── */
+.fin-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+
+.fin-input-row {
+  display: flex; align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+  gap: 12px;
+}
+.fin-input-row:last-child { border-bottom: none; }
+.fin-label { font-size: 13px; color: var(--text); flex: 1; }
+.fin-input {
+  width: 130px;
+  padding: 7px 10px;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: 'DM Mono', monospace;
+  font-size: 13px;
+  color: var(--text);
+  text-align: right;
+  background: var(--surface);
+  outline: none;
+  transition: border-color 0.15s;
+}
+.fin-input:focus { border-color: var(--green); }
+
+.fin-summary {
+  background: var(--green-dark);
+  border-radius: var(--radius);
+  padding: 20px;
+  color: white;
+}
+.fin-summary-row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.08); }
+.fin-summary-row:last-child { border-bottom: none; padding-top: 12px; }
+.fin-summary-label { font-size: 13px; color: rgba(255,255,255,0.65); }
+.fin-summary-val { font-family: 'DM Mono', monospace; font-size: 14px; font-weight: 500; color: white; }
+.fin-summary-total { font-size: 20px; font-weight: 600; }
+.fin-summary-total.positive { color: #5DCAA5; }
+.fin-summary-total.negative { color: #F0997B; }
+
+.expense-list { max-height: 400px; overflow-y: auto; }
+
+/* ── BAR CHART ─────────────────────────────── */
+.mini-chart { display: flex; align-items: flex-end; gap: 4px; height: 60px; padding: 0 4px; }
+.bar-col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.bar { width: 100%; background: var(--green); border-radius: 3px 3px 0 0; min-height: 3px; transition: height 0.3s; opacity: 0.8; }
+.bar:hover { opacity: 1; }
+.bar-lbl { font-size: 9px; color: var(--text3); font-family: 'DM Mono', monospace; }
+
+/* ── DEVICE LINK ───────────────────────────── */
+.qr-container {
+  display: flex; flex-direction: column; align-items: center;
+  padding: 32px;
+  gap: 16px;
+}
+.qr-box {
+  width: 200px; height: 200px;
+  background: white;
+  border: 2px solid var(--border);
+  border-radius: var(--radius);
+  display: flex; align-items: center; justify-content: center;
+  position: relative;
+  overflow: hidden;
+}
+.qr-corner {
+  position: absolute;
+  width: 20px; height: 20px;
+  border-color: var(--green);
+  border-style: solid;
+  border-width: 0;
+}
+.qr-corner.tl { top: 8px; left: 8px; border-top-width: 3px; border-left-width: 3px; }
+.qr-corner.tr { top: 8px; right: 8px; border-top-width: 3px; border-right-width: 3px; }
+.qr-corner.bl { bottom: 8px; left: 8px; border-bottom-width: 3px; border-left-width: 3px; }
+.qr-corner.br { bottom: 8px; right: 8px; border-bottom-width: 3px; border-right-width: 3px; }
+
+.qr-status { font-size: 13px; color: var(--text2); text-align: center; max-width: 240px; }
+.qr-timer { font-family: 'DM Mono', monospace; font-size: 24px; font-weight: 500; color: var(--green); }
+
+/* ── MODAL / OVERLAY ───────────────────────── */
+.modal-backdrop {
+  display: none;
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.45);
+  z-index: 200;
+  align-items: center; justify-content: center;
+}
+.modal-backdrop.open { display: flex; }
+.modal {
+  background: var(--surface);
+  border-radius: 16px;
+  padding: 28px;
+  width: 100%; max-width: 480px;
+  box-shadow: 0 24px 64px rgba(0,0,0,0.25);
+  position: relative;
+}
+.modal-title { font-size: 16px; font-weight: 600; margin-bottom: 6px; }
+.modal-sub { font-size: 13px; color: var(--text2); margin-bottom: 20px; }
+.modal-close {
+  position: absolute; top: 20px; right: 20px;
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  background: var(--surface2);
+  border: none; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text2);
+}
+.modal-close:hover { background: var(--border); }
+
+/* ── TABS ──────────────────────────────────── */
+.tab-pills { display: flex; gap: 4px; padding: 4px; background: var(--surface2); border-radius: var(--radius-sm); width: fit-content; margin-bottom: 20px; }
+.tab-pill {
+  padding: 7px 16px;
+  border-radius: 6px;
+  font-size: 13px; font-weight: 500;
+  cursor: pointer; color: var(--text2);
+  border: none; background: transparent;
+  transition: all 0.12s; font-family: inherit;
+}
+.tab-pill.active { background: var(--surface); color: var(--green); box-shadow: var(--shadow); }
+.tab-pill:hover:not(.active) { color: var(--text); }
+
+/* ── TABLE ─────────────────────────────────── */
+.data-table { width: 100%; border-collapse: collapse; }
+.data-table th { font-size: 11px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: 0.05em; padding: 10px 14px; border-bottom: 1px solid var(--border); text-align: left; background: var(--surface2); }
+.data-table td { padding: 12px 14px; border-bottom: 1px solid var(--border); font-size: 13px; }
+.data-table tr:last-child td { border-bottom: none; }
+.data-table tr:hover td { background: var(--surface2); }
+.data-table .mono { font-family: 'DM Mono', monospace; }
+
+/* ── AI SCAN UI ────────────────────────────── */
+.scan-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.scan-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px 20px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.15s;
+  box-shadow: var(--shadow);
+}
+.scan-card:hover { border-color: var(--green); box-shadow: var(--shadow-md); transform: translateY(-2px); }
+.scan-icon {
+  width: 52px; height: 52px;
+  border-radius: 14px;
+  background: var(--green-light);
+  display: flex; align-items: center; justify-content: center;
+  margin: 0 auto 14px;
+}
+.scan-icon svg { width: 26px; height: 26px; color: var(--green); }
+.scan-title { font-size: 14px; font-weight: 600; color: var(--text); margin-bottom: 4px; }
+.scan-desc { font-size: 12px; color: var(--text2); line-height: 1.4; }
+
+/* ── TOASTS ────────────────────────────────── */
+#toast-container {
+  position: fixed; bottom: 24px; right: 24px;
+  display: flex; flex-direction: column; gap: 8px;
+  z-index: 999;
+}
+.toast {
+  background: var(--text);
+  color: white;
+  padding: 12px 16px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  display: flex; align-items: center; gap: 10px;
+  box-shadow: var(--shadow-md);
+  animation: slideIn 0.2s ease;
+  max-width: 320px;
+}
+.toast.success { background: var(--green); }
+.toast.error { background: var(--red); }
+.toast.warning { background: var(--amber); color: var(--text); }
+
+@keyframes slideIn { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }
+
+/* ── MISC ──────────────────────────────────── */
+.divider { height: 1px; background: var(--border); margin: 16px 0; }
+.text-mono { font-family: 'DM Mono', monospace; }
+.row { display: flex; align-items: center; gap: 12px; }
+.col { display: flex; flex-direction: column; gap: 4px; }
+.spacer { flex: 1; }
+.mt-4 { margin-top: 4px; }
+.mt-8 { margin-top: 8px; }
+.mt-16 { margin-top: 16px; }
+.mt-24 { margin-top: 24px; }
+.mb-16 { margin-bottom: 16px; }
+.mb-24 { margin-bottom: 24px; }
+.w-full { width: 100%; }
+
+.empty-state {
+  text-align: center; padding: 48px 24px;
+  color: var(--text2);
+}
+.empty-state svg { width: 48px; height: 48px; color: var(--text3); margin: 0 auto 12px; display: block; }
+.empty-state p { font-size: 13px; }
+
+.loading-dots { display: flex; gap: 4px; align-items: center; justify-content: center; padding: 32px; }
+.loading-dots span { width: 8px; height: 8px; border-radius: 50%; background: var(--green); animation: bounce 1.2s infinite; }
+.loading-dots span:nth-child(2) { animation-delay: 0.2s; }
+.loading-dots span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes bounce { 0%,60%,100%{transform:translateY(0)} 30%{transform:translateY(-8px)} }
+
+.ai-processing {
+  display: flex; flex-direction: column; align-items: center;
+  gap: 12px; padding: 32px;
+  text-align: center;
+}
+.ai-spinner {
+  width: 48px; height: 48px;
+  border: 3px solid var(--green-light);
+  border-top-color: var(--green);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.sign-area {
+  border: 2px dashed var(--border);
+  border-radius: var(--radius);
+  height: 160px;
+  display: flex; align-items: center; justify-content: center;
+  cursor: crosshair;
+  background: var(--surface2);
+  font-size: 13px; color: var(--text3);
+  margin-bottom: 16px;
+}
+.sign-area.signing { background: white; border-style: solid; border-color: var(--green); }
+
+.page-header { margin-bottom: 24px; }
+.page-header h2 { font-size: 20px; font-weight: 600; }
+.page-header p { font-size: 13px; color: var(--text2); margin-top: 3px; }
+
+/* QR grid simulation */
+.qr-grid { display: grid; grid-template-columns: repeat(21, 1fr); gap: 1px; width: 160px; height: 160px; }
+.qr-cell { border-radius: 1px; }
+</style>
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="login-screen">
+  <div class="login-card">
+    <div class="login-logo">
+      <svg viewBox="0 0 28 28" fill="none">
+        <path d="M5 14L11 20L23 8" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </div>
+    <h1>CompliTrack</h1>
+    <p>Franchise compliance & store management</p>
+    <div class="field">
+      <label>Email address</label>
+      <input type="email" id="login-email" value="owner@complitrack.co.za" placeholder="you@store.co.za">
+    </div>
+    <div class="field">
+      <label>Password</label>
+      <input type="password" id="login-password" value="••••••••" placeholder="Your password">
+    </div>
+    <button class="btn btn-primary" onclick="doLogin()">Sign in to CompliTrack</button>
+    <p class="login-demo">Demo mode — click sign in to explore the dashboard</p>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="app">
+
+  <!-- SIDEBAR -->
+  <nav class="sidebar">
+    <div class="sidebar-brand">
+      <div class="brand-icon">
+        <svg viewBox="0 0 20 20" fill="none">
+          <path d="M3 10L8 15L17 5" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+      <div>
+        <div class="brand-text">CompliTrack</div>
+        <div class="brand-sub">v1.0 · Demo</div>
+      </div>
+    </div>
+
+    <div class="sidebar-section">Overview</div>
+    <div class="nav-item active" onclick="showPage('dashboard')">
+      <svg viewBox="0 0 16 16" fill="currentColor"><rect x="1" y="1" width="6" height="6" rx="1.5"/><rect x="9" y="1" width="6" height="6" rx="1.5"/><rect x="1" y="9" width="6" height="6" rx="1.5"/><rect x="9" y="9" width="6" height="6" rx="1.5"/></svg>
+      All stores
+    </div>
+    <div class="nav-item" onclick="showPage('today')">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="12" height="11" rx="2"/><path d="M5 1v4M11 1v4M2 7h12"/></svg>
+      Today's session
+      <span class="nav-badge">2</span>
+    </div>
+
+    <div class="sidebar-section">Store Management</div>
+    <div class="nav-item" onclick="showPage('financials')">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 1v14M4 5h6a2 2 0 010 4H5a2 2 0 000 4h7"/></svg>
+      Income & expenses
+    </div>
+    <div class="nav-item" onclick="showPage('stock')">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 5l6-3 6 3v6l-6 3-6-3V5z"/><path d="M8 2v12M2 5l6 3 6-3"/></svg>
+      Stock on hand
+    </div>
+    <div class="nav-item" onclick="showPage('wages')">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="6" cy="5" r="3"/><path d="M1 14c0-3 2-5 5-5"/><path d="M12 10v4M10 12h4"/></svg>
+      Staff & wages
+    </div>
+
+    <div class="sidebar-section">AI Tools</div>
+    <div class="nav-item" onclick="showPage('scanner')">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1" y="1" width="5" height="5" rx="1"/><rect x="10" y="1" width="5" height="5" rx="1"/><rect x="1" y="10" width="5" height="5" rx="1"/><path d="M10 10h5v5"/><path d="M10 13h2v2"/></svg>
+      AI scanner
+    </div>
+    <div class="nav-item" onclick="showPage('device')">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="5" y="1" width="6" height="10" rx="1.5"/><path d="M7 12v2M5 14h6"/><path d="M11 4h3M11 6h2"/></svg>
+      Device link
+    </div>
+
+    <div class="sidebar-section">Reports</div>
+    <div class="nav-item" onclick="showPage('reports')">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 2h10v12H3z"/><path d="M6 6h4M6 9h4M6 12h2"/></svg>
+      Reports & PDFs
+    </div>
+
+    <div class="sidebar-footer">
+      <div class="user-pill">
+        <div class="avatar">JV</div>
+        <div>
+          <div class="user-name">Johan van Zyl</div>
+          <div class="user-role">Franchise owner</div>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <!-- HEADER -->
+  <header class="header">
+    <div>
+      <div class="header-title" id="header-title">All stores</div>
+      <div class="header-sub" id="header-sub">Wednesday, 29 April 2026</div>
+    </div>
+    <div class="spacer"></div>
+    <div class="conn-indicator" onclick="showDeviceLinkModal()" title="Click to link phone">
+      <div class="conn-dot" id="conn-dot"></div>
+      <span id="conn-label">Live · 3 stores</span>
+    </div>
+    <button class="btn btn-secondary btn-sm" onclick="showPage('device')">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="5" y="1" width="6" height="10" rx="1.5"/><path d="M7 12v2M5 14h6"/></svg>
+      Link phone
+    </button>
+  </header>
+
+  <!-- MAIN -->
+  <main class="main">
+
+    <!-- DASHBOARD PAGE -->
+    <div id="page-dashboard" class="page active">
+      <div class="page-header">
+        <h2>Store compliance board</h2>
+        <p>Live status across all your stores — today, 29 April 2026</p>
+      </div>
+
+      <div class="metrics-grid">
+        <div class="metric metric-good">
+          <div class="metric-label">Stores compliant</div>
+          <div class="metric-value">1<span style="font-size:16px;color:var(--text2)">/3</span></div>
+          <div class="metric-sub">2 still in progress</div>
+        </div>
+        <div class="metric metric-warn">
+          <div class="metric-label">Tasks completed</div>
+          <div class="metric-value">47</div>
+          <div class="metric-sub">of 66 total today</div>
+        </div>
+        <div class="metric metric-good">
+          <div class="metric-label">AI photos verified</div>
+          <div class="metric-value">31</div>
+          <div class="metric-sub">3 flagged for review</div>
+        </div>
+        <div class="metric metric-bad">
+          <div class="metric-label">Overdue sign-offs</div>
+          <div class="metric-value">2</div>
+          <div class="metric-sub">Pampierstad, Upington</div>
+        </div>
+      </div>
+
+      <div class="store-grid">
+        <!-- Store 1 -->
+        <div class="store-card" onclick="showPage('today')">
+          <div class="store-card-head">
+            <div>
+              <div class="store-name">Pampierstad Branch</div>
+              <div class="store-meta">Mochacho's · 8 staff on shift</div>
+            </div>
+            <span class="badge badge-amber">In progress</span>
+          </div>
+          <div class="store-progress-row">
+            <span class="store-progress-label">Cleaning</span>
+            <div class="store-progress-track"><div class="store-progress-fill" style="width:72%"></div></div>
+            <span class="store-progress-pct">72%</span>
+          </div>
+          <div class="store-progress-row">
+            <span class="store-progress-label">Uniform</span>
+            <div class="store-progress-track"><div class="store-progress-fill" style="width:100%"></div></div>
+            <span class="store-progress-pct">✓</span>
+          </div>
+          <div class="store-progress-row">
+            <span class="store-progress-label">Temps</span>
+            <div class="store-progress-track"><div class="store-progress-fill" style="background:var(--amber);width:50%"></div></div>
+            <span class="store-progress-pct" style="color:var(--amber)">50%</span>
+          </div>
+          <div class="store-stats">
+            <div class="store-stat"><div class="store-stat-val" style="color:var(--green)">R28k</div><div class="store-stat-lbl">Income</div></div>
+            <div class="store-stat"><div class="store-stat-val">18</div><div class="store-stat-lbl">Tasks done</div></div>
+            <div class="store-stat"><div class="store-stat-val" style="color:var(--amber)">3</div><div class="store-stat-lbl">AI flags</div></div>
+            <div class="store-stat"><div class="store-stat-val">08:34</div><div class="store-stat-lbl">Last update</div></div>
+          </div>
+        </div>
+
+        <!-- Store 2 -->
+        <div class="store-card">
+          <div class="store-card-head">
+            <div>
+              <div class="store-name">Upington Branch</div>
+              <div class="store-meta">Mochacho's · 6 staff on shift</div>
+            </div>
+            <span class="badge badge-red">Overdue</span>
+          </div>
+          <div class="store-progress-row">
+            <span class="store-progress-label">Cleaning</span>
+            <div class="store-progress-track"><div class="store-progress-fill" style="background:var(--red);width:28%"></div></div>
+            <span class="store-progress-pct" style="color:var(--red)">28%</span>
+          </div>
+          <div class="store-progress-row">
+            <span class="store-progress-label">Uniform</span>
+            <div class="store-progress-track"><div class="store-progress-fill" style="background:var(--red);width:0%"></div></div>
+            <span class="store-progress-pct" style="color:var(--red)">✗</span>
+          </div>
+          <div class="store-progress-row">
+            <span class="store-progress-label">Temps</span>
+            <div class="store-progress-track"><div class="store-progress-fill" style="background:var(--red);width:0%"></div></div>
+            <span class="store-progress-pct" style="color:var(--red)">0%</span>
+          </div>
+          <div class="store-stats">
+            <div class="store-stat"><div class="store-stat-val" style="color:var(--green)">R19k</div><div class="store-stat-lbl">Income</div></div>
+            <div class="store-stat"><div class="store-stat-val">6</div><div class="store-stat-lbl">Tasks done</div></div>
+            <div class="store-stat"><div class="store-stat-val" style="color:var(--red)">0</div><div class="store-stat-lbl">AI flags</div></div>
+            <div class="store-stat"><div class="store-stat-val">07:12</div><div class="store-stat-lbl">Last update</div></div>
+          </div>
+        </div>
+
+        <!-- Store 3 -->
+        <div class="store-card">
+          <div class="store-card-head">
+            <div>
+              <div class="store-name">Kuruman Branch</div>
+              <div class="store-meta">Mochacho's · 9 staff on shift</div>
+            </div>
+            <span class="badge badge-green">Signed off</span>
+          </div>
+          <div class="store-progress-row">
+            <span class="store-progress-label">Cleaning</span>
+            <div class="store-progress-track"><div class="store-progress-fill" style="width:100%"></div></div>
+            <span class="store-progress-pct">✓</span>
+          </div>
+          <div class="store-progress-row">
+            <span class="store-progress-label">Uniform</span>
+            <div class="store-progress-track"><div class="store-progress-fill" style="width:100%"></div></div>
+            <span class="store-progress-pct">✓</span>
+          </div>
+          <div class="store-progress-row">
+            <span class="store-progress-label">Temps</span>
+            <div class="store-progress-track"><div class="store-progress-fill" style="width:100%"></div></div>
+            <span class="store-progress-pct">✓</span>
+          </div>
+          <div class="store-stats">
+            <div class="store-stat"><div class="store-stat-val" style="color:var(--green)">R34k</div><div class="store-stat-lbl">Income</div></div>
+            <div class="store-stat"><div class="store-stat-val">22</div><div class="store-stat-lbl">Tasks done</div></div>
+            <div class="store-stat"><div class="store-stat-val">0</div><div class="store-stat-lbl">AI flags</div></div>
+            <div class="store-stat"><div class="store-stat-val">09:51</div><div class="store-stat-lbl">Signed off</div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Monthly chart -->
+      <div class="card mt-24">
+        <div class="card-header">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="var(--green)" stroke-width="1.5"><path d="M2 12l4-5 4 3 4-7"/></svg>
+          <div>
+            <div class="card-title">April 2026 — daily compliance %</div>
+            <div class="card-sub">Average across all 3 stores</div>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="mini-chart" id="monthly-chart"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TODAY PAGE -->
+    <div id="page-today" class="page">
+      <div class="page-header">
+        <h2>Today's compliance session</h2>
+        <p>Pampierstad Branch · 29 April 2026</p>
+      </div>
+
+      <!-- Uniform photo -->
+      <div class="card mb-16">
+        <div class="card-header">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="var(--green)" stroke-width="1.5"><circle cx="8" cy="5" r="3"/><path d="M2 14c0-4 2-6 6-6s6 2 6 6"/></svg>
+          <div>
+            <div class="card-title">Daily staff uniform photo</div>
+            <div class="card-sub">Required before trade begins — 08:30</div>
+          </div>
+          <div class="card-actions">
+            <span class="badge badge-green">✓ Photo taken 08:34</span>
+          </div>
+        </div>
+        <div class="card-body">
+          <div style="display:flex;gap:16px;align-items:center;">
+            <div style="width:80px;height:60px;background:var(--green-light);border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0;border:1px solid var(--border);">
+              <svg width="28" height="28" viewBox="0 0 28 28" fill="none" stroke="var(--green)" stroke-width="1.5"><circle cx="14" cy="10" r="5"/><path d="M4 26c0-6 4-10 10-10s10 4 10 10"/></svg>
+            </div>
+            <div>
+              <div style="font-size:13px;font-weight:500;color:var(--green);margin-bottom:4px;">✓ AI check: All 8 staff compliant</div>
+              <div style="font-size:12px;color:var(--text2);">Cap ✓ · Apron ✓ · Closed shoes ✓ · Hair nets ✓</div>
+              <div style="font-size:11px;color:var(--text3);margin-top:4px;">Taken by Kea · 08:34 AM</div>
+            </div>
+            <div class="spacer"></div>
+            <button class="btn btn-ghost btn-sm">View photo</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Progress summary -->
+      <div class="card mb-16">
+        <div class="card-body">
+          <div style="display:flex;align-items:center;gap:16px;margin-bottom:12px;">
+            <div style="flex:1;">
+              <div style="display:flex;justify-content:space-between;margin-bottom:6px;">
+                <span style="font-size:13px;font-weight:500;">Session progress</span>
+                <span style="font-size:13px;font-weight:600;color:var(--green);">18 / 22 tasks</span>
+              </div>
+              <div class="progress-track">
+                <div class="progress-fill" style="width:82%"></div>
+              </div>
+            </div>
+            <button class="btn btn-primary btn-sm" onclick="showSignOffModal()">Sign off session</button>
+          </div>
+          <div style="display:flex;gap:16px;">
+            <span style="font-size:12px;color:var(--text2);">Temps: <strong style="color:var(--amber)">2/4 logged</strong></span>
+            <span style="font-size:12px;color:var(--text2);">AI flags: <strong style="color:var(--amber)">3 needs review</strong></span>
+            <span style="font-size:12px;color:var(--text2);">Signed off: <strong style="color:var(--text3)">Pending</strong></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Checklist -->
+      <div class="card">
+        <div class="card-header">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="var(--green)" stroke-width="1.5"><path d="M2 4h12M2 8h12M2 12h8"/></svg>
+          <div class="card-title">Cleaning checklist</div>
+          <div class="card-actions">
+            <span class="badge badge-grey">22 tasks</span>
+          </div>
+        </div>
+        <div class="card-body" id="checklist-body"></div>
+      </div>
+    </div>
+
+    <!-- FINANCIALS PAGE -->
+    <div id="page-financials" class="page">
+      <div class="page-header">
+        <h2>Income & expenses</h2>
+        <p>Pampierstad Branch · April 2026</p>
+      </div>
+
+      <div class="tab-pills">
+        <button class="tab-pill active" onclick="switchFinTab('daily', this)">Daily entry</button>
+        <button class="tab-pill" onclick="switchFinTab('monthly', this)">Monthly summary</button>
+        <button class="tab-pill" onclick="switchFinTab('foodcost', this)">Food cost</button>
+      </div>
+
+      <div id="fin-daily">
+        <div style="display:grid;grid-template-columns:1fr 380px;gap:20px;">
+          <div>
+            <div class="card mb-16">
+              <div class="card-header">
+                <div class="card-title">Income — 29 April</div>
+                <div class="card-actions">
+                  <button class="btn btn-ghost btn-sm" onclick="showScanModal('invoice')">
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1" y="1" width="5" height="5" rx="1"/><rect x="10" y="1" width="5" height="5" rx="1"/><rect x="1" y="10" width="5" height="5" rx="1"/><path d="M10 10h5v5"/></svg>
+                    Scan invoice
+                  </button>
+                </div>
+              </div>
+              <div class="card-body">
+                <div class="fin-input-row">
+                  <span class="fin-label">Total income (incl. VAT)</span>
+                  <input class="fin-input" type="number" value="27634" oninput="updateSummary()">
+                </div>
+                <div class="fin-input-row">
+                  <span class="fin-label">Cash</span>
+                  <input class="fin-input" type="number" value="8200" oninput="updateSummary()">
+                </div>
+                <div class="fin-input-row">
+                  <span class="fin-label">Card</span>
+                  <input class="fin-input" type="number" value="19434" oninput="updateSummary()">
+                </div>
+                <div class="fin-input-row">
+                  <span class="fin-label">Ticket count</span>
+                  <input class="fin-input" type="number" value="164">
+                </div>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <div class="card-title">Expenses — 29 April</div>
+              </div>
+              <div class="card-body expense-list" id="expenses-body"></div>
+            </div>
+          </div>
+
+          <div>
+            <div class="fin-summary" id="fin-summary">
+              <div style="font-size:11px;font-weight:600;color:rgba(255,255,255,0.4);letter-spacing:0.08em;text-transform:uppercase;margin-bottom:16px;">Daily summary</div>
+              <div class="fin-summary-row"><span class="fin-summary-label">Income</span><span class="fin-summary-val" id="s-income">R 27,634</span></div>
+              <div class="fin-summary-row"><span class="fin-summary-label">Cost of sales</span><span class="fin-summary-val" id="s-cos">R 12,349</span></div>
+              <div class="fin-summary-row"><span class="fin-summary-label">Total expenses</span><span class="fin-summary-val" id="s-exp">R 14,875</span></div>
+              <div class="fin-summary-row"><span class="fin-summary-label">Food cost %</span><span class="fin-summary-val" id="s-fc">44.7%</span></div>
+              <div class="fin-summary-row"><span class="fin-summary-label">Avg ticket</span><span class="fin-summary-val" id="s-avg">R 168.50</span></div>
+              <div class="fin-summary-row">
+                <span class="fin-summary-label">Profit / Loss</span>
+                <span class="fin-summary-val fin-summary-total positive" id="s-profit">R 12,759</span>
+              </div>
+              <button class="btn btn-secondary w-full mt-16" style="background:rgba(255,255,255,0.1);color:white;border-color:rgba(255,255,255,0.15);" onclick="saveDailyFinancials()">Save today's entry</button>
+            </div>
+
+            <div class="card mt-16">
+              <div class="card-header"><div class="card-title">This month — income</div></div>
+              <div class="card-body">
+                <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:12px;">
+                  <span style="font-size:24px;font-weight:600;color:var(--green);">R398,811</span>
+                  <span style="font-size:12px;color:var(--text2);">April total</span>
+                </div>
+                <div class="mini-chart" id="income-chart"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="fin-monthly" style="display:none;">
+        <div class="card">
+          <div class="card-header"><div class="card-title">April 2026 — monthly breakdown</div></div>
+          <div class="card-body">
+            <table class="data-table">
+              <thead><tr><th>Date</th><th>Income</th><th>Expenses</th><th>Food cost %</th><th>Profit</th><th>Tickets</th></tr></thead>
+              <tbody id="monthly-table"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div id="fin-foodcost" style="display:none;">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+          <div class="card">
+            <div class="card-header"><div class="card-title">Food cost calculation</div></div>
+            <div class="card-body">
+              <div class="fin-input-row"><span class="fin-label">Opening stock</span><input class="fin-input" type="number" value="99883"></div>
+              <div class="fin-input-row"><span class="fin-label">Purchases this month</span><input class="fin-input" type="number" value="107517"></div>
+              <div class="fin-input-row"><span class="fin-label">Closing stock</span><input class="fin-input" type="number" value="0"></div>
+              <div class="divider"></div>
+              <div class="fin-input-row" style="background:var(--surface2);padding:12px;border-radius:8px;border:none;">
+                <span class="fin-label" style="font-weight:600;">Cost of sales</span>
+                <span class="text-mono" style="font-size:15px;font-weight:600;color:var(--text);">R 207,400</span>
+              </div>
+              <div class="fin-input-row" style="border:none;margin-top:8px;">
+                <span class="fin-label" style="font-weight:600;">Food cost %</span>
+                <span style="font-size:24px;font-weight:700;color:var(--red);">59.8%</span>
+              </div>
+              <div style="font-size:12px;color:var(--text2);margin-top:8px;padding:8px 12px;background:var(--red-light);border-radius:6px;">⚠ Target is below 35%. Check your closing stock count and purchasing.</div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-header"><div class="card-title">Trackers</div></div>
+            <div class="card-body">
+              <div class="fin-input-row"><span class="fin-label">Royalty (this month)</span><input class="fin-input" type="number" value="27916"></div>
+              <div class="fin-input-row"><span class="fin-label">Advert spend</span><input class="fin-input" type="number" value="7976"></div>
+              <div class="divider"></div>
+              <div style="font-size:13px;font-weight:500;margin-bottom:12px;">Sale breakdown</div>
+              <div id="sale-breakdown"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- STOCK PAGE -->
+    <div id="page-stock" class="page">
+      <div class="page-header">
+        <h2>Stock on hand</h2>
+        <p>Pampierstad Branch · last counted 29 April</p>
+      </div>
+      <div style="display:flex;gap:12px;margin-bottom:20px;align-items:center;">
+        <input type="text" placeholder="Search stock items..." style="flex:1;padding:9px 14px;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;font-size:13px;outline:none;" oninput="filterStock(this.value)">
+        <button class="btn btn-secondary btn-sm" onclick="showScanModal('stock')">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1" y="1" width="5" height="5" rx="1"/><rect x="10" y="1" width="5" height="5" rx="1"/><rect x="1" y="10" width="5" height="5" rx="1"/><path d="M10 10h5v5"/></svg>
+          Scan stock
+        </button>
+        <button class="btn btn-primary btn-sm">+ Add item</button>
+      </div>
+      <div class="tab-pills" id="stock-cat-pills">
+        <button class="tab-pill active" onclick="filterStockCat('all',this)">All</button>
+        <button class="tab-pill" onclick="filterStockCat('goods',this)">Goods</button>
+        <button class="tab-pill" onclick="filterStockCat('packaging',this)">Packaging</button>
+        <button class="tab-pill" onclick="filterStockCat('basting',this)">Basting</button>
+      </div>
+      <div class="card">
+        <table class="data-table" id="stock-table">
+          <thead><tr><th>Description</th><th>Category</th><th>Unit</th><th>Price</th><th>Qty on hand</th><th>Value</th><th></th></tr></thead>
+          <tbody id="stock-body"></tbody>
+        </table>
+        <div style="padding:14px 20px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;">
+          <span style="font-size:12px;color:var(--text2);">Total stock value</span>
+          <span class="text-mono" style="font-size:16px;font-weight:600;color:var(--green);" id="stock-total">R 0.00</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- WAGES PAGE -->
+    <div id="page-wages" class="page">
+      <div class="page-header">
+        <h2>Staff & wages — leen boek</h2>
+        <p>April 2026 · Pampierstad Branch</p>
+      </div>
+      <div class="card">
+        <table class="data-table">
+          <thead><tr><th>Staff member</th><th>Basic salary</th><th>Advanced</th><th>Net payable</th><th></th></tr></thead>
+          <tbody id="wages-body"></tbody>
+        </table>
+        <div style="padding:14px 20px;border-top:1px solid var(--border);background:var(--green-dark);border-radius:0 0 var(--radius) var(--radius);">
+          <div style="display:flex;justify-content:space-between;color:white;">
+            <span style="font-size:13px;opacity:0.7;">Total payroll</span>
+            <span class="text-mono" style="font-weight:600;" id="wages-total">R 0</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SCANNER PAGE -->
+    <div id="page-scanner" class="page">
+      <div class="page-header">
+        <h2>AI scanner hub</h2>
+        <p>Use Claude AI to scan invoices, check uniforms, verify cleaning, and count stock</p>
+      </div>
+      <div class="scan-grid mb-24">
+        <div class="scan-card" onclick="showScanModal('invoice')">
+          <div class="scan-icon">
+            <svg viewBox="0 0 26 26" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="4" y="2" width="18" height="22" rx="2"/><path d="M8 8h10M8 12h10M8 16h6"/><path d="M16 18l4 4"/></svg>
+          </div>
+          <div class="scan-title">Invoice scanner</div>
+          <div class="scan-desc">Photo a supplier invoice — AI extracts all line items, totals, and auto-fills your expense and stock records</div>
+        </div>
+        <div class="scan-card" onclick="showScanModal('uniform')">
+          <div class="scan-icon">
+            <svg viewBox="0 0 26 26" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="13" cy="8" r="4"/><path d="M5 22c0-5 3-8 8-8s8 3 8 8"/><path d="M18 14l3 3-5 4"/></svg>
+          </div>
+          <div class="scan-title">Uniform checker</div>
+          <div class="scan-desc">Upload group staff photo — AI checks each person for cap, apron, closed shoes, and hair net compliance</div>
+        </div>
+        <div class="scan-card" onclick="showScanModal('cleaning')">
+          <div class="scan-icon">
+            <svg viewBox="0 0 26 26" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M13 4l2 6h6l-5 4 2 6-5-4-5 4 2-6-5-4h6z"/></svg>
+          </div>
+          <div class="scan-title">Cleaning verifier</div>
+          <div class="scan-desc">Photo any area or equipment — AI confirms it meets food safety standards and flags any issues found</div>
+        </div>
+        <div class="scan-card" onclick="showScanModal('stock')">
+          <div class="scan-icon">
+            <svg viewBox="0 0 26 26" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 8l9-4 9 4v10l-9 4-9-4V8z"/><path d="M13 4v18M4 8l9 4 9-4"/><circle cx="20" cy="20" r="4"/><path d="M18 20h4M20 18v4"/></svg>
+          </div>
+          <div class="scan-title">Stock counter</div>
+          <div class="scan-desc">Photo your shelves or storeroom — AI reads product labels and quantities to auto-update your stock counts</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Recent scans</div>
+        </div>
+        <table class="data-table">
+          <thead><tr><th>Type</th><th>Date & time</th><th>Result</th><th>Applied to</th><th>By</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><span class="badge badge-blue">Invoice</span></td>
+              <td class="mono">29 Apr · 07:45</td>
+              <td>Supplier: Fresh Direct · R4,521.00</td>
+              <td><span class="badge badge-green">Stock + expense</span></td>
+              <td>Ashley</td>
+            </tr>
+            <tr>
+              <td><span class="badge badge-green">Uniform</span></td>
+              <td class="mono">29 Apr · 08:34</td>
+              <td>8/8 staff compliant</td>
+              <td><span class="badge badge-green">Session saved</span></td>
+              <td>Kea</td>
+            </tr>
+            <tr>
+              <td><span class="badge badge-amber">Cleaning</span></td>
+              <td class="mono">29 Apr · 09:12</td>
+              <td>Needs review — grease on hood</td>
+              <td><span class="badge badge-amber">Flagged</span></td>
+              <td>Owen</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- DEVICE LINK PAGE -->
+    <div id="page-device" class="page">
+      <div class="page-header">
+        <h2>Device link</h2>
+        <p>Link your phone to this browser session so you can take photos from your PC</p>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">Link your phone</div>
+          </div>
+          <div class="qr-container">
+            <div class="qr-box" id="qr-box">
+              <canvas id="qr-canvas" width="160" height="160"></canvas>
+              <div class="qr-corner tl"></div>
+              <div class="qr-corner tr"></div>
+              <div class="qr-corner bl"></div>
+              <div class="qr-corner br"></div>
+            </div>
+            <div class="qr-timer" id="qr-timer">14:58</div>
+            <div class="qr-status">Open the CompliTrack app on your phone, tap <strong>Settings → Link to web session</strong>, then scan this code</div>
+            <button class="btn btn-secondary btn-sm" onclick="regenerateQR()">Generate new code</button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header"><div class="card-title">How device linking works</div></div>
+          <div class="card-body">
+            <div style="display:flex;flex-direction:column;gap:16px;">
+              <div style="display:flex;gap:12px;align-items:flex-start;">
+                <div style="width:28px;height:28px;border-radius:50%;background:var(--green);color:white;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;flex-shrink:0;">1</div>
+                <div><div style="font-size:13px;font-weight:500;">Scan the QR code</div><div style="font-size:12px;color:var(--text2);margin-top:2px;">Open CompliTrack on your phone and scan the code with the app's scanner</div></div>
+              </div>
+              <div style="display:flex;gap:12px;align-items:flex-start;">
+                <div style="width:28px;height:28px;border-radius:50%;background:var(--green);color:white;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;flex-shrink:0;">2</div>
+                <div><div style="font-size:13px;font-weight:500;">Phone links instantly</div><div style="font-size:12px;color:var(--text2);margin-top:2px;">Your phone becomes a camera peripheral for this browser tab via Supabase Realtime</div></div>
+              </div>
+              <div style="display:flex;gap:12px;align-items:flex-start;">
+                <div style="width:28px;height:28px;border-radius:50%;background:var(--green);color:white;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;flex-shrink:0;">3</div>
+                <div><div style="font-size:13px;font-weight:500;">Trigger scans from PC</div><div style="font-size:12px;color:var(--text2);margin-top:2px;">Click "Scan invoice" anywhere on the dashboard — your phone camera opens automatically</div></div>
+              </div>
+              <div style="display:flex;gap:12px;align-items:flex-start;">
+                <div style="width:28px;height:28px;border-radius:50%;background:var(--green);color:white;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;flex-shrink:0;">4</div>
+                <div><div style="font-size:13px;font-weight:500;">Results appear on web</div><div style="font-size:12px;color:var(--text2);margin-top:2px;">After you take the photo on your phone, the AI result appears in your browser in seconds</div></div>
+              </div>
+            </div>
+            <div class="divider"></div>
+            <div style="display:flex;align-items:center;gap:8px;padding:10px 12px;background:var(--green-light);border-radius:8px;border:1px solid rgba(15,110,86,0.15);">
+              <div class="conn-dot"></div>
+              <span style="font-size:12px;color:var(--green-dark);font-weight:500;">No phone linked yet — scan the QR code to connect</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- REPORTS PAGE -->
+    <div id="page-reports" class="page">
+      <div class="page-header">
+        <h2>Reports & sign-offs</h2>
+        <p>Compliance history across all stores</p>
+      </div>
+      <div class="card">
+        <table class="data-table">
+          <thead><tr><th>Date</th><th>Store</th><th>Status</th><th>Score</th><th>Uniform</th><th>Signed by</th><th>PDF</th></tr></thead>
+          <tbody id="reports-body"></tbody>
+        </table>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- MODALS -->
+<div class="modal-backdrop" id="modal-signoff">
+  <div class="modal">
+    <button class="modal-close" onclick="closeModal('modal-signoff')">✕</button>
+    <div class="modal-title">Sign off today's session</div>
+    <div class="modal-sub">Draw your signature below to confirm all tasks are complete</div>
+    <div style="margin-bottom:12px;">
+      <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text2);margin-bottom:8px;">
+        <span>Tasks complete: <strong style="color:var(--green)">18/22</strong></span>
+        <span>Uniform: <strong style="color:var(--green)">✓ Passed</strong></span>
+        <span>Temps: <strong style="color:var(--amber)">2/4</strong></span>
+      </div>
+    </div>
+    <div class="sign-area" id="sign-area" onclick="startSigning()">
+      Tap or click to sign here
+    </div>
+    <div style="display:flex;gap:10px;">
+      <button class="btn btn-secondary" style="flex:1" onclick="clearSignature()">Clear</button>
+      <button class="btn btn-primary" style="flex:2" onclick="confirmSignoff()">Confirm sign-off & generate PDF</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="modal-scan">
+  <div class="modal">
+    <button class="modal-close" onclick="closeModal('modal-scan')">✕</button>
+    <div class="modal-title" id="scan-modal-title">AI Scanner</div>
+    <div class="modal-sub" id="scan-modal-sub">Choose how to capture your photo</div>
+    <div id="scan-modal-body"></div>
+  </div>
+</div>
+
+<div id="toast-container"></div>
+
+<script>
+// ════════════════════════════════════════════════════════════
+//  COMPLITRACK — SUPABASE CONFIG
+//  Replace the two values below with your credentials from:
+//  Supabase → Settings → API
+// ════════════════════════════════════════════════════════════
+const SUPABASE_URL  = 'https://fdixocuxhpafxkfytvxu.supabase.co'
+const SUPABASE_KEY  = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZkaXhvY3V4aHBhZnhrZnl0dnh1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0ODI2NzgsImV4cCI6MjA5MzA1ODY3OH0.ZsStIc18riGDkmcuRvgKfnAMol6DMKZF2y2br8RAfl0'
+
+// Detect if real credentials have been added
+const USE_SUPABASE = !SUPABASE_URL.includes('YOUR_PROJECT_REF')
+
+// Init Supabase client (only if creds are real)
+const sb = USE_SUPABASE
+  ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+      auth: { persistSession: true, autoRefreshToken: true },
+      realtime: { params: { eventsPerSecond: 10 } },
+    })
+  : null
+
+// ── STATE ─────────────────────────────────────────────────────
+const state = {
+  currentPage: 'dashboard',
+  qrTimer: 898,
+  qrInterval: null,
+  connInterval: null,
+  heartbeatInterval: null,
+  realtimeChannels: [],
+  signing: false,
+  user: null,
+  profile: null,
+  storeId: null,
+  orgId: null,
+  role: null,
+  sessionId: null,
+  deviceSessionId: null,
+  isOnline: true,
+};
+
+// ── SUPABASE AUTH ─────────────────────────────────────────────
+async function doLogin() {
+  if (!USE_SUPABASE) {
+    // Demo mode — skip auth
+    document.getElementById('login-screen').style.display = 'none';
+    document.getElementById('app').style.display = 'block';
+    initApp();
+    return;
+  }
+
+  const email = document.getElementById('login-email').value.trim();
+  const password = document.getElementById('login-password').value;
+  const btn = document.querySelector('#login-screen .btn-primary');
+  btn.textContent = 'Signing in...';
+  btn.disabled = true;
+
+  try {
+    const { data, error } = await sb.auth.signInWithPassword({ email, password });
+    if (error) throw error;
+
+    // Fetch profile for role + store info
+    const { data: profile, error: pErr } = await sb
+      .from('profiles')
+      .select('*, stores(name, organisation_id)')
+      .eq('id', data.user.id)
+      .single();
+    if (pErr) throw pErr;
+
+    state.user    = data.user;
+    state.profile = profile;
+    state.storeId = profile.store_id;
+    state.orgId   = profile.organisation_id;
+    state.role    = profile.role;
+
+    // Update sidebar user display
+    if (profile.full_name) {
+      document.querySelector('.user-name').textContent = profile.full_name;
+      document.querySelector('.user-role').textContent = profile.role;
+      const initials = profile.full_name.split(' ').map(n=>n[0]).join('').slice(0,2).toUpperCase();
+      document.querySelector('.sidebar-footer .avatar').textContent = initials;
+    }
+
+    document.getElementById('login-screen').style.display = 'none';
+    document.getElementById('app').style.display = 'block';
+    initApp();
+  } catch (e) {
+    showToast('Login failed: ' + e.message, 'error');
+    btn.textContent = 'Sign in to CompliTrack';
+    btn.disabled = false;
+  }
+}
+
+// Check for existing session on page load
+async function checkExistingSession() {
+  if (!USE_SUPABASE) return;
+  const { data: { session } } = await sb.auth.getSession();
+  if (session) {
+    // Already logged in — skip login screen
+    doLogin();
+  }
+}
+
+// ── SUPABASE REALTIME ─────────────────────────────────────────
+function subscribeToSession(sessionId) {
+  if (!USE_SUPABASE || !sessionId) return;
+
+  // Unsubscribe from old channels first
+  state.realtimeChannels.forEach(ch => sb.removeChannel(ch));
+  state.realtimeChannels = [];
+
+  // Subscribe to checklist item changes for this session
+  const ch1 = sb.channel(`session-${sessionId}`)
+    .on('postgres_changes', {
+      event: '*', schema: 'public',
+      table: 'checklist_items',
+      filter: `session_id=eq.${sessionId}`,
+    }, (payload) => {
+      handleChecklistUpdate(payload);
+    })
+    .on('postgres_changes', {
+      event: 'UPDATE', schema: 'public',
+      table: 'daily_sessions',
+      filter: `id=eq.${sessionId}`,
+    }, (payload) => {
+      if (payload.new.status === 'signed_off') {
+        showToast('Session signed off ✓', 'success');
+        loadTodaySession();
+      }
+    })
+    .subscribe((status) => {
+      updateConnectionStatus(status === 'SUBSCRIBED');
+    });
+
+  state.realtimeChannels.push(ch1);
+
+  // Subscribe to device session (for phone link responses)
+  if (state.deviceSessionId) {
+    const ch2 = sb.channel(`device-${state.deviceSessionId}`)
+      .on('postgres_changes', {
+        event: 'UPDATE', schema: 'public',
+        table: 'device_sessions',
+        filter: `id=eq.${state.deviceSessionId}`,
+      }, (payload) => {
+        handleDeviceSessionUpdate(payload.new);
+      })
+      .subscribe();
+    state.realtimeChannels.push(ch2);
+  }
+}
+
+function handleChecklistUpdate(payload) {
+  if (payload.new && payload.new.completed) {
+    showToast('Task completed by staff member', 'success');
+    loadTodaySession(); // Refresh the checklist
+  }
+}
+
+function handleDeviceSessionUpdate(session) {
+  if (session.status === 'linked') {
+    showToast('✓ Phone linked successfully', 'success');
+    document.getElementById('conn-label').textContent = 'Phone linked';
+    document.getElementById('conn-dot').className = 'conn-dot';
+  }
+  if (session.status === 'complete' && session.result_url) {
+    showToast('Photo received from phone — AI processing...', 'success');
+    // result_data already has AI output — show it
+    if (session.result_data) {
+      showAIResultFromData(session.result_data, session.scan_mode);
+    }
+  }
+}
+
+// ── CONNECTION STABILITY (fixes the Fetch disconnect issue) ───
+function startHeartbeat() {
+  // Clear any existing
+  if (state.heartbeatInterval) clearInterval(state.heartbeatInterval);
+  if (state.connInterval) clearInterval(state.connInterval);
+
+  // Pulse the dot animation (demo + real mode)
+  state.connInterval = setInterval(() => {
+    const dot = document.getElementById('conn-dot');
+    if (dot) dot.style.opacity = dot.style.opacity === '0.3' ? '1' : '0.3';
+  }, 1500);
+
+  if (!USE_SUPABASE) return;
+
+  // Send heartbeat every 25s to keep WebSocket warm
+  state.heartbeatInterval = setInterval(async () => {
+    if (!state.user) return;
+    try {
+      await sb.from('connection_heartbeats').upsert({
+        user_id: state.user.id,
+        store_id: state.storeId,
+        device_type: 'web',
+        last_seen: new Date().toISOString(),
+        is_online: true,
+      }, { onConflict: 'user_id,device_type' });
+    } catch (e) {
+      // Heartbeat failed — mark offline
+      updateConnectionStatus(false);
+    }
+  }, 25000);
+
+  // Re-subscribe when tab comes back into focus
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      setTimeout(() => {
+        if (state.sessionId) subscribeToSession(state.sessionId);
+        updateConnectionStatus(true);
+        showToast('Connection restored', 'success');
+      }, 500);
+    }
+  });
+
+  // Detect online/offline
+  window.addEventListener('online',  () => {
+    updateConnectionStatus(true);
+    if (state.sessionId) subscribeToSession(state.sessionId);
+    flushOfflineQueue();
+  });
+  window.addEventListener('offline', () => updateConnectionStatus(false));
+}
+
+function updateConnectionStatus(online) {
+  state.isOnline = online;
+  const dot   = document.getElementById('conn-dot');
+  const label = document.getElementById('conn-label');
+  if (!dot) return;
+  dot.className = 'conn-dot' + (online ? '' : ' offline');
+  label.textContent = online ? 'Live · connected' : 'Offline — queuing writes';
+}
+
+// ── OFFLINE QUEUE ─────────────────────────────────────────────
+async function resilientWrite(table, payload, operation = 'upsert') {
+  if (USE_SUPABASE && state.isOnline) {
+    try {
+      const { error } = await sb.from(table)[operation](payload);
+      if (error) throw error;
+      return true;
+    } catch (e) {
+      // Fall through to queue
+    }
+  }
+  // Queue locally for later
+  const queue = JSON.parse(localStorage.getItem('ct_offline_queue') || '[]');
+  queue.push({ table, payload, operation, ts: Date.now() });
+  localStorage.setItem('ct_offline_queue', JSON.stringify(queue));
+  showToast('Saved offline — will sync when reconnected', 'warning');
+  return false;
+}
+
+async function flushOfflineQueue() {
+  if (!USE_SUPABASE) return;
+  const queue = JSON.parse(localStorage.getItem('ct_offline_queue') || '[]');
+  if (!queue.length) return;
+  showToast(`Syncing ${queue.length} offline changes...`, 'success');
+  const remaining = [];
+  for (const item of queue) {
+    try {
+      const { error } = await sb.from(item.table)[item.operation](item.payload);
+      if (error) remaining.push(item);
+    } catch { remaining.push(item); }
+  }
+  localStorage.setItem('ct_offline_queue', JSON.stringify(remaining));
+  if (!remaining.length) showToast('All offline changes synced ✓', 'success');
+}
+
+// ── DEVICE LINK — QR SESSION CREATION ────────────────────────
+async function createDeviceSession(mode = 'general') {
+  if (!USE_SUPABASE || !state.user) return null;
+  const { data, error } = await sb.from('device_sessions')
+    .insert({
+      user_id:   state.user.id,
+      store_id:  state.storeId,
+      scan_mode: mode,
+      status:    'pending',
+    })
+    .select()
+    .single();
+  if (error) { showToast('Could not create scan session', 'error'); return null; }
+  state.deviceSessionId = data.id;
+  // Subscribe to this device session for phone response
+  subscribeToSession(state.sessionId);
+  return data;
+}
+
+// ── SUPABASE DATA LOADERS ─────────────────────────────────────
+async function loadTodaySession() {
+  if (!USE_SUPABASE || !state.storeId) return;
+  const today = new Date().toISOString().slice(0, 10);
+
+  // Upsert today's session
+  const { data: session, error } = await sb.from('daily_sessions')
+    .upsert(
+      { store_id: state.storeId, session_date: today, opened_by: state.user.id, status: 'in_progress' },
+      { onConflict: 'store_id,session_date', ignoreDuplicates: true }
+    )
+    .select()
+    .single();
+  if (error) return;
+  state.sessionId = session.id;
+
+  // Load checklist items for this session
+  const { data: items } = await sb.from('checklist_items')
+    .select('*, checklist_templates(section, task_name, requires_photo)')
+    .eq('session_id', session.id)
+    .order('id');
+
+  if (items && items.length > 0) {
+    updateChecklistFromDB(items);
+  } else {
+    // First time — seed checklist items from templates
+    await seedChecklistItems(session.id);
+  }
+
+  subscribeToSession(session.id);
+}
+
+async function seedChecklistItems(sessionId) {
+  const { data: templates } = await sb.from('checklist_templates')
+    .select('*')
+    .or(`organisation_id.eq.${state.orgId},organisation_id.is.null`)
+    .eq('is_active', true)
+    .eq('frequency', 'daily')
+    .order('sort_order');
+  if (!templates) return;
+  const items = templates.map(t => ({ session_id: sessionId, template_id: t.id }));
+  await sb.from('checklist_items').insert(items);
+}
+
+function updateChecklistFromDB(items) {
+  // Group by section and rebuild local data
+  const grouped = {};
+  items.forEach(item => {
+    const section = item.checklist_templates?.section || 'Other';
+    if (!grouped[section]) grouped[section] = [];
+    grouped[section].push({
+      id:    item.id,
+      name:  item.checklist_templates?.task_name || '',
+      done:  item.completed,
+      photo: !!item.photo_url,
+      ai:    item.ai_photo_result,
+    });
+  });
+  // Replace demo data with real DB data
+  checklistData.length = 0;
+  Object.entries(grouped).forEach(([section, tasks]) => {
+    checklistData.push({ section, tasks });
+  });
+  renderChecklist();
+}
+
+async function loadDailyFinancials(date) {
+  if (!USE_SUPABASE || !state.storeId) return;
+  const d = date || new Date().toISOString().slice(0, 10);
+  const { data } = await sb.from('daily_financials')
+    .select('*')
+    .eq('store_id', state.storeId)
+    .eq('entry_date', d)
+    .single();
+  if (data) {
+    // Populate income fields
+    const inputs = document.querySelectorAll('#fin-daily input[type=number]');
+    if (inputs[0]) inputs[0].value = data.income || 0;
+    if (inputs[1]) inputs[1].value = data.cash_amount || 0;
+    if (inputs[2]) inputs[2].value = data.card_amount || 0;
+    if (inputs[3]) inputs[3].value = data.ticket_count || 0;
+    // Populate expenses
+    if (data.expenses) {
+      Object.entries(data.expenses).forEach(([key, val]) => {
+        const el = document.querySelector(`input[data-key="${key}"]`);
+        if (el) el.value = val;
+      });
+    }
+    updateSummary();
+  }
+}
+
+async function saveDailyFinancials() {
+  if (!USE_SUPABASE || !state.storeId) {
+    showToast('Saved (demo mode)', 'success');
+    return;
+  }
+  const today = new Date().toISOString().slice(0, 10);
+  const inputs = document.querySelectorAll('#fin-daily input[type=number]');
+  const expObj = {};
+  expenses.forEach(e => {
+    const el = document.querySelector(`input[data-key="${e.key}"]`);
+    expObj[e.key] = parseFloat(el?.value || 0);
+  });
+  const payload = {
+    store_id:      state.storeId,
+    entry_date:    today,
+    income:        parseFloat(inputs[0]?.value || 0),
+    cash_amount:   parseFloat(inputs[1]?.value || 0),
+    card_amount:   parseFloat(inputs[2]?.value || 0),
+    ticket_count:  parseInt(inputs[3]?.value || 0),
+    cost_of_sales: expObj.cos || 0,
+    expenses:      expObj,
+    created_by:    state.user.id,
+  };
+  await resilientWrite('daily_financials', payload, 'upsert');
+  showToast('Daily entry saved ✓', 'success');
+}
+
+async function loadStockCounts() {
+  if (!USE_SUPABASE || !state.storeId) return;
+  const { data: items } = await sb.from('stock_items')
+    .select('*, stock_counts(quantity, count_date)')
+    .eq('store_id', state.storeId)
+    .eq('is_active', true)
+    .order('category');
+  if (!items) return;
+  // Replace demo stock data with real DB data
+  stockData.length = 0;
+  items.forEach(item => {
+    const latest = item.stock_counts?.sort((a,b) => new Date(b.count_date) - new Date(a.count_date))[0];
+    stockData.push({
+      id:    item.id,
+      desc:  item.description,
+      cat:   item.category,
+      unit:  item.unit,
+      price: item.price,
+      qty:   latest?.quantity || 0,
+    });
+  });
+  renderStock();
+}
+
+async function loadReports() {
+  if (!USE_SUPABASE || !state.storeId) return;
+  const { data } = await sb.from('daily_sessions')
+    .select('*, profiles(full_name), stores(name)')
+    .eq(state.role === 'owner' ? 'status' : 'store_id', state.role === 'owner' ? 'signed_off' : state.storeId)
+    .order('session_date', { ascending: false })
+    .limit(30);
+  if (!data) return;
+  reportsData.length = 0;
+  data.forEach(r => {
+    reportsData.push({
+      date:    new Date(r.session_date).toLocaleDateString('en-ZA', { day:'2-digit', month:'short', year:'numeric' }),
+      store:   r.stores?.name || '',
+      status:  r.status,
+      score:   100, // TODO: calculate from checklist items
+      uniform: 'pass',
+      manager: r.profiles?.full_name || '',
+      pdfUrl:  r.pdf_report_url,
+    });
+  });
+  renderReports();
+}
+
+function showAIResultFromData(data, mode) {
+  // Shows real AI result from device session
+  document.getElementById('scan-modal-title').textContent = 'AI scan result';
+  document.getElementById('scan-modal-body').innerHTML = `
+    <div style="background:var(--surface2);border-radius:8px;padding:12px;font-size:13px;white-space:pre-wrap;max-height:300px;overflow-y:auto;">${JSON.stringify(data, null, 2)}</div>
+    <button class="btn btn-primary w-full mt-16" onclick="closeModal('modal-scan')">Done</button>`;
+  document.getElementById('modal-scan').classList.add('open');
+}
+
+// ── DATA ──────────────────────────────────────────────────────
+const checklistData = [
+  { section: 'Kitchen', tasks: [
+    { name: 'Clean grill surfaces', done: true, photo: true, ai: 'pass' },
+    { name: 'Clean fryer baskets and oil check', done: true, photo: true, ai: 'pass' },
+    { name: 'Wipe down prep counters', done: true, photo: true, ai: 'needs_review' },
+    { name: 'Sweep and mop kitchen floor', done: false, photo: false, ai: null },
+    { name: 'Clean floor drains', done: false, photo: false, ai: null },
+    { name: 'Sanitise cutting boards', done: true, photo: true, ai: 'pass' },
+    { name: 'Empty and clean bins', done: true, photo: true, ai: 'pass' },
+  ]},
+  { section: 'Fridges', tasks: [
+    { name: 'Check fridge temperatures', done: true, photo: false, ai: null },
+    { name: 'Wipe fridge shelves and doors', done: true, photo: true, ai: 'pass' },
+    { name: 'Check freezer temperatures', done: false, photo: false, ai: null },
+    { name: 'FIFO stock rotation check', done: true, photo: true, ai: 'pass' },
+  ]},
+  { section: 'Front of House', tasks: [
+    { name: 'Wipe all tables and chairs', done: true, photo: true, ai: 'pass' },
+    { name: 'Clean till and counter area', done: true, photo: true, ai: 'needs_review' },
+    { name: 'Sweep and mop front floor', done: true, photo: true, ai: 'pass' },
+    { name: 'Clean windows and glass doors', done: false, photo: false, ai: null },
+    { name: 'Sanitise menus and condiment holders', done: false, photo: false, ai: null },
+  ]},
+  { section: 'Bathrooms', tasks: [
+    { name: 'Clean and sanitise toilets', done: true, photo: true, ai: 'pass' },
+    { name: 'Wipe basins and mirrors', done: true, photo: true, ai: 'pass' },
+    { name: 'Restock soap and paper towels', done: true, photo: false, ai: null },
+    { name: 'Mop bathroom floors', done: false, photo: false, ai: null },
+  ]},
+  { section: 'Receiving Area', tasks: [
+    { name: 'Clean receiving dock / back door area', done: true, photo: true, ai: 'needs_review' },
+    { name: 'Check delivery vehicle cleanliness', done: false, photo: false, ai: null },
+  ]},
+];
+
+const expenses = [
+  { label: 'Cost of sales', key: 'cos', value: 12349 },
+  { label: 'Cleaning', key: 'cleaning', value: 210 },
+  { label: 'Packaging', key: 'packaging', value: 0 },
+  { label: 'Casual wages', key: 'wages', value: 1665 },
+  { label: 'Rental', key: 'rental', value: 0 },
+  { label: 'Salaries', key: 'salaries', value: 500 },
+  { label: 'Security', key: 'security', value: 0 },
+  { label: 'Municipality', key: 'municipality', value: 0 },
+  { label: 'Fuel', key: 'fuel', value: 0 },
+  { label: 'Gas', key: 'gas', value: 0 },
+  { label: 'Insurance', key: 'insurance', value: 0 },
+  { label: 'Internet', key: 'internet', value: 0 },
+  { label: 'Telephone', key: 'telephone', value: 0 },
+  { label: 'Banking', key: 'banking', value: 0 },
+  { label: 'Accounting', key: 'accounting', value: 0 },
+  { label: 'Franchise fee', key: 'franchise', value: 0 },
+  { label: 'Marketing', key: 'marketing', value: 0 },
+  { label: 'Credit cards', key: 'cc', value: 0 },
+  { label: 'Delivery', key: 'delivery', value: 0 },
+  { label: 'Pest control', key: 'pest', value: 0 },
+  { label: 'Repair', key: 'repair', value: 0 },
+  { label: 'Stationery', key: 'stationery', value: 0 },
+  { label: 'Micros', key: 'micros', value: 0 },
+];
+
+const stockData = [
+  { desc: 'L&H Spice per KG', cat: 'goods', unit: 'kg', price: 52.75, qty: 22.5 },
+  { desc: 'Mild Spice per KG', cat: 'goods', unit: 'kg', price: 54.75, qty: 27.7 },
+  { desc: 'Hot Spice per KG', cat: 'goods', unit: 'kg', price: 57.00, qty: 19.8 },
+  { desc: 'XXX Hot Spice per KG', cat: 'goods', unit: 'kg', price: 81.62, qty: 7.96 },
+  { desc: 'Dynamite per KG', cat: 'goods', unit: 'kg', price: 65.87, qty: 2.63 },
+  { desc: 'Chips Spice per KG', cat: 'goods', unit: 'kg', price: 44.50, qty: 25.5 },
+  { desc: 'Salsa per Ltr', cat: 'goods', unit: 'ltr', price: 52.80, qty: 5.00 },
+  { desc: '250ml Lemon & Herb', cat: 'goods', unit: 'each', price: 14.66, qty: 119 },
+  { desc: '20L Whip per Ltr', cat: 'goods', unit: 'ltr', price: 36.65, qty: 100 },
+  { desc: '5L Greek Salad per Ltr', cat: 'goods', unit: 'ltr', price: 34.60, qty: 10 },
+  { desc: 'Sweet Chilli per Ltr', cat: 'goods', unit: 'ltr', price: 25.40, qty: 15 },
+  { desc: 'Mob Caps', cat: 'packaging', unit: 'each', price: 0.55, qty: 500 },
+  { desc: 'Mini Shoppers', cat: 'packaging', unit: 'each', price: 1.14, qty: 1000 },
+  { desc: 'Maxi Shoppers', cat: 'packaging', unit: 'each', price: 1.57, qty: 800 },
+  { desc: 'Printed Serviettes', cat: 'packaging', unit: 'each', price: 0.16, qty: 2000 },
+  { desc: 'Tomato Sauce', cat: 'basting', unit: 'ltr', price: 7.46, qty: 4.0 },
+  { desc: 'Chutney', cat: 'basting', unit: 'ltr', price: 14.42, qty: 1.5 },
+  { desc: 'Worcestershire Sauce', cat: 'basting', unit: 'ltr', price: 8.16, qty: 1.5 },
+];
+
+const wagesData = [
+  { name: 'Ashley', salary: 5000, advanced: 0 },
+  { name: 'Owen', salary: 4933, advanced: 3000 },
+  { name: 'Justin', salary: 4500, advanced: 0 },
+  { name: 'Jeanifer', salary: 4200, advanced: 0 },
+  { name: 'Nokkie', salary: 3800, advanced: 369 },
+  { name: 'Dineo', salary: 3800, advanced: 565 },
+  { name: 'Sinah', salary: 3600, advanced: 1200 },
+  { name: 'Lucy', salary: 3500, advanced: 67 },
+  { name: 'Jenny', salary: 3800, advanced: 0 },
+  { name: 'Kea', salary: 4000, advanced: 760 },
+  { name: 'Tshepi', salary: 3600, advanced: 0 },
+  { name: 'Tumi', salary: 3600, advanced: 0 },
+];
+
+const monthlyData = [
+  [1,27634,14875],[2,40756,47449],[3,27272,2408],[4,33680,43834],[5,25281,0],
+  [6,25299,12214],[7,19246,1026],[8,16169,6348],[9,18840,1414],[10,17782,3371],
+  [11,21700,368],[12,17304,2380],[13,7709,7511],[14,10187,946],[15,17680,12054],
+  [16,13358,745],[17,23050,3760],[18,20984,648],[19,14880,0],
+];
+
+const reportsData = [
+  { date:'29 Apr 2026', store:'Kuruman', status:'signed_off', score:100, uniform:'pass', manager:'Thabo M.' },
+  { date:'28 Apr 2026', store:'Pampierstad', status:'signed_off', score:91, uniform:'pass', manager:'Kea D.' },
+  { date:'28 Apr 2026', store:'Upington', status:'signed_off', score:78, uniform:'partial', manager:'Sipho L.' },
+  { date:'27 Apr 2026', store:'Kuruman', status:'signed_off', score:100, uniform:'pass', manager:'Thabo M.' },
+  { date:'27 Apr 2026', store:'Pampierstad', status:'signed_off', score:86, uniform:'pass', manager:'Owen J.' },
+];
+
+// ── INIT ──────────────────────────────────────────────────────
+function doLogin() {
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('app').style.display = 'block';
+  initApp();
+}
+
+async function initApp() {
+  // Always render demo data immediately for fast load
+  renderChecklist();
+  renderExpenses();
+  renderStock();
+  renderWages();
+  renderReports();
+  renderMonthlyChart();
+  renderIncomeChart();
+  renderMonthlyTable();
+  renderSaleBreakdown();
+  startQRTimer();
+  startHeartbeat();
+  drawQR();
+
+  // If Supabase is configured, overlay real data on top
+  if (USE_SUPABASE) {
+    document.getElementById('conn-label').textContent = 'Connecting...';
+    document.getElementById('conn-dot').className = 'conn-dot pending';
+    try {
+      await loadTodaySession();
+      await loadDailyFinancials();
+      await loadStockCounts();
+      await loadReports();
+      await flushOfflineQueue();
+      updateConnectionStatus(true);
+      document.getElementById('conn-label').textContent = 'Live · connected';
+    } catch(e) {
+      updateConnectionStatus(false);
+    }
+  } else {
+    // Demo mode banner
+    document.getElementById('conn-label').textContent = 'Demo mode — add Supabase keys';
+    document.getElementById('conn-dot').className = 'conn-dot pending';
+    setTimeout(() => showToast('Running in demo mode — add your Supabase URL and key to connect live data', 'warning'), 1000);
+  }
+}
+
+// ── NAVIGATION ────────────────────────────────────────────────
+const pageTitles = {
+  dashboard: ['All stores', 'Live compliance board — 29 April 2026'],
+  today: ["Today's session", 'Pampierstad Branch · 29 April 2026'],
+  financials: ['Income & expenses', 'Pampierstad Branch · April 2026'],
+  stock: ['Stock on hand', 'Pampierstad Branch'],
+  wages: ['Staff & wages', 'Leen boek — April 2026'],
+  scanner: ['AI scanner', 'Invoice · Uniform · Cleaning · Stock'],
+  device: ['Device link', 'Link phone as camera peripheral'],
+  reports: ['Reports', 'Compliance history'],
+};
+
+function showPage(page) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById('page-' + page).classList.add('active');
+  const navItem = document.querySelector(`.nav-item[onclick="showPage('${page}')"]`);
+  if (navItem) navItem.classList.add('active');
+  const [title, sub] = pageTitles[page] || [page, ''];
+  document.getElementById('header-title').textContent = title;
+  document.getElementById('header-sub').textContent = sub;
+  state.currentPage = page;
+}
+
+// ── CHECKLIST ─────────────────────────────────────────────────
+function renderChecklist() {
+  const body = document.getElementById('checklist-body');
+  body.innerHTML = checklistData.map((section, si) => {
+    const done = section.tasks.filter(t => t.done).length;
+    const total = section.tasks.length;
+    const tasks = section.tasks.map((task, ti) => {
+      const aiIcon = task.ai === 'pass' ? '🟢' : task.ai === 'needs_review' ? '🟡' : task.ai === 'fail' ? '🔴' : '';
+      return `
+        <div class="task-item">
+          <div class="task-check ${task.done ? 'done' : ''}" onclick="toggleTask(${si},${ti})">
+            <svg viewBox="0 0 12 12" fill="none" stroke="white" stroke-width="2"><path d="M1 6l3 3 7-6"/></svg>
+          </div>
+          <span class="task-name ${task.done ? 'done' : ''}">${task.name}</span>
+          ${aiIcon ? `<span style="font-size:12px;">${aiIcon}</span>` : ''}
+          <div class="task-photo-btn ${task.photo ? 'has-photo' : ''}" onclick="showScanModal('cleaning')" title="${task.photo ? 'Photo taken' : 'Take photo'}">
+            <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1" y="3" width="12" height="9" rx="2"/><circle cx="7" cy="7.5" r="2.5"/><path d="M5 3l1-2h2l1 2"/></svg>
+          </div>
+        </div>`;
+    }).join('');
+    return `
+      <div class="section-group">
+        <div class="section-head" onclick="toggleSection(this)">
+          <svg class="section-chevron" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 2l4 4-4 4"/></svg>
+          <span class="section-name">${section.section}</span>
+          <span class="section-count">${done}/${total} complete</span>
+          ${done === total ? '<span class="badge badge-green">✓</span>' : ''}
+        </div>
+        <div class="task-list" style="display:none;">${tasks}</div>
+      </div>`;
+  }).join('');
+}
+
+function toggleSection(head) {
+  const list = head.nextElementSibling;
+  const chevron = head.querySelector('.section-chevron');
+  const open = list.style.display !== 'none';
+  list.style.display = open ? 'none' : 'block';
+  chevron.classList.toggle('open', !open);
+}
+
+function toggleTask(si, ti) {
+  checklistData[si].tasks[ti].done = !checklistData[si].tasks[ti].done;
+  renderChecklist();
+  showToast(checklistData[si].tasks[ti].done ? 'Task marked complete' : 'Task unmarked', 'success');
+}
+
+// ── EXPENSES ─────────────────────────────────────────────────
+function renderExpenses() {
+  document.getElementById('expenses-body').innerHTML = expenses.map(e => `
+    <div class="fin-input-row">
+      <span class="fin-label">${e.label}</span>
+      <input class="fin-input" type="number" value="${e.value}" oninput="updateSummary()" data-key="${e.key}">
+    </div>`).join('');
+}
+
+function updateSummary() {
+  const income = parseFloat(document.querySelector('#fin-daily input[type=number]')?.value || 27634);
+  const totalExp = expenses.reduce((s, e) => {
+    const el = document.querySelector(`input[data-key="${e.key}"]`);
+    return s + parseFloat(el?.value || e.value);
+  }, 0);
+  const profit = income - totalExp;
+  const fc = totalExp > 0 ? ((expenses.find(e=>e.key==='cos')?.value || 12349) / income * 100).toFixed(1) : 0;
+  document.getElementById('s-income').textContent = 'R ' + income.toLocaleString();
+  document.getElementById('s-exp').textContent = 'R ' + Math.round(totalExp).toLocaleString();
+  document.getElementById('s-profit').textContent = (profit >= 0 ? 'R ' : '-R ') + Math.abs(Math.round(profit)).toLocaleString();
+  document.getElementById('s-profit').className = 'fin-summary-val fin-summary-total ' + (profit >= 0 ? 'positive' : 'negative');
+}
+
+function switchFinTab(tab, btn) {
+  document.querySelectorAll('.tab-pill').forEach(p => p.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('fin-daily').style.display = tab === 'daily' ? 'block' : 'none';
+  document.getElementById('fin-monthly').style.display = tab === 'monthly' ? 'block' : 'none';
+  document.getElementById('fin-foodcost').style.display = tab === 'foodcost' ? 'block' : 'none';
+}
+
+function renderMonthlyTable() {
+  document.getElementById('monthly-table').innerHTML = monthlyData.map(([d, inc, exp]) => {
+    const profit = inc - exp;
+    const fc = inc > 0 ? (exp / inc * 100).toFixed(1) : 0;
+    return `<tr>
+      <td class="mono">Apr ${d}</td>
+      <td class="mono">R ${inc.toLocaleString()}</td>
+      <td class="mono">R ${exp.toLocaleString()}</td>
+      <td><span class="badge ${fc < 30 ? 'badge-green' : fc < 40 ? 'badge-amber' : 'badge-red'}">${fc}%</span></td>
+      <td class="mono" style="color:${profit >= 0 ? 'var(--green)' : 'var(--red)'}">R ${profit.toLocaleString()}</td>
+      <td class="mono">—</td>
+    </tr>`;
+  }).join('');
+}
+
+function renderSaleBreakdown() {
+  const items = [
+    { label: 'In-store', pct: 97.7, color: 'var(--green)' },
+    { label: 'Deliveries', pct: 0.5, color: 'var(--amber)' },
+    { label: 'Platters', pct: 1.8, color: 'var(--blue)' },
+  ];
+  document.getElementById('sale-breakdown').innerHTML = items.map(i => `
+    <div style="margin-bottom:10px;">
+      <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px;">
+        <span style="color:var(--text2)">${i.label}</span>
+        <span style="font-weight:500">${i.pct}%</span>
+      </div>
+      <div class="progress-track"><div class="progress-fill" style="width:${i.pct}%;background:${i.color}"></div></div>
+    </div>`).join('');
+}
+
+// ── STOCK ─────────────────────────────────────────────────────
+let stockFilter = 'all';
+let stockSearch = '';
+
+function renderStock() {
+  const filtered = stockData.filter(s =>
+    (stockFilter === 'all' || s.cat === stockFilter) &&
+    s.desc.toLowerCase().includes(stockSearch.toLowerCase())
+  );
+  let total = 0;
+  document.getElementById('stock-body').innerHTML = filtered.map(s => {
+    const val = s.price * s.qty;
+    total += val;
+    return `<tr>
+      <td style="font-weight:500">${s.desc}</td>
+      <td><span class="badge badge-grey">${s.cat}</span></td>
+      <td>${s.unit}</td>
+      <td class="mono">R ${s.price.toFixed(2)}</td>
+      <td class="mono">${s.qty}</td>
+      <td class="mono">R ${val.toFixed(2)}</td>
+      <td><button class="btn btn-ghost btn-sm">Edit</button></td>
+    </tr>`;
+  }).join('');
+  document.getElementById('stock-total').textContent = 'R ' + total.toFixed(2);
+}
+
+function filterStock(val) { stockSearch = val; renderStock(); }
+function filterStockCat(cat, btn) {
+  stockFilter = cat;
+  document.querySelectorAll('#stock-cat-pills .tab-pill').forEach(p => p.classList.remove('active'));
+  btn.classList.add('active');
+  renderStock();
+}
+
+// ── WAGES ─────────────────────────────────────────────────────
+function renderWages() {
+  let total = 0;
+  document.getElementById('wages-body').innerHTML = wagesData.map(w => {
+    const net = w.salary - w.advanced;
+    total += net;
+    const initials = w.name.split(' ').map(n=>n[0]).join('').slice(0,2);
+    return `<tr>
+      <td>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <div class="avatar" style="width:28px;height:28px;font-size:11px;">${initials}</div>
+          ${w.name}
+        </div>
+      </td>
+      <td class="mono">R ${w.salary.toLocaleString()}</td>
+      <td class="mono" style="color:${w.advanced > 0 ? 'var(--amber)' : 'var(--text3)'}">R ${w.advanced.toLocaleString()}</td>
+      <td class="mono" style="font-weight:500;color:${net >= 0 ? 'var(--green)' : 'var(--red)'}">R ${net.toLocaleString()}</td>
+      <td><button class="btn btn-ghost btn-sm" onclick="showToast('Advance added for ${w.name}','success')">+ Advance</button></td>
+    </tr>`;
+  }).join('');
+  document.getElementById('wages-total').textContent = 'R ' + total.toLocaleString();
+}
+
+// ── REPORTS ──────────────────────────────────────────────────
+function renderReports() {
+  document.getElementById('reports-body').innerHTML = reportsData.map(r => `
+    <tr>
+      <td class="mono">${r.date}</td>
+      <td style="font-weight:500">${r.store}</td>
+      <td><span class="badge ${r.status === 'signed_off' ? 'badge-green' : 'badge-amber'}">${r.status === 'signed_off' ? '✓ Signed off' : 'Pending'}</span></td>
+      <td><span class="badge ${r.score >= 90 ? 'badge-green' : r.score >= 70 ? 'badge-amber' : 'badge-red'}">${r.score}%</span></td>
+      <td><span class="badge ${r.uniform === 'pass' ? 'badge-green' : r.uniform === 'partial' ? 'badge-amber' : 'badge-red'}">${r.uniform}</span></td>
+      <td>${r.manager}</td>
+      <td><button class="btn btn-ghost btn-sm" onclick="showToast('PDF opening...','success')">↓ PDF</button></td>
+    </tr>`).join('');
+}
+
+// ── CHARTS ───────────────────────────────────────────────────
+function renderMonthlyChart() {
+  const el = document.getElementById('monthly-chart');
+  if (!el) return;
+  const maxVal = Math.max(...monthlyData.map(d => d[1]));
+  el.innerHTML = monthlyData.map(([d, inc]) => {
+    const h = Math.round((inc / maxVal) * 52);
+    return `<div class="bar-col">
+      <div class="bar" style="height:${h}px" title="Apr ${d}: R${inc.toLocaleString()}"></div>
+      <div class="bar-lbl">${d}</div>
+    </div>`;
+  }).join('');
+}
+
+function renderIncomeChart() {
+  const el = document.getElementById('income-chart');
+  if (!el) return;
+  const data = monthlyData.slice(0, 19);
+  const maxVal = Math.max(...data.map(d => d[1]));
+  el.innerHTML = data.map(([d, inc]) => {
+    const h = Math.round((inc / maxVal) * 52);
+    return `<div class="bar-col">
+      <div class="bar" style="height:${h}px;background:var(--green-mid)" title="Apr ${d}: R${inc.toLocaleString()}"></div>
+    </div>`;
+  }).join('');
+}
+
+// ── QR CODE ───────────────────────────────────────────────────
+function drawQR() {
+  const canvas = document.getElementById('qr-canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = 'white';
+  ctx.fillRect(0, 0, 160, 160);
+  const cellSize = 6;
+  const cols = 21;
+  ctx.fillStyle = '#0F6E56';
+  // Generate pseudo-random QR pattern
+  const seed = Date.now();
+  const rand = (i) => Math.sin(seed * 0.0001 + i * 0.3) > 0;
+  // Finder patterns
+  [[4,4],[4,110],[110,4]].forEach(([x,y]) => {
+    ctx.fillRect(x,y,42,42);
+    ctx.fillStyle = 'white'; ctx.fillRect(x+6,y+6,30,30);
+    ctx.fillStyle = '#0F6E56'; ctx.fillRect(x+12,y+12,18,18);
+    ctx.fillStyle = '#0F6E56';
+  });
+  // Data cells
+  for (let i = 3; i < 18; i++) {
+    for (let j = 3; j < 18; j++) {
+      if ((i < 9 && j < 9) || (i < 9 && j > 13) || (i > 13 && j < 9)) continue;
+      if (rand(i * cols + j)) {
+        ctx.fillRect(4 + i*7, 4 + j*7, 6, 6);
+      }
+    }
+  }
+}
+
+function startQRTimer() {
+  state.qrTimer = 898;
+  if (state.qrInterval) clearInterval(state.qrInterval);
+  state.qrInterval = setInterval(() => {
+    state.qrTimer--;
+    const min = Math.floor(state.qrTimer / 60);
+    const sec = state.qrTimer % 60;
+    const el = document.getElementById('qr-timer');
+    if (el) el.textContent = `${min}:${sec.toString().padStart(2,'0')}`;
+    if (state.qrTimer <= 0) {
+      clearInterval(state.qrInterval);
+      if (el) el.textContent = 'Expired';
+      showToast('QR code expired — generate a new one', 'warning');
+    }
+  }, 1000);
+}
+
+function regenerateQR() {
+  drawQR();
+  startQRTimer();
+  showToast('New QR code generated — 15 minutes remaining', 'success');
+}
+
+// ── MODALS ────────────────────────────────────────────────────
+function showSignOffModal() { document.getElementById('modal-signoff').classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+
+function startSigning() {
+  const area = document.getElementById('sign-area');
+  area.textContent = '✓ Signature captured';
+  area.classList.add('signing');
+  area.style.color = 'var(--green)';
+  area.style.fontSize = '14px';
+  area.style.fontWeight = '500';
+  state.signing = true;
+}
+
+function clearSignature() {
+  const area = document.getElementById('sign-area');
+  area.textContent = 'Tap or click to sign here';
+  area.classList.remove('signing');
+  area.style.color = '';
+  area.style.fontSize = '';
+  area.style.fontWeight = '';
+  state.signing = false;
+}
+
+function confirmSignoff() {
+  if (!state.signing) { showToast('Please draw your signature first', 'warning'); return; }
+  closeModal('modal-signoff');
+  showToast('Session signed off — PDF report generating...', 'success');
+  setTimeout(() => showToast('PDF report ready — check Reports tab', 'success'), 3000);
+}
+
+// ── SCAN MODAL ────────────────────────────────────────────────
+const scanModes = {
+  invoice: {
+    title: 'Scan invoice or delivery note',
+    sub: 'AI will extract supplier, line items, and totals automatically',
+    demo: 'invoice',
+  },
+  uniform: {
+    title: 'Staff uniform check',
+    sub: 'AI will check each staff member for cap, apron, shoes, and hair net',
+    demo: 'uniform',
+  },
+  cleaning: {
+    title: 'Cleaning verification',
+    sub: 'AI will confirm the area meets food safety standards',
+    demo: 'cleaning',
+  },
+  stock: {
+    title: 'Stock count scanner',
+    sub: 'AI will read product labels and quantities from the photo',
+    demo: 'stock',
+  },
+};
+
+function showScanModal(mode) {
+  const cfg = scanModes[mode];
+  document.getElementById('scan-modal-title').textContent = cfg.title;
+  document.getElementById('scan-modal-sub').textContent = cfg.sub;
+  document.getElementById('scan-modal-body').innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:20px;">
+      <button class="btn btn-primary" onclick="runAIScan('${mode}')">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1" y="3" width="14" height="10" rx="2"/><circle cx="8" cy="8" r="2.5"/></svg>
+        Use this device's camera
+      </button>
+      <button class="btn btn-secondary" onclick="closeModal('modal-scan');showPage('device')">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1" y="1" width="5" height="5" rx="1"/><rect x="10" y="1" width="5" height="5" rx="1"/><rect x="1" y="10" width="5" height="5" rx="1"/><path d="M10 10h5v5"/></svg>
+        Use linked phone (show QR)
+      </button>
+    </div>
+    <div style="font-size:11px;color:var(--text3);text-align:center;">Photos are sent to Claude AI for analysis — results appear in seconds</div>`;
+  document.getElementById('modal-scan').classList.add('open');
+}
+
+function runAIScan(mode) {
+  document.getElementById('scan-modal-body').innerHTML = `
+    <div class="ai-processing">
+      <div class="ai-spinner"></div>
+      <div style="font-size:14px;font-weight:500;">AI is reading your photo...</div>
+      <div style="font-size:12px;color:var(--text2);">Claude is ${mode === 'invoice' ? 'extracting line items and totals' : mode === 'uniform' ? 'checking each staff member' : mode === 'cleaning' ? 'verifying the area meets standards' : 'reading product quantities'}</div>
+    </div>`;
+  setTimeout(() => showAIResult(mode), 2500);
+}
+
+function showAIResult(mode) {
+  const results = {
+    invoice: `
+      <div style="font-size:13px;font-weight:500;color:var(--green);margin-bottom:12px;">✓ Invoice scanned successfully</div>
+      <div style="background:var(--surface2);border-radius:8px;padding:12px;margin-bottom:12px;">
+        <div style="display:flex;justify-content:space-between;margin-bottom:6px;"><span style="color:var(--text2);font-size:12px;">Supplier</span><span style="font-weight:500;font-size:12px;">Fresh Direct Supplies</span></div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:6px;"><span style="color:var(--text2);font-size:12px;">Date</span><span class="text-mono" style="font-size:12px;">29 Apr 2026</span></div>
+        <div style="display:flex;justify-content:space-between;"><span style="color:var(--text2);font-size:12px;">Invoice #</span><span class="text-mono" style="font-size:12px;">FD-2026-04892</span></div>
+      </div>
+      <div style="font-size:12px;color:var(--text2);margin-bottom:6px;">3 line items extracted:</div>
+      <table class="data-table" style="margin-bottom:12px;"><thead><tr><th>Item</th><th>Qty</th><th>Price</th><th>Total</th></tr></thead>
+      <tbody>
+        <tr><td>L&H Spice 4kg</td><td>5</td><td class="mono">R211.00</td><td class="mono">R1,055</td></tr>
+        <tr><td>Chips Spice 4kg</td><td>4</td><td class="mono">R178.00</td><td class="mono">R712</td></tr>
+        <tr><td>250ml Sauce x12</td><td>20</td><td class="mono">R168.72</td><td class="mono">R3,374</td></tr>
+      </tbody></table>
+      <div style="display:flex;justify-content:space-between;font-weight:600;margin-bottom:16px;"><span>Total (excl. VAT)</span><span class="text-mono">R5,141</span></div>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-primary" style="flex:1" onclick="closeModal('modal-scan');showToast('Applied to stock & expenses','success')">Apply to stock + expenses</button>
+      </div>`,
+    uniform: `
+      <div style="font-size:13px;font-weight:500;color:var(--green);margin-bottom:12px;">✓ 8/8 staff compliant</div>
+      ${['Ashley','Owen','Kea','Dineo','Sinah','Lucy','Tumi','Tshepi'].map(n => `
+      <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);">
+        <div class="avatar" style="width:28px;height:28px;font-size:11px;">${n.slice(0,2).toUpperCase()}</div>
+        <span style="flex:1;font-size:13px;">${n}</span>
+        <span style="font-size:11px;color:var(--green);">Cap ✓</span>
+        <span style="font-size:11px;color:var(--green);">Apron ✓</span>
+        <span style="font-size:11px;color:var(--green);">Shoes ✓</span>
+        <span class="badge badge-green">✓</span>
+      </div>`).join('')}
+      <button class="btn btn-primary w-full mt-16" onclick="closeModal('modal-scan');showToast('Uniform check saved to today\\'s session','success')">Save to today's session</button>`,
+    cleaning: `
+      <div style="font-size:13px;font-weight:500;color:var(--amber);margin-bottom:12px;">⚠ Needs attention</div>
+      <div style="background:var(--amber-light);border-radius:8px;padding:12px;margin-bottom:12px;border:1px solid rgba(239,159,39,0.2);">
+        <div style="font-size:12px;font-weight:500;color:#7A4F00;margin-bottom:4px;">AI assessment:</div>
+        <div style="font-size:12px;color:#7A4F00;">The grill surface appears largely clean, however there is visible grease build-up on the left side hood panel. The area should be re-cleaned before sign-off.</div>
+      </div>
+      <button class="btn btn-secondary w-full" onclick="closeModal('modal-scan');showToast('Flagged for review','warning')">Flag for re-cleaning</button>`,
+    stock: `
+      <div style="font-size:13px;font-weight:500;color:var(--green);margin-bottom:12px;">✓ 6 items identified</div>
+      <table class="data-table" style="margin-bottom:16px;"><thead><tr><th>Item</th><th>Qty read</th><th>Confidence</th></tr></thead>
+      <tbody>
+        <tr><td>L&H Spice 4kg bags</td><td class="mono">5</td><td><span class="badge badge-green">High</span></td></tr>
+        <tr><td>Mild Spice 4kg bags</td><td class="mono">7</td><td><span class="badge badge-green">High</span></td></tr>
+        <tr><td>Chips Spice 4kg bags</td><td class="mono">6</td><td><span class="badge badge-amber">Medium</span></td></tr>
+        <tr><td>250ml Sauce bottles</td><td class="mono">119</td><td><span class="badge badge-green">High</span></td></tr>
+        <tr><td>20L Whip container</td><td class="mono">2</td><td><span class="badge badge-green">High</span></td></tr>
+        <tr><td>Salsa containers</td><td class="mono">4</td><td><span class="badge badge-amber">Medium</span></td></tr>
+      </tbody></table>
+      <button class="btn btn-primary w-full" onclick="closeModal('modal-scan');showToast('Stock counts updated','success')">Update stock counts</button>`,
+  };
+  document.getElementById('scan-modal-body').innerHTML = results[mode] || '';
+}
+
+// ── TOASTS ────────────────────────────────────────────────────
+function showToast(msg, type = '') {
+  const container = document.getElementById('toast-container');
+  const toast = document.createElement('div');
+  toast.className = `toast ${type}`;
+  toast.innerHTML = `
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5">
+      ${type === 'success' ? '<path d="M1 7l4 4 8-8"/>' : type === 'error' ? '<path d="M1 1l12 12M13 1L1 13"/>' : '<circle cx="7" cy="7" r="6"/><path d="M7 4v4M7 10v.5"/>'}
+    </svg>
+    ${msg}`;
+  container.appendChild(toast);
+  setTimeout(() => { toast.style.opacity = '0'; toast.style.transition = 'opacity 0.3s'; setTimeout(() => toast.remove(), 300); }, 3000);
+}
+
+// ── AUTO-OPEN FIRST SECTION ───────────────────────────────────
+setTimeout(() => {
+  const firstHead = document.querySelector('.section-head');
+  if (firstHead) toggleSection(firstHead);
+}, 100);
+
+// ── CHECK FOR EXISTING SESSION ON LOAD ───────────────────────
+window.addEventListener('load', () => {
+  if (USE_SUPABASE) {
+    checkExistingSession();
+  }
+});
+
+</script>
+</body>
+</html>
