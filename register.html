@@ -1,0 +1,920 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CompliTrack — Get Started</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<style>
+:root {
+  --green:       #0F6E56;
+  --green-mid:   #1D9E75;
+  --green-light: #E1F5EE;
+  --green-dark:  #085041;
+  --amber:       #EF9F27;
+  --red:         #E24B4A;
+  --red-light:   #FCEBEB;
+  --bg:          #F4F6F4;
+  --surface:     #FFFFFF;
+  --surface2:    #F0F4F1;
+  --border:      #E2EAE5;
+  --text:        #0D1F18;
+  --text2:       #4A6358;
+  --text3:       #8AA898;
+  --radius:      12px;
+  --radius-sm:   8px;
+  --shadow:      0 1px 3px rgba(15,110,86,0.08);
+  --shadow-lg:   0 8px 32px rgba(15,110,86,0.12);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'DM Sans', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; font-size: 14px; }
+
+/* ── LAYOUT ── */
+.page { display: none; }
+.page.active { display: flex; min-height: 100vh; }
+
+/* ── SPLIT LAYOUT ── */
+.split { display: grid; grid-template-columns: 1fr 1fr; min-height: 100vh; }
+.split-left {
+  background: var(--green-dark);
+  padding: 48px;
+  display: flex; flex-direction: column;
+  justify-content: space-between;
+}
+.split-right {
+  background: var(--surface);
+  padding: 48px;
+  display: flex; flex-direction: column;
+  justify-content: center;
+  max-width: 520px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+/* ── BRAND ── */
+.brand { display: flex; align-items: center; gap: 12px; margin-bottom: 48px; }
+.brand-icon { width: 40px; height: 40px; background: var(--green-mid); border-radius: 12px; display: flex; align-items: center; justify-content: center; }
+.brand-name { font-size: 18px; font-weight: 600; color: white; }
+
+/* ── LEFT PANEL ── */
+.left-headline { font-size: 32px; font-weight: 600; color: white; line-height: 1.2; margin-bottom: 20px; }
+.left-sub { font-size: 15px; color: rgba(255,255,255,0.6); line-height: 1.6; margin-bottom: 40px; }
+
+.feature-list { display: flex; flex-direction: column; gap: 16px; }
+.feature-item { display: flex; gap: 14px; align-items: flex-start; }
+.feature-icon { width: 36px; height: 36px; background: rgba(255,255,255,0.1); border-radius: 10px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.feature-icon svg { width: 18px; height: 18px; }
+.feature-title { font-size: 14px; font-weight: 500; color: white; margin-bottom: 2px; }
+.feature-desc { font-size: 12px; color: rgba(255,255,255,0.5); line-height: 1.4; }
+
+.testimonial {
+  background: rgba(255,255,255,0.07);
+  border-radius: var(--radius);
+  padding: 20px;
+  margin-top: 32px;
+}
+.testimonial-text { font-size: 13px; color: rgba(255,255,255,0.75); line-height: 1.6; font-style: italic; margin-bottom: 12px; }
+.testimonial-author { font-size: 12px; color: rgba(255,255,255,0.4); }
+
+/* ── STEP INDICATOR ── */
+.steps { display: flex; gap: 8px; margin-bottom: 32px; }
+.step-dot { height: 4px; border-radius: 2px; background: var(--border); flex: 1; transition: background 0.3s; }
+.step-dot.active { background: var(--green); }
+.step-dot.done { background: var(--green-mid); }
+
+.step-label { font-size: 12px; color: var(--text3); margin-bottom: 6px; font-weight: 500; letter-spacing: 0.04em; text-transform: uppercase; }
+.step-title { font-size: 22px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
+.step-desc { font-size: 13px; color: var(--text2); margin-bottom: 28px; line-height: 1.5; }
+
+/* ── FORM ── */
+.field { margin-bottom: 16px; }
+.field label { display: block; font-size: 12px; font-weight: 500; color: var(--text2); margin-bottom: 6px; letter-spacing: 0.02em; }
+.field input, .field select {
+  width: 100%;
+  padding: 11px 14px;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  font-size: 14px;
+  color: var(--text);
+  background: var(--surface);
+  transition: border-color 0.15s;
+  outline: none;
+  appearance: none;
+}
+.field input:focus, .field select:focus { border-color: var(--green); }
+.field input.error { border-color: var(--red); }
+.field-error { font-size: 11px; color: var(--red); margin-top: 4px; }
+.field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 12px 20px;
+  border-radius: var(--radius-sm);
+  font-family: inherit; font-size: 14px; font-weight: 500;
+  cursor: pointer; border: none; transition: all 0.15s; width: 100%;
+}
+.btn-primary { background: var(--green); color: white; }
+.btn-primary:hover { background: var(--green-dark); }
+.btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
+.btn-secondary { background: var(--surface2); color: var(--text); border: 1.5px solid var(--border); }
+.btn-secondary:hover { background: var(--border); }
+.btn-ghost { background: transparent; color: var(--text2); border: none; font-size: 13px; cursor: pointer; padding: 8px; }
+.btn-ghost:hover { color: var(--green); }
+
+.btn-row { display: flex; gap: 10px; margin-top: 8px; }
+.btn-row .btn-secondary { flex: 1; }
+.btn-row .btn-primary { flex: 2; }
+
+/* ── INDUSTRY GRID ── */
+.industry-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 20px; }
+.industry-card {
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px 8px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.15s;
+  background: var(--surface);
+}
+.industry-card:hover { border-color: var(--green); background: var(--green-light); }
+.industry-card.selected { border-color: var(--green); background: var(--green-light); }
+.industry-card svg { width: 24px; height: 24px; margin: 0 auto 6px; display: block; color: var(--text3); }
+.industry-card.selected svg { color: var(--green); }
+.industry-card span { font-size: 11px; font-weight: 500; color: var(--text2); }
+.industry-card.selected span { color: var(--green-dark); }
+
+/* ── STORE LIST ── */
+.store-list { display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px; max-height: 280px; overflow-y: auto; }
+.store-item {
+  background: var(--surface2);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  display: flex; align-items: center; gap: 10px;
+}
+.store-item-name { font-size: 13px; font-weight: 500; flex: 1; }
+.store-item-meta { font-size: 11px; color: var(--text3); }
+.store-item-remove { background: none; border: none; cursor: pointer; color: var(--text3); font-size: 16px; padding: 0 4px; }
+.store-item-remove:hover { color: var(--red); }
+
+.add-store-form {
+  background: var(--surface2);
+  border: 1.5px dashed var(--border);
+  border-radius: var(--radius-sm);
+  padding: 14px;
+  margin-bottom: 16px;
+}
+
+/* ── STAFF LIST ── */
+.staff-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+.staff-item {
+  background: var(--surface2);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  display: flex; align-items: center; gap: 10px;
+}
+.staff-avatar {
+  width: 32px; height: 32px; border-radius: 50%;
+  background: var(--green-light);
+  color: var(--green-dark);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 600; flex-shrink: 0;
+}
+.staff-email { font-size: 13px; flex: 1; }
+.role-badge {
+  font-size: 10px; padding: 2px 8px; border-radius: 99px; font-weight: 500;
+}
+.role-manager { background: var(--green-light); color: var(--green-dark); }
+.role-staff { background: #E6F1FB; color: #0C447C; }
+
+/* ── SUCCESS ── */
+.success-screen {
+  min-height: 100vh;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  background: var(--surface);
+  padding: 40px;
+  text-align: center;
+}
+.success-icon {
+  width: 80px; height: 80px;
+  background: var(--green-light);
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  margin: 0 auto 24px;
+}
+.success-icon svg { width: 40px; height: 40px; color: var(--green); }
+
+/* ── INVITE TOGGLE ── */
+.invite-toggle {
+  display: flex; gap: 4px;
+  background: var(--surface2); border-radius: var(--radius-sm);
+  padding: 3px; margin-bottom: 16px; width: fit-content;
+}
+.invite-opt {
+  padding: 6px 14px; border-radius: 6px; font-size: 12px; font-weight: 500;
+  cursor: pointer; border: none; background: transparent; color: var(--text2);
+  font-family: inherit; transition: all 0.12s;
+}
+.invite-opt.active { background: var(--surface); color: var(--green); box-shadow: var(--shadow); }
+
+/* ── PROGRESS ── */
+.progress-ring { position: relative; width: 48px; height: 48px; margin: 0 auto 16px; }
+.progress-ring svg { transform: rotate(-90deg); }
+.progress-ring-text {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 600; color: var(--green);
+}
+
+/* ── RESPONSIVE ── */
+@media (max-width: 768px) {
+  .split { grid-template-columns: 1fr; }
+  .split-left { display: none; }
+  .split-right { padding: 32px 24px; max-width: 100%; }
+}
+
+.alert { padding: 10px 14px; border-radius: var(--radius-sm); font-size: 13px; margin-bottom: 16px; }
+.alert-error { background: var(--red-light); color: #8B1A1A; border: 1px solid rgba(226,75,74,0.2); }
+.alert-success { background: var(--green-light); color: var(--green-dark); border: 1px solid rgba(15,110,86,0.2); }
+
+.divider { display: flex; align-items: center; gap: 12px; margin: 20px 0; }
+.divider span { font-size: 12px; color: var(--text3); white-space: nowrap; }
+.divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+
+.already-account { text-align: center; margin-top: 20px; font-size: 13px; color: var(--text2); }
+.already-account a { color: var(--green); font-weight: 500; text-decoration: none; }
+</style>
+</head>
+<body>
+
+<!-- STEP 1: Account details -->
+<div id="step1" class="page active">
+  <div class="split">
+    <div class="split-left">
+      <div>
+        <div class="brand">
+          <div class="brand-icon">
+            <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+              <path d="M3 11L9 17L19 5" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </div>
+          <span class="brand-name">CompliTrack</span>
+        </div>
+        <div class="left-headline">Compliance made simple for food service franchises</div>
+        <div class="left-sub">From daily cleaning checklists to AI-powered invoice scanning — manage every store from one dashboard.</div>
+        <div class="feature-list">
+          <div class="feature-item">
+            <div class="feature-icon">
+              <svg viewBox="0 0 18 18" fill="none" stroke="rgba(255,255,255,0.7)" stroke-width="1.5"><path d="M2 9l4 4 10-8"/></svg>
+            </div>
+            <div>
+              <div class="feature-title">Daily compliance checklists</div>
+              <div class="feature-desc">Photo proof for every task. AI verifies each photo automatically.</div>
+            </div>
+          </div>
+          <div class="feature-item">
+            <div class="feature-icon">
+              <svg viewBox="0 0 18 18" fill="none" stroke="rgba(255,255,255,0.7)" stroke-width="1.5"><rect x="2" y="4" width="14" height="11" rx="2"/><circle cx="9" cy="9.5" r="2.5"/></svg>
+            </div>
+            <div>
+              <div class="feature-title">AI invoice scanner</div>
+              <div class="feature-desc">Photo a delivery note — AI extracts line items into your stock and expenses.</div>
+            </div>
+          </div>
+          <div class="feature-item">
+            <div class="feature-icon">
+              <svg viewBox="0 0 18 18" fill="none" stroke="rgba(255,255,255,0.7)" stroke-width="1.5"><path d="M2 6l7-3 7 3v6l-7 3-7-3V6z"/></svg>
+            </div>
+            <div>
+              <div class="feature-title">Multi-store dashboard</div>
+              <div class="feature-desc">See all branches live. Know who's compliant before you even call.</div>
+            </div>
+          </div>
+          <div class="feature-item">
+            <div class="feature-icon">
+              <svg viewBox="0 0 18 18" fill="none" stroke="rgba(255,255,255,0.7)" stroke-width="1.5"><rect x="5" y="1" width="8" height="11" rx="1.5"/><path d="M3 16h12M7 13v2M11 13v2"/></svg>
+            </div>
+            <div>
+              <div class="feature-title">Phone as camera peripheral</div>
+              <div class="feature-desc">Scan invoices from your PC using your phone camera. No switching devices.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="testimonial">
+        <div class="testimonial-text">"CompliTrack replaced 4 WhatsApp groups and a stack of paper checklists. My franchise manager now sees everything live."</div>
+        <div class="testimonial-author">Bennie van Zyl · Bartholos Group · Mochacho's Franchise</div>
+      </div>
+    </div>
+
+    <div class="split-right">
+      <div class="steps">
+        <div class="step-dot active" id="dot1"></div>
+        <div class="step-dot" id="dot2"></div>
+        <div class="step-dot" id="dot3"></div>
+        <div class="step-dot" id="dot4"></div>
+      </div>
+      <div class="step-label">Step 1 of 4</div>
+      <div class="step-title">Create your account</div>
+      <div class="step-desc">Start with your personal details — you'll be the organisation owner.</div>
+
+      <div id="alert1"></div>
+
+      <div class="field-row">
+        <div class="field">
+          <label>First name</label>
+          <input type="text" id="first-name" placeholder="Bennie">
+        </div>
+        <div class="field">
+          <label>Last name</label>
+          <input type="text" id="last-name" placeholder="van Zyl">
+        </div>
+      </div>
+      <div class="field">
+        <label>Email address</label>
+        <input type="email" id="email" placeholder="you@yourfranchise.co.za">
+      </div>
+      <div class="field">
+        <label>Password</label>
+        <input type="password" id="password" placeholder="Minimum 8 characters">
+      </div>
+      <div class="field">
+        <label>Confirm password</label>
+        <input type="password" id="password2" placeholder="Repeat your password">
+      </div>
+      <button class="btn btn-primary" onclick="goStep2()">
+        Continue
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
+      </button>
+      <div class="already-account">Already have an account? <a href="index.html">Sign in</a></div>
+    </div>
+  </div>
+</div>
+
+<!-- STEP 2: Organisation -->
+<div id="step2" class="page">
+  <div class="split">
+    <div class="split-left">
+      <div class="brand">
+        <div class="brand-icon">
+          <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+            <path d="M3 11L9 17L19 5" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <span class="brand-name">CompliTrack</span>
+      </div>
+      <div>
+        <div class="left-headline" style="font-size:24px;">Your organisation is your franchise group</div>
+        <div class="left-sub">Whether you have 1 store or 50, everything sits under your organisation. Each store gets its own compliance dashboard, staff accounts, and reports.</div>
+        <div style="background:rgba(255,255,255,0.07);border-radius:12px;padding:20px;margin-top:24px;">
+          <div style="font-size:12px;color:rgba(255,255,255,0.4);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:14px;">Structure</div>
+          <div style="display:flex;flex-direction:column;gap:10px;">
+            <div style="display:flex;align-items:center;gap:10px;">
+              <div style="width:8px;height:8px;border-radius:50%;background:#5DCAA5;flex-shrink:0;"></div>
+              <span style="font-size:13px;color:white;">Bartholos Group <span style="color:rgba(255,255,255,0.4);font-size:11px;">← your organisation</span></span>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;padding-left:18px;">
+              <div style="width:6px;height:6px;border-radius:50%;background:rgba(255,255,255,0.3);flex-shrink:0;"></div>
+              <span style="font-size:12px;color:rgba(255,255,255,0.6);">Pampierstad Branch</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;padding-left:18px;">
+              <div style="width:6px;height:6px;border-radius:50%;background:rgba(255,255,255,0.3);flex-shrink:0;"></div>
+              <span style="font-size:12px;color:rgba(255,255,255,0.6);">Hartswater Branch</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;padding-left:18px;">
+              <div style="width:6px;height:6px;border-radius:50%;background:rgba(255,255,255,0.3);flex-shrink:0;"></div>
+              <span style="font-size:12px;color:rgba(255,255,255,0.4);font-style:italic;">+ add more stores any time</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="split-right">
+      <div class="steps">
+        <div class="step-dot done" id="dot1b"></div>
+        <div class="step-dot active" id="dot2b"></div>
+        <div class="step-dot" id="dot3b"></div>
+        <div class="step-dot" id="dot4b"></div>
+      </div>
+      <div class="step-label">Step 2 of 4</div>
+      <div class="step-title">Your organisation</div>
+      <div class="step-desc">This is your franchise group name — the umbrella for all your stores.</div>
+
+      <div id="alert2"></div>
+
+      <div class="field">
+        <label>Organisation / franchise name</label>
+        <input type="text" id="org-name" placeholder="e.g. Bartholos Group">
+      </div>
+
+      <div class="field">
+        <label>Industry</label>
+      </div>
+      <div class="industry-grid" id="industry-grid">
+        <div class="industry-card selected" onclick="selectIndustry('fast_food', this)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 9h18M3 15h18M9 9v6M15 9v6"/></svg>
+          <span>Fast food</span>
+        </div>
+        <div class="industry-card" onclick="selectIndustry('restaurant', this)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2v8m0 0c-2.5 0-5 2-5 6h10c0-4-2.5-6-5-6z"/><path d="M8 22h8"/></svg>
+          <span>Restaurant</span>
+        </div>
+        <div class="industry-card" onclick="selectIndustry('bakery', this)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><ellipse cx="12" cy="13" rx="8" ry="5"/><path d="M4 13V9c0-2 4-4 8-4s8 2 8 4v4"/></svg>
+          <span>Bakery</span>
+        </div>
+        <div class="industry-card" onclick="selectIndustry('butchery', this)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 3l2 6h6l-5 4 2 6-5-4-5 4 2-6-5-4h6z"/></svg>
+          <span>Butchery</span>
+        </div>
+        <div class="industry-card" onclick="selectIndustry('supermarket', this)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><path d="M3 6h18M16 10a4 4 0 01-8 0"/></svg>
+          <span>Supermarket</span>
+        </div>
+        <div class="industry-card" onclick="selectIndustry('other', this)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/></svg>
+          <span>Other</span>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>How many stores do you operate?</label>
+        <select id="store-count">
+          <option value="1">1 store</option>
+          <option value="2-5">2–5 stores</option>
+          <option value="6-10">6–10 stores</option>
+          <option value="11+">11+ stores</option>
+        </select>
+      </div>
+
+      <div class="btn-row">
+        <button class="btn btn-secondary" onclick="goStep(1)">Back</button>
+        <button class="btn btn-primary" onclick="goStep3()">
+          Continue
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- STEP 3: Add stores -->
+<div id="step3" class="page">
+  <div class="split">
+    <div class="split-left">
+      <div class="brand">
+        <div class="brand-icon">
+          <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+            <path d="M3 11L9 17L19 5" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <span class="brand-name">CompliTrack</span>
+      </div>
+      <div>
+        <div class="left-headline" style="font-size:24px;">Add your stores</div>
+        <div class="left-sub">Each store gets its own compliance dashboard. You can add more stores at any time from your owner dashboard.</div>
+        <div style="background:rgba(255,255,255,0.07);border-radius:12px;padding:20px;margin-top:24px;">
+          <div style="font-size:12px;color:rgba(255,255,255,0.4);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:14px;">Each store gets</div>
+          <div style="display:flex;flex-direction:column;gap:8px;font-size:13px;color:rgba(255,255,255,0.65);">
+            <div>✓ Daily compliance checklist</div>
+            <div>✓ Staff uniform photo check</div>
+            <div>✓ Temperature logging</div>
+            <div>✓ Income & expense tracking</div>
+            <div>✓ AI scanner integration</div>
+            <div>✓ PDF report generation</div>
+            <div>✓ Multiple staff logins</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="split-right">
+      <div class="steps">
+        <div class="step-dot done"></div>
+        <div class="step-dot done"></div>
+        <div class="step-dot active"></div>
+        <div class="step-dot"></div>
+      </div>
+      <div class="step-label">Step 3 of 4</div>
+      <div class="step-title">Add your stores</div>
+      <div class="step-desc">Add at least one store to get started. You can always add more later.</div>
+
+      <div id="store-list" class="store-list"></div>
+
+      <div class="add-store-form" id="add-store-form">
+        <div style="font-size:12px;font-weight:500;color:var(--text2);margin-bottom:10px;">Add a store</div>
+        <div class="field" style="margin-bottom:10px;">
+          <label>Store name</label>
+          <input type="text" id="new-store-name" placeholder="e.g. Pampierstad Branch">
+        </div>
+        <div class="field" style="margin-bottom:10px;">
+          <label>Address</label>
+          <input type="text" id="new-store-address" placeholder="Town, Province">
+        </div>
+        <div class="field" style="margin-bottom:10px;">
+          <label>Uniform photo time</label>
+          <input type="time" id="new-store-time" value="08:30">
+        </div>
+        <button class="btn btn-secondary" onclick="addStore()" style="width:auto;padding:8px 16px;font-size:13px;">
+          + Add this store
+        </button>
+      </div>
+
+      <div id="alert3"></div>
+
+      <div class="btn-row">
+        <button class="btn btn-secondary" onclick="goStep(2)">Back</button>
+        <button class="btn btn-primary" onclick="goStep4()">
+          Continue
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- STEP 4: Invite team -->
+<div id="step4" class="page">
+  <div class="split">
+    <div class="split-left">
+      <div class="brand">
+        <div class="brand-icon">
+          <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+            <path d="M3 11L9 17L19 5" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <span class="brand-name">CompliTrack</span>
+      </div>
+      <div>
+        <div class="left-headline" style="font-size:24px;">Invite your team</div>
+        <div class="left-sub">Each store can have multiple logins. Managers handle sign-offs and financials. Staff complete daily tasks.</div>
+        <div style="background:rgba(255,255,255,0.07);border-radius:12px;padding:20px;margin-top:24px;">
+          <div style="font-size:12px;color:rgba(255,255,255,0.4);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:14px;">Role permissions</div>
+          <div style="display:flex;flex-direction:column;gap:12px;">
+            <div>
+              <div style="font-size:13px;font-weight:500;color:white;margin-bottom:4px;">Owner (you)</div>
+              <div style="font-size:12px;color:rgba(255,255,255,0.5);">All stores · financials · reports · invite team</div>
+            </div>
+            <div>
+              <div style="font-size:13px;font-weight:500;color:white;margin-bottom:4px;">Manager</div>
+              <div style="font-size:12px;color:rgba(255,255,255,0.5);">Their store · financials · sign-off · invite staff</div>
+            </div>
+            <div>
+              <div style="font-size:13px;font-weight:500;color:white;margin-bottom:4px;">Staff</div>
+              <div style="font-size:12px;color:rgba(255,255,255,0.5);">Checklists · photos · temperatures only</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="split-right">
+      <div class="steps">
+        <div class="step-dot done"></div>
+        <div class="step-dot done"></div>
+        <div class="step-dot done"></div>
+        <div class="step-dot active"></div>
+      </div>
+      <div class="step-label">Step 4 of 4</div>
+      <div class="step-title">Invite your team</div>
+      <div class="step-desc">This step is optional — you can invite people later from your dashboard.</div>
+
+      <div class="staff-list" id="staff-list"></div>
+
+      <div style="background:var(--surface2);border:1.5px dashed var(--border);border-radius:var(--radius-sm);padding:14px;margin-bottom:16px;">
+        <div style="font-size:12px;font-weight:500;color:var(--text2);margin-bottom:10px;">Invite a team member</div>
+        <div class="field" style="margin-bottom:10px;">
+          <label>Email address</label>
+          <input type="email" id="invite-email" placeholder="manager@store.co.za">
+        </div>
+        <div class="field-row" style="margin-bottom:10px;">
+          <div class="field" style="margin-bottom:0">
+            <label>Role</label>
+            <select id="invite-role">
+              <option value="manager">Manager</option>
+              <option value="staff">Staff member</option>
+            </select>
+          </div>
+          <div class="field" style="margin-bottom:0">
+            <label>Store</label>
+            <select id="invite-store"></select>
+          </div>
+        </div>
+        <button class="btn btn-secondary" onclick="addInvite()" style="width:auto;padding:8px 16px;font-size:13px;">
+          + Add to invite list
+        </button>
+      </div>
+
+      <div id="alert4"></div>
+
+      <div class="btn-row">
+        <button class="btn btn-secondary" onclick="goStep(3)">Back</button>
+        <button class="btn btn-primary" id="finish-btn" onclick="finishSetup()">
+          Launch CompliTrack
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SUCCESS -->
+<div id="success" class="page">
+  <div class="success-screen">
+    <div class="success-icon">
+      <svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="2.5">
+        <path d="M8 20L16 28L32 12" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </div>
+    <h1 style="font-size:28px;font-weight:600;margin-bottom:8px;">You're all set!</h1>
+    <p style="font-size:15px;color:var(--text2);margin-bottom:32px;max-width:400px;line-height:1.6;">Your CompliTrack account is ready. Invitation emails have been sent to your team members.</p>
+    <div style="background:var(--surface2);border-radius:var(--radius);padding:20px;margin-bottom:32px;text-align:left;width:100%;max-width:440px;">
+      <div style="font-size:12px;font-weight:500;color:var(--text3);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:12px;">Your account summary</div>
+      <div id="success-summary" style="font-size:13px;color:var(--text2);display:flex;flex-direction:column;gap:8px;"></div>
+    </div>
+    <a href="index.html" class="btn btn-primary" style="width:auto;padding:14px 32px;text-decoration:none;">
+      Open your dashboard →
+    </a>
+    <p style="font-size:12px;color:var(--text3);margin-top:16px;">Bookmark this URL: <strong id="dashboard-url"></strong></p>
+  </div>
+</div>
+
+<script>
+// ── CONFIG ────────────────────────────────────────────────────
+const SUPABASE_URL = 'https://YOUR_PROJECT_REF.supabase.co'
+const SUPABASE_KEY = 'your-anon-public-key-here'
+const USE_SUPABASE = !SUPABASE_URL.includes('YOUR_PROJECT_REF')
+
+const sb = USE_SUPABASE
+  ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY)
+  : null
+
+// ── STATE ─────────────────────────────────────────────────────
+const data = {
+  firstName: '', lastName: '', email: '', password: '',
+  orgName: '', industry: 'fast_food', storeCount: '1',
+  stores: [],
+  invites: [],
+}
+
+// ── NAVIGATION ────────────────────────────────────────────────
+function goStep(n) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'))
+  document.getElementById('step' + n).classList.add('active')
+  window.scrollTo(0, 0)
+}
+
+function showAlert(stepNum, msg, type = 'error') {
+  const el = document.getElementById('alert' + stepNum)
+  el.innerHTML = `<div class="alert alert-${type}">${msg}</div>`
+  setTimeout(() => el.innerHTML = '', 5000)
+}
+
+// ── STEP 1 VALIDATION ─────────────────────────────────────────
+function goStep2() {
+  const first = document.getElementById('first-name').value.trim()
+  const last  = document.getElementById('last-name').value.trim()
+  const email = document.getElementById('email').value.trim()
+  const pw    = document.getElementById('password').value
+  const pw2   = document.getElementById('password2').value
+
+  if (!first || !last) { showAlert(1, 'Please enter your full name'); return }
+  if (!email || !email.includes('@')) { showAlert(1, 'Please enter a valid email address'); return }
+  if (pw.length < 8) { showAlert(1, 'Password must be at least 8 characters'); return }
+  if (pw !== pw2) { showAlert(1, 'Passwords do not match'); return }
+
+  data.firstName = first
+  data.lastName  = last
+  data.email     = email
+  data.password  = pw
+  goStep(2)
+}
+
+// ── STEP 2 ────────────────────────────────────────────────────
+let selectedIndustry = 'fast_food'
+
+function selectIndustry(val, card) {
+  selectedIndustry = val
+  document.querySelectorAll('.industry-card').forEach(c => c.classList.remove('selected'))
+  card.classList.add('selected')
+}
+
+function goStep3() {
+  const orgName = document.getElementById('org-name').value.trim()
+  if (!orgName) { showAlert(2, 'Please enter your organisation name'); return }
+  data.orgName    = orgName
+  data.industry   = selectedIndustry
+  data.storeCount = document.getElementById('store-count').value
+  renderStoreList()
+  goStep(3)
+}
+
+// ── STEP 3 ────────────────────────────────────────────────────
+function addStore() {
+  const name    = document.getElementById('new-store-name').value.trim()
+  const address = document.getElementById('new-store-address').value.trim()
+  const time    = document.getElementById('new-store-time').value || '08:30'
+
+  if (!name) { showAlert(3, 'Please enter a store name'); return }
+
+  data.stores.push({ name, address, time })
+  document.getElementById('new-store-name').value = ''
+  document.getElementById('new-store-address').value = ''
+  renderStoreList()
+  updateInviteStoreSelect()
+}
+
+function removeStore(i) {
+  data.stores.splice(i, 1)
+  renderStoreList()
+  updateInviteStoreSelect()
+}
+
+function renderStoreList() {
+  const el = document.getElementById('store-list')
+  if (!data.stores.length) {
+    el.innerHTML = '<div style="text-align:center;padding:16px;color:var(--text3);font-size:13px;">No stores added yet — add your first store below</div>'
+    return
+  }
+  el.innerHTML = data.stores.map((s, i) => `
+    <div class="store-item">
+      <div style="width:32px;height:32px;background:var(--green-light);border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="var(--green)" stroke-width="1.5"><path d="M2 6l6-3 6 3v7H2V6z"/><rect x="5" y="9" width="6" height="4"/></svg>
+      </div>
+      <div style="flex:1;">
+        <div class="store-item-name">${s.name}</div>
+        <div class="store-item-meta">${s.address || 'No address'} · Uniform: ${s.time}</div>
+      </div>
+      <button class="store-item-remove" onclick="removeStore(${i})">×</button>
+    </div>`).join('')
+}
+
+function goStep4() {
+  if (!data.stores.length) { showAlert(3, 'Please add at least one store before continuing'); return }
+  updateInviteStoreSelect()
+  renderStaffList()
+  goStep(4)
+}
+
+// ── STEP 4 ────────────────────────────────────────────────────
+function updateInviteStoreSelect() {
+  const sel = document.getElementById('invite-store')
+  if (!sel) return
+  sel.innerHTML = data.stores.map((s, i) => `<option value="${i}">${s.name}</option>`).join('')
+}
+
+function addInvite() {
+  const email = document.getElementById('invite-email').value.trim()
+  const role  = document.getElementById('invite-role').value
+  const storeIdx = parseInt(document.getElementById('invite-store').value)
+
+  if (!email || !email.includes('@')) { showAlert(4, 'Please enter a valid email address'); return }
+  if (data.invites.find(i => i.email === email)) { showAlert(4, 'That email is already in the invite list'); return }
+
+  data.invites.push({ email, role, storeIdx, store: data.stores[storeIdx]?.name || '' })
+  document.getElementById('invite-email').value = ''
+  renderStaffList()
+}
+
+function removeInvite(i) {
+  data.invites.splice(i, 1)
+  renderStaffList()
+}
+
+function renderStaffList() {
+  const el = document.getElementById('staff-list')
+  if (!data.invites.length) {
+    el.innerHTML = '<div style="font-size:12px;color:var(--text3);padding:4px 0 12px;">No invites yet — add team members below, or skip and invite later</div>'
+    return
+  }
+  el.innerHTML = data.invites.map((inv, i) => {
+    const initials = inv.email.slice(0, 2).toUpperCase()
+    return `
+      <div class="staff-item">
+        <div class="staff-avatar">${initials}</div>
+        <div style="flex:1;">
+          <div class="staff-email">${inv.email}</div>
+          <div style="font-size:11px;color:var(--text3);">${inv.store}</div>
+        </div>
+        <span class="role-badge ${inv.role === 'manager' ? 'role-manager' : 'role-staff'}">${inv.role}</span>
+        <button class="store-item-remove" onclick="removeInvite(${i})">×</button>
+      </div>`
+  }).join('')
+}
+
+// ── FINISH SETUP ──────────────────────────────────────────────
+async function finishSetup() {
+  const btn = document.getElementById('finish-btn')
+  btn.disabled = true
+  btn.textContent = 'Setting up your account...'
+
+  try {
+    if (USE_SUPABASE) {
+      await createSupabaseAccount()
+    } else {
+      // Demo mode — simulate success
+      await new Promise(r => setTimeout(r, 1500))
+    }
+    showSuccess()
+  } catch(e) {
+    showAlert(4, 'Setup failed: ' + e.message)
+    btn.disabled = false
+    btn.innerHTML = 'Launch CompliTrack <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 8h10M9 4l4 4-4 4"/></svg>'
+  }
+}
+
+async function createSupabaseAccount() {
+  // 1. Create auth user
+  const { data: authData, error: authErr } = await sb.auth.signUp({
+    email: data.email,
+    password: data.password,
+    options: { data: { full_name: `${data.firstName} ${data.lastName}` } }
+  })
+  if (authErr) throw authErr
+  const userId = authData.user.id
+
+  // 2. Create organisation
+  const { data: org, error: orgErr } = await sb.from('organisations')
+    .insert({ name: data.orgName, industry: data.industry, subscription_plan: 'starter' })
+    .select().single()
+  if (orgErr) throw orgErr
+
+  // 3. Create stores
+  const storeIds = []
+  for (const store of data.stores) {
+    const { data: s, error: sErr } = await sb.from('stores')
+      .insert({
+        organisation_id: org.id,
+        name: store.name,
+        address: store.address,
+        uniform_photo_time: store.time,
+      })
+      .select().single()
+    if (sErr) throw sErr
+    storeIds.push(s.id)
+  }
+
+  // 4. Update owner profile
+  const { error: pErr } = await sb.from('profiles')
+    .upsert({
+      id: userId,
+      full_name: `${data.firstName} ${data.lastName}`,
+      role: 'owner',
+      organisation_id: org.id,
+      store_id: storeIds[0] || null,
+    })
+  if (pErr) throw pErr
+
+  // 5. Send invites via Supabase auth invite
+  for (const inv of data.invites) {
+    try {
+      await sb.auth.admin.inviteUserByEmail(inv.email, {
+        data: {
+          role: inv.role,
+          organisation_id: org.id,
+          store_id: storeIds[inv.storeIdx] || storeIds[0],
+        }
+      })
+    } catch(e) {
+      // Non-critical — invites can fail silently and be resent
+      console.warn('Invite failed for', inv.email, e.message)
+    }
+  }
+}
+
+function showSuccess() {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'))
+  document.getElementById('success').classList.add('active')
+
+  const url = window.location.origin + '/index.html'
+  document.getElementById('dashboard-url').textContent = url
+
+  document.getElementById('success-summary').innerHTML = `
+    <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);">
+      <span>Organisation</span><strong>${data.orgName}</strong>
+    </div>
+    <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);">
+      <span>Industry</span><strong style="text-transform:capitalize">${data.industry.replace('_',' ')}</strong>
+    </div>
+    <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);">
+      <span>Stores created</span><strong>${data.stores.length}</strong>
+    </div>
+    <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);">
+      <span>Team invites sent</span><strong>${data.invites.length}</strong>
+    </div>
+    <div style="display:flex;justify-content:space-between;padding:6px 0;">
+      <span>Your role</span><strong>Owner</strong>
+    </div>`
+}
+
+// ── INIT ──────────────────────────────────────────────────────
+renderStoreList()
+renderStaffList()
+</script>
+</body>
+</html>
