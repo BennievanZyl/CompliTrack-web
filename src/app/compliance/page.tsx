@@ -17,6 +17,7 @@ type Session = {
   pdf_report_url: string | null;
   started_at: string | null;
   duration_seconds: number | null;
+  opened_by: string | null;
 };
 
 type ChecklistItem = {
@@ -94,7 +95,6 @@ export default function CompliancePage() {
   const sessionRef = useRef<Session | null>(null);
 
   useEffect(() => { checkAuthAndLoad(); }, []);
-
   useEffect(() => { sessionRef.current = session; }, [session]);
 
   useEffect(() => {
@@ -160,9 +160,26 @@ export default function CompliancePage() {
     setComments(data || []);
   }
 
+  async function getOrCreateConversation(recipientId: string): Promise<string | null> {
+    if (!currentUser) return null;
+    const { data: existing } = await supabase
+      .from('conversations')
+      .select('id')
+      .or(`and(participant_1.eq.${currentUser.id},participant_2.eq.${recipientId}),and(participant_1.eq.${recipientId},participant_2.eq.${currentUser.id})`)
+      .single();
+    if (existing) return existing.id;
+    const { data: newConv } = await supabase
+      .from('conversations')
+      .insert({ participant_1: currentUser.id, participant_2: recipientId })
+      .select()
+      .single();
+    return newConv?.id || null;
+  }
+
   async function sendComment() {
     if (!newComment.trim() || !selectedItem || !session || !currentUser) return;
     setSendingComment(true);
+
     await supabase.from('compliance_comments').insert({
       checklist_item_id: selectedItem.id,
       session_id: session.id,
@@ -170,6 +187,27 @@ export default function CompliancePage() {
       sender_id: currentUser.id,
       message: newComment.trim(),
     });
+
+    const recipientId = session.opened_by;
+    if (recipientId && recipientId !== currentUser.id) {
+      const convId = await getOrCreateConversation(recipientId);
+      if (convId) {
+        const taskName = selectedItem.checklist_templates?.task_name || 'Checklist item';
+        const sessionDate = new Date(session.session_date).toLocaleDateString('en-ZA');
+        const chatMessage = `Compliance query on "${taskName}" (${sessionDate}): ${newComment.trim()}`;
+        await supabase.from('chat_messages').insert({
+          conversation_id: convId,
+          sender_id: currentUser.id,
+          recipient_id: recipientId,
+          message: chatMessage,
+        });
+        await supabase.from('conversations').update({
+          last_message: chatMessage,
+          last_message_at: new Date().toISOString(),
+        }).eq('id', convId);
+      }
+    }
+
     setNewComment('');
     await loadComments(selectedItem.id);
     setSendingComment(false);
@@ -206,7 +244,6 @@ export default function CompliancePage() {
   return (
     <div style={{ minHeight: '100vh', background: '#f8faf8', fontFamily: 'system-ui, sans-serif' }}>
 
-      {/* Lightbox */}
       {lightboxUrl && (
         <div onClick={() => setLightboxUrl(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.92)', zIndex: 1000, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
           <div style={{ color: '#fff', fontSize: 14, marginBottom: 16, opacity: 0.7 }}>{lightboxTitle}</div>
@@ -215,7 +252,6 @@ export default function CompliancePage() {
         </div>
       )}
 
-      {/* Item Detail + Comments Panel */}
       {selectedItem && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 900, display: 'flex', alignItems: 'flex-end', justifyContent: 'flex-end' }}>
           <div style={{ background: '#fff', width: 420, height: '100vh', display: 'flex', flexDirection: 'column', boxShadow: '-4px 0 24px rgba(0,0,0,0.15)' }}>
@@ -252,22 +288,25 @@ export default function CompliancePage() {
               {selectedItem.photo_url && (
                 <div style={{ marginBottom: 24 }}>
                   <div style={{ fontSize: 13, fontWeight: 600, color: '#333', marginBottom: 8 }}>Photo Evidence</div>
-                  <img
-                    src={selectedItem.photo_url}
-                    alt="evidence"
-                    onClick={() => { setLightboxUrl(selectedItem.photo_url!); setLightboxTitle(selectedItem.checklist_templates?.task_name || ''); }}
-                    style={{ width: '100%', borderRadius: 12, objectFit: 'cover', cursor: 'zoom-in', maxHeight: 280 }}
-                  />
-                  <div style={{ fontSize: 11, color: '#aaa', marginTop: 6, textAlign: 'center' }}>Tap to enlarge</div>
+                  <div style={{ position: 'relative', cursor: 'zoom-in' }} onClick={() => { setLightboxUrl(selectedItem.photo_url!); setLightboxTitle(selectedItem.checklist_templates?.task_name || ''); }}>
+                    <img src={selectedItem.photo_url} alt="evidence" style={{ width: '100%', borderRadius: 12, objectFit: 'cover', maxHeight: 280 }} />
+                    <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.2)', borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <span style={{ color: '#fff', fontSize: 32, fontWeight: 300 }}>+</span>
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 11, color: '#aaa', marginTop: 6, textAlign: 'center' }}>Tap to enlarge for inspection</div>
                 </div>
               )}
 
               <div>
-                <div style={{ fontSize: 13, fontWeight: 600, color: '#333', marginBottom: 12 }}>Comments & Follow-up</div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: '#333', marginBottom: 12 }}>
+                  Comments & Follow-up
+                  {comments.length > 0 && <span style={{ marginLeft: 8, background: PRIMARY, color: '#fff', borderRadius: 20, padding: '2px 8px', fontSize: 11 }}>{comments.length}</span>}
+                </div>
                 {comments.length === 0 && (
                   <div style={{ textAlign: 'center', padding: '24px 0', color: '#ccc', fontSize: 13 }}>No comments yet. Flag an issue below.</div>
                 )}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                   {comments.map(c => {
                     const isMe = c.sender_id === currentUser?.id;
                     return (
@@ -284,17 +323,22 @@ export default function CompliancePage() {
               </div>
             </div>
 
-            <div style={{ padding: '16px 24px', borderTop: '1px solid #eef2ee', display: 'flex', gap: 10 }}>
-              <input
-                value={newComment}
-                onChange={e => setNewComment(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && sendComment()}
-                placeholder="Flag an issue or add a comment..."
-                style={{ flex: 1, padding: '10px 14px', borderRadius: 10, border: '1.5px solid #eef2ee', fontSize: 14, outline: 'none', fontFamily: 'inherit' }}
-              />
-              <button onClick={sendComment} disabled={sendingComment || !newComment.trim()} style={{ padding: '10px 18px', background: newComment.trim() ? PRIMARY : '#eee', color: newComment.trim() ? '#fff' : '#aaa', border: 'none', borderRadius: 10, fontWeight: 700, cursor: newComment.trim() ? 'pointer' : 'default', fontSize: 14 }}>
-                Send
-              </button>
+            <div style={{ padding: '16px 24px', borderTop: '1px solid #eef2ee', background: '#f8faf8' }}>
+              {currentUser?.role === 'franchisor_admin' || currentUser?.role === 'platform_admin' ? (
+                <div style={{ marginBottom: 8, fontSize: 12, color: '#888', fontStyle: 'italic' }}>This comment will also be sent as a chat message to the store manager.</div>
+              ) : null}
+              <div style={{ display: 'flex', gap: 10 }}>
+                <input
+                  value={newComment}
+                  onChange={e => setNewComment(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && sendComment()}
+                  placeholder="Flag an issue or add a comment..."
+                  style={{ flex: 1, padding: '10px 14px', borderRadius: 10, border: '1.5px solid #eef2ee', fontSize: 14, outline: 'none', fontFamily: 'inherit', background: '#fff' }}
+                />
+                <button onClick={sendComment} disabled={sendingComment || !newComment.trim()} style={{ padding: '10px 18px', background: newComment.trim() ? PRIMARY : '#eee', color: newComment.trim() ? '#fff' : '#aaa', border: 'none', borderRadius: 10, fontWeight: 700, cursor: newComment.trim() ? 'pointer' : 'default', fontSize: 14 }}>
+                  {sendingComment ? '...' : 'Send'}
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -356,6 +400,7 @@ export default function CompliancePage() {
             )}
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 20, marginBottom: 32 }}>
+
               <div style={cardStyle}>
                 <div style={labelStyle}>CHECKLIST</div>
                 <div style={{ fontSize: 36, fontWeight: 800, color: pctColor }}>{pct}%</div>
@@ -380,7 +425,11 @@ export default function CompliancePage() {
               <div style={cardStyle}>
                 <div style={labelStyle}>TIME TAKEN</div>
                 <div style={{ fontSize: 22, fontWeight: 800, color: PRIMARY }}>
-                  {session.duration_seconds ? formatDuration(session.duration_seconds) : session.started_at && session.status !== 'signed_off' ? elapsed : 'Not started'}
+                  {session.duration_seconds
+                    ? formatDuration(session.duration_seconds)
+                    : session.started_at && session.status !== 'signed_off'
+                    ? elapsed
+                    : 'Not started'}
                 </div>
                 <div style={{ fontSize: 13, color: '#888', marginTop: 4 }}>compliance duration</div>
               </div>
@@ -396,6 +445,7 @@ export default function CompliancePage() {
                 <div style={{ fontSize: 36, fontWeight: 800, color: tempColor }}>{tempLogs.length === 0 ? '-' : `${tempCompliant}/${tempLogs.length}`}</div>
                 <div style={{ fontSize: 13, color: '#888', marginTop: 4 }}>readings compliant</div>
               </div>
+
             </div>
 
             <div style={{ display: 'flex', gap: 4, marginBottom: 24, background: '#fff', padding: 4, borderRadius: 14, border: '1px solid #eef2ee', width: 'fit-content' }}>
@@ -423,7 +473,7 @@ export default function CompliancePage() {
                         </div>
                       </div>
                       {items.map((item, idx) => (
-                        <div key={item.id} style={{ padding: '14px 24px', display: 'flex', alignItems: 'center', gap: 14, borderBottom: idx < items.length - 1 ? '1px solid #f0f4f0' : 'none', cursor: 'pointer' }} onClick={() => openItemDetail(item)}>
+                        <div key={item.id} onClick={() => openItemDetail(item)} style={{ padding: '14px 24px', display: 'flex', alignItems: 'center', gap: 14, borderBottom: idx < items.length - 1 ? '1px solid #f0f4f0' : 'none', cursor: 'pointer' }}>
                           <div style={{ width: 28, height: 28, borderRadius: '50%', flexShrink: 0, background: item.completed ? PRIMARY : '#eef2ee', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 14, fontWeight: 700 }}>
                             {item.completed ? 'v' : ''}
                           </div>
@@ -434,15 +484,10 @@ export default function CompliancePage() {
                           </div>
                           {item.completed_at && <div style={{ fontSize: 11, color: '#bbb', whiteSpace: 'nowrap' }}>{new Date(item.completed_at).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })}</div>}
                           {item.photo_url && (
-                            <div style={{ position: 'relative' }}>
-                              <img
-                                src={item.photo_url}
-                                alt="task"
-                                onClick={e => { e.stopPropagation(); setLightboxUrl(item.photo_url!); setLightboxTitle(item.checklist_templates?.task_name || ''); }}
-                                style={{ width: 48, height: 48, borderRadius: 8, objectFit: 'cover', cursor: 'zoom-in', border: '2px solid #eef2ee' }}
-                              />
-                              <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.3)', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'zoom-in', pointerEvents: 'none' }}>
-                                <span style={{ color: '#fff', fontSize: 16 }}>+</span>
+                            <div style={{ position: 'relative' }} onClick={e => { e.stopPropagation(); setLightboxUrl(item.photo_url!); setLightboxTitle(item.checklist_templates?.task_name || ''); }}>
+                              <img src={item.photo_url} alt="task" style={{ width: 48, height: 48, borderRadius: 8, objectFit: 'cover', border: '2px solid #eef2ee' }} />
+                              <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.3)', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                <span style={{ color: '#fff', fontSize: 18, fontWeight: 300 }}>+</span>
                               </div>
                             </div>
                           )}
@@ -461,7 +506,12 @@ export default function CompliancePage() {
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 20 }}>
                   {uniforms.map(u => (
                     <div key={u.id} style={{ background: '#fff', borderRadius: 20, border: '1px solid #eef2ee', overflow: 'hidden' }}>
-                      <img src={u.photo_url} alt="uniform" onClick={() => { setLightboxUrl(u.photo_url); setLightboxTitle('Uniform Check'); }} style={{ width: '100%', height: 220, objectFit: 'cover', cursor: 'zoom-in' }} />
+                      <div style={{ position: 'relative', cursor: 'zoom-in' }} onClick={() => { setLightboxUrl(u.photo_url); setLightboxTitle('Uniform Check'); }}>
+                        <img src={u.photo_url} alt="uniform" style={{ width: '100%', height: 220, objectFit: 'cover' }} />
+                        <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <span style={{ color: '#fff', fontSize: 32, fontWeight: 300 }}>+</span>
+                        </div>
+                      </div>
                       <div style={{ padding: 16 }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                           <span style={{ fontSize: 13, color: '#666' }}>{new Date(u.taken_at).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })}</span>
