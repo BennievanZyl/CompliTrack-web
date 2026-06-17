@@ -29,6 +29,12 @@ type CashUp = {
   signed_by_name: string | null; signed_off_at: string | null;
 };
 
+type StaffMember = {
+  id: string;
+  full_name: string;
+  role: string;
+};
+
 const DENOMS = [
   { key: 'r200', label: 'R200', value: 200 },
   { key: 'r100', label: 'R100', value: 100 },
@@ -50,6 +56,7 @@ export default function CashUpPage() {
   const router = useRouter();
   const [cashUp, setCashUp] = useState<CashUp | null>(null);
   const [history, setHistory] = useState<CashUp[]>([]);
+  const [staff, setStaff] = useState<StaffMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [activeStep, setActiveStep] = useState(1);
@@ -76,18 +83,50 @@ export default function CashUpPage() {
   async function checkAuthAndLoad() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { router.push('/login'); return; }
-    await loadCashUp();
+    await Promise.all([loadCashUp(), loadStaff()]);
+  }
+
+  async function loadStaff() {
+    const { data } = await supabase
+      .from('store_staff')
+      .select('id, full_name, role')
+      .eq('store_id', STORE_ID)
+      .order('full_name');
+    setStaff(data || []);
   }
 
   async function loadCashUp() {
     setLoading(true);
     const today = new Date().toISOString().split('T')[0];
     const { data: todayCashUp } = await supabase
-      .from('cash_ups').select('*').eq('store_id', STORE_ID).eq('cash_up_date', today).single();
-    if (todayCashUp) { setCashUp(todayCashUp); populateForm(todayCashUp); }
+      .from('cash_ups').select('*')
+      .eq('store_id', STORE_ID)
+      .eq('cash_up_date', today)
+      .maybeSingle();
+
+    if (todayCashUp) {
+      setCashUp(todayCashUp);
+      populateForm(todayCashUp);
+    } else {
+      // Auto-fill previous float from yesterday
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      const { data: yesterdayCashUp } = await supabase
+        .from('cash_ups')
+        .select('float_total')
+        .eq('store_id', STORE_ID)
+        .eq('cash_up_date', yesterday.toISOString().split('T')[0])
+        .maybeSingle();
+      if (yesterdayCashUp?.float_total) {
+        setRecon(p => ({ ...p, previous_float: yesterdayCashUp.float_total.toString() }));
+      }
+    }
+
     const { data: hist } = await supabase
-      .from('cash_ups').select('*').eq('store_id', STORE_ID)
-      .order('cash_up_date', { ascending: false }).limit(14);
+      .from('cash_ups').select('*')
+      .eq('store_id', STORE_ID)
+      .order('cash_up_date', { ascending: false })
+      .limit(14);
     setHistory(hist || []);
     setLoading(false);
   }
@@ -120,11 +159,11 @@ export default function CashUpPage() {
   const isSignedOff = cashUp?.status === 'signed_off';
   const readOnly = isSignedOff;
 
-  async function saveDraft() {
-    setSaving(true);
-    const today = new Date().toISOString().split('T')[0];
-    const payload = {
-      store_id: STORE_ID, organisation_id: ORG_ID, cash_up_date: today,
+  function buildPayload(status: string) {
+    return {
+      store_id: STORE_ID,
+      organisation_id: ORG_ID,
+      cash_up_date: new Date().toISOString().split('T')[0],
       r200: bankDenoms.r200, r100: bankDenoms.r100, r50: bankDenoms.r50,
       r20: bankDenoms.r20, r10: bankDenoms.r10, r5: bankDenoms.r5,
       r2: bankDenoms.r2, r1: bankDenoms.r1, r050: bankDenoms.r050,
@@ -141,44 +180,51 @@ export default function CashUpPage() {
       bank_deposit_amount: recon.bank_deposit_amount ? parseFloat(recon.bank_deposit_amount) : null,
       bank_reference: recon.bank_reference || null,
       customer_count: customers, average_spend: avgSpend,
-      notes: notes || null, status: 'draft',
+      notes: notes || null,
+      status,
     };
-    if (cashUp) {
-      await supabase.from('cash_ups').update(payload).eq('id', cashUp.id);
-    } else {
-      const { data } = await supabase.from('cash_ups').insert(payload).select().single();
-      if (data) setCashUp(data);
+  }
+
+  async function saveDraft() {
+    setSaving(true);
+    try {
+      const payload = buildPayload('draft');
+      if (cashUp?.id) {
+        await supabase.from('cash_ups').update(payload).eq('id', cashUp.id);
+      } else {
+        const { data, error } = await supabase.from('cash_ups').insert(payload).select().single();
+        if (error) throw error;
+        if (data) setCashUp(data);
+      }
+      await loadCashUp();
+    } catch (e) {
+      console.error('Save error:', e);
     }
-    await loadCashUp();
     setSaving(false);
   }
 
   async function signOff() {
-    if (!signedByName.trim() || !cashUp) return;
+    if (!signedByName.trim()) return;
     setSaving(true);
-    await supabase.from('cash_ups').update({
-      signed_by_name: signedByName,
-      signed_off_at: new Date().toISOString(),
-      status: 'signed_off',
-      notes: notes || null,
-      r200: bankDenoms.r200, r100: bankDenoms.r100, r50: bankDenoms.r50,
-      r20: bankDenoms.r20, r10: bankDenoms.r10, r5: bankDenoms.r5,
-      r2: bankDenoms.r2, r1: bankDenoms.r1, r050: bankDenoms.r050,
-      r020: bankDenoms.r020, r010: bankDenoms.r010, r005: bankDenoms.r005,
-      float_r200: floatDenoms.r200, float_r100: floatDenoms.r100, float_r50: floatDenoms.r50,
-      float_r20: floatDenoms.r20, float_r10: floatDenoms.r10, float_r5: floatDenoms.r5,
-      float_r2: floatDenoms.r2, float_r1: floatDenoms.r1, float_r050: floatDenoms.r050,
-      float_r020: floatDenoms.r020, float_r010: floatDenoms.r010, float_r005: floatDenoms.r005,
-      float_total: floatTotal, bank_total: bankTotal, total_cash: totalCash,
-      previous_float: prevFloat, eft_total: eft, payouts,
-      a_total: aTotal, pos_slip_total: posSlip, voids,
-      cash_up_total: cashUpTotal, variance,
-      banked: recon.banked,
-      bank_deposit_amount: recon.bank_deposit_amount ? parseFloat(recon.bank_deposit_amount) : null,
-      bank_reference: recon.bank_reference || null,
-      customer_count: customers, average_spend: avgSpend,
-    }).eq('id', cashUp.id);
-    await loadCashUp();
+    try {
+      const payload = {
+        ...buildPayload('signed_off'),
+        signed_by_name: signedByName.trim(),
+        signed_off_at: new Date().toISOString(),
+      };
+      if (cashUp?.id) {
+        const { error } = await supabase.from('cash_ups').update(payload).eq('id', cashUp.id);
+        if (error) throw error;
+      } else {
+        const { data, error } = await supabase.from('cash_ups').insert(payload).select().single();
+        if (error) throw error;
+        if (data) setCashUp(data);
+      }
+      await loadCashUp();
+    } catch (e) {
+      console.error('Sign off error:', e);
+      alert('Sign off failed — check console for details');
+    }
     setSaving(false);
   }
 
@@ -187,12 +233,10 @@ export default function CashUpPage() {
     if (!c) return;
     const vColor = c.variance === 0 ? '#1a5c38' : c.variance > 0 ? '#f59e0b' : '#ef4444';
     const vLabel = c.variance === 0 ? 'BALANCED' : c.variance > 0 ? `OVER by R ${Math.abs(c.variance).toFixed(2)}` : `SHORT by R ${Math.abs(c.variance).toFixed(2)}`;
-    const win = window.open('', '_blank');
-    if (!win) return;
     const denomRows = DENOMS.map(d => {
       const bankQty = c[d.key as keyof CashUp] as number;
       const floatQty = c[`float_${d.key}` as keyof CashUp] as number;
-      if (bankQty === 0 && floatQty === 0) return '';
+      if (!bankQty && !floatQty) return '';
       return `<tr>
         <td>${d.label}</td>
         <td class="right">${floatQty || 0}</td>
@@ -202,64 +246,57 @@ export default function CashUpPage() {
         <td class="right">R ${((bankQty || 0) * d.value).toFixed(2)}</td>
       </tr>`;
     }).join('');
-
+    const win = window.open('', '_blank');
+    if (!win) return;
     win.document.write(`<!DOCTYPE html><html><head><title>Cash Up - ${c.cash_up_date}</title><style>
-      @page { size: A4; margin: 18mm 20mm; }
-      * { box-sizing: border-box; margin: 0; padding: 0; }
-      body { font-family: Arial, sans-serif; font-size: 11px; color: #111; }
-      .header { text-align: center; padding-bottom: 12px; margin-bottom: 16px; border-bottom: 3px solid #1a5c38; }
-      .header h1 { font-size: 22px; color: #1a5c38; font-weight: 900; }
-      .header h2 { font-size: 13px; color: #444; margin-top: 2px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; }
-      .header p { font-size: 11px; color: #888; margin-top: 4px; }
-      .meta { display: flex; justify-content: space-between; background: #f0f7f2; padding: 10px 14px; border-radius: 6px; margin-bottom: 16px; font-size: 11px; }
-      .meta strong { color: #1a5c38; }
-      .section-title { font-size: 11px; font-weight: 800; color: #1a5c38; text-transform: uppercase; letter-spacing: 0.8px; border-bottom: 2px solid #1a5c38; padding-bottom: 3px; margin-bottom: 8px; }
-      table { width: 100%; border-collapse: collapse; font-size: 11px; margin-bottom: 16px; }
-      td, th { padding: 5px 6px; }
-      th { background: #1a5c38; color: #fff; font-weight: 700; text-align: left; }
-      th.right, td.right { text-align: right; }
-      tr:nth-child(even) td { background: #f8f8f8; }
-      .total-row td { font-weight: 800; background: #e8f5e9; border-top: 2px solid #1a5c38; }
-      td.divider { width: 12px; background: #fff; border-left: 2px dashed #ccc; border-right: 2px dashed #ccc; }
-      th.divider { background: #fff; border-left: 2px dashed #ccc; border-right: 2px dashed #ccc; }
-      .col-header { background: #0a1f12; color: #fff; text-align: center; font-weight: 800; font-size: 11px; padding: 6px; }
-      .two-col { display: flex; gap: 16px; margin-bottom: 16px; }
-      .two-col > div { flex: 1; }
-      .recon-row { display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid #eee; font-size: 11px; }
-      .recon-row.subtotal { font-weight: 800; background: #e8f5e9; padding: 6px 4px; margin-top: 2px; border-top: 2px solid #1a5c38; border-bottom: none; }
-      .variance-box { border: 3px solid ${vColor}; background: ${c.variance === 0 ? '#e8f5e9' : c.variance > 0 ? '#fff8e1' : '#fdecea'}; padding: 14px 20px; border-radius: 8px; text-align: center; margin: 14px 0; }
-      .variance-label { font-size: 10px; font-weight: 800; color: ${vColor}; text-transform: uppercase; letter-spacing: 1px; }
-      .variance-amount { font-size: 30px; font-weight: 900; color: ${vColor}; margin: 4px 0; }
-      .variance-status { font-size: 14px; font-weight: 800; color: ${vColor}; }
-      .notes-box { border: 1px solid #ddd; padding: 8px 10px; border-radius: 4px; min-height: 50px; font-size: 11px; color: #333; line-height: 1.5; }
-      .sign-section { display: flex; justify-content: space-between; margin-top: 24px; padding-top: 16px; border-top: 2px solid #1a5c38; }
-      .sign-block { text-align: center; }
-      .sign-line { border-bottom: 1px solid #333; width: 160px; margin: 35px auto 6px; }
-      .sign-label { font-size: 10px; color: #666; }
-      .sign-name { font-size: 11px; font-weight: 700; color: #333; margin-top: 3px; }
-      .footer { margin-top: 20px; text-align: center; font-size: 9px; color: #aaa; border-top: 1px solid #eee; padding-top: 8px; }
-      .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 800; }
-      .badge-green { background: #e8f5e9; color: #1a5c38; }
-      .badge-amber { background: #fff8e1; color: #f59e0b; }
-      .totals-summary { display: flex; gap: 12px; margin-bottom: 16px; }
-      .total-pill { flex: 1; background: #f0f7f2; border: 2px solid #1a5c38; border-radius: 8px; padding: 10px; text-align: center; }
-      .total-pill .label { font-size: 9px; color: #666; text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px; }
-      .total-pill .amount { font-size: 16px; font-weight: 900; color: #1a5c38; margin-top: 2px; }
+      @page{size:A4;margin:18mm 20mm}*{box-sizing:border-box;margin:0;padding:0}
+      body{font-family:Arial,sans-serif;font-size:11px;color:#111}
+      .header{text-align:center;padding-bottom:12px;margin-bottom:16px;border-bottom:3px solid #1a5c38}
+      .header h1{font-size:22px;color:#1a5c38;font-weight:900}
+      .header h2{font-size:13px;color:#444;margin-top:2px;font-weight:600;letter-spacing:1px;text-transform:uppercase}
+      .header p{font-size:11px;color:#888;margin-top:4px}
+      .meta{display:flex;justify-content:space-between;background:#f0f7f2;padding:10px 14px;border-radius:6px;margin-bottom:16px;font-size:11px}
+      .meta strong{color:#1a5c38}
+      .section-title{font-size:11px;font-weight:800;color:#1a5c38;text-transform:uppercase;letter-spacing:.8px;border-bottom:2px solid #1a5c38;padding-bottom:3px;margin-bottom:8px}
+      table{width:100%;border-collapse:collapse;font-size:11px;margin-bottom:16px}
+      td,th{padding:5px 6px}
+      th{background:#1a5c38;color:#fff;font-weight:700;text-align:left}
+      th.right,td.right{text-align:right}
+      tr:nth-child(even) td{background:#f8f8f8}
+      .total-row td{font-weight:800;background:#e8f5e9;border-top:2px solid #1a5c38}
+      td.divider{width:12px;background:#fff;border-left:2px dashed #ccc;border-right:2px dashed #ccc}
+      th.divider{background:#fff;border-left:2px dashed #ccc;border-right:2px dashed #ccc}
+      .col-header{background:#0a1f12;color:#fff;text-align:center;font-weight:800;font-size:11px;padding:6px}
+      .two-col{display:flex;gap:16px;margin-bottom:16px}
+      .two-col>div{flex:1}
+      .recon-row{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #eee;font-size:11px}
+      .recon-row.subtotal{font-weight:800;background:#e8f5e9;padding:6px 4px;margin-top:2px;border-top:2px solid #1a5c38;border-bottom:none}
+      .variance-box{border:3px solid ${vColor};background:${c.variance===0?'#e8f5e9':c.variance>0?'#fff8e1':'#fdecea'};padding:14px 20px;border-radius:8px;text-align:center;margin:14px 0}
+      .variance-label{font-size:10px;font-weight:800;color:${vColor};text-transform:uppercase;letter-spacing:1px}
+      .variance-amount{font-size:30px;font-weight:900;color:${vColor};margin:4px 0}
+      .variance-status{font-size:14px;font-weight:800;color:${vColor}}
+      .notes-box{border:1px solid #ddd;padding:8px 10px;border-radius:4px;min-height:50px;font-size:11px;color:#333;line-height:1.5}
+      .sign-section{display:flex;justify-content:space-between;margin-top:24px;padding-top:16px;border-top:2px solid #1a5c38}
+      .sign-block{text-align:center}
+      .sign-line{border-bottom:1px solid #333;width:160px;margin:35px auto 6px}
+      .sign-label{font-size:10px;color:#666}
+      .sign-name{font-size:11px;font-weight:700;color:#333;margin-top:3px}
+      .footer{margin-top:20px;text-align:center;font-size:9px;color:#aaa;border-top:1px solid #eee;padding-top:8px}
+      .badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:800}
+      .badge-green{background:#e8f5e9;color:#1a5c38}
+      .badge-amber{background:#fff8e1;color:#f59e0b}
+      .totals-summary{display:flex;gap:12px;margin-bottom:16px}
+      .total-pill{flex:1;background:#f0f7f2;border:2px solid #1a5c38;border-radius:8px;padding:10px;text-align:center}
+      .total-pill .label{font-size:9px;color:#666;text-transform:uppercase;font-weight:700;letter-spacing:.5px}
+      .total-pill .amount{font-size:16px;font-weight:900;color:#1a5c38;margin-top:2px}
     </style></head><body>
-
-    <div class="header">
-      <h1>CompliTrack</h1>
-      <h2>Daily Cash Up Report</h2>
-      <p>${STORE_NAME}</p>
-    </div>
-
+    <div class="header"><h1>CompliTrack</h1><h2>Daily Cash Up Report</h2><p>${STORE_NAME}</p></div>
     <div class="meta">
-      <div><strong>Date:</strong> ${new Date(c.cash_up_date).toLocaleDateString('en-ZA', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</div>
-      <div><strong>Status:</strong> <span class="badge ${c.status === 'signed_off' ? 'badge-green' : 'badge-amber'}">${c.status === 'signed_off' ? 'SIGNED OFF' : 'DRAFT'}</span></div>
-      <div><strong>Signed by:</strong> ${c.signed_by_name || '—'}</div>
-      <div><strong>Time:</strong> ${c.signed_off_at ? new Date(c.signed_off_at).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : '—'}</div>
+      <div><strong>Date:</strong> ${new Date(c.cash_up_date).toLocaleDateString('en-ZA',{weekday:'long',day:'numeric',month:'long',year:'numeric'})}</div>
+      <div><strong>Status:</strong> <span class="badge ${c.status==='signed_off'?'badge-green':'badge-amber'}">${c.status==='signed_off'?'SIGNED OFF':'DRAFT'}</span></div>
+      <div><strong>Signed by:</strong> ${c.signed_by_name||'—'}</div>
+      <div><strong>Time:</strong> ${c.signed_off_at?new Date(c.signed_off_at).toLocaleTimeString('en-ZA',{hour:'2-digit',minute:'2-digit'}):'—'}</div>
     </div>
-
     <div class="section-title">Cash Count</div>
     <div class="totals-summary">
       <div class="total-pill"><div class="label">Till Float</div><div class="amount">R ${c.float_total.toFixed(2)}</div></div>
@@ -267,28 +304,11 @@ export default function CashUpPage() {
       <div class="total-pill"><div class="label">Total Cash</div><div class="amount">R ${c.total_cash.toFixed(2)}</div></div>
     </div>
     <table>
-      <tr>
-        <th rowspan="2">Denom</th>
-        <th colspan="2" class="col-header" style="text-align:center">TILL FLOAT</th>
-        <th class="divider"></th>
-        <th colspan="2" class="col-header" style="text-align:center">TO BANK</th>
-      </tr>
-      <tr>
-        <th class="right">Qty</th><th class="right">Value</th>
-        <th class="divider"></th>
-        <th class="right">Qty</th><th class="right">Value</th>
-      </tr>
+      <tr><th rowspan="2">Denom</th><th colspan="2" class="col-header" style="text-align:center">TILL FLOAT</th><th class="divider"></th><th colspan="2" class="col-header" style="text-align:center">TO BANK</th></tr>
+      <tr><th class="right">Qty</th><th class="right">Value</th><th class="divider"></th><th class="right">Qty</th><th class="right">Value</th></tr>
       ${denomRows}
-      <tr class="total-row">
-        <td><strong>TOTAL</strong></td>
-        <td></td>
-        <td class="right"><strong>R ${c.float_total.toFixed(2)}</strong></td>
-        <td class="divider"></td>
-        <td></td>
-        <td class="right"><strong>R ${c.bank_total.toFixed(2)}</strong></td>
-      </tr>
+      <tr class="total-row"><td><strong>TOTAL</strong></td><td></td><td class="right"><strong>R ${c.float_total.toFixed(2)}</strong></td><td class="divider"></td><td></td><td class="right"><strong>R ${c.bank_total.toFixed(2)}</strong></td></tr>
     </table>
-
     <div class="two-col">
       <div>
         <div class="section-title">Reconciliation</div>
@@ -301,41 +321,48 @@ export default function CashUpPage() {
         <div class="recon-row"><span>POS Slip Total</span><span>R ${c.pos_slip_total.toFixed(2)}</span></div>
         <div class="recon-row"><span>Less: Voids</span><span>— R ${c.voids.toFixed(2)}</span></div>
         <div class="recon-row subtotal"><span><strong>Cash Up Total</strong></span><span><strong>R ${c.cash_up_total.toFixed(2)}</strong></span></div>
-        ${c.banked ? `<br/><div class="recon-row"><span>Bank Deposit</span><span>R ${(c.bank_deposit_amount || 0).toFixed(2)}</span></div><div class="recon-row"><span>Bank Ref</span><span>${c.bank_reference || '—'}</span></div>` : ''}
+        ${c.banked?`<br/><div class="recon-row"><span>Bank Deposit</span><span>R ${(c.bank_deposit_amount||0).toFixed(2)}</span></div><div class="recon-row"><span>Bank Ref</span><span>${c.bank_reference||'—'}</span></div>`:''}
       </div>
       <div>
         <div class="section-title">Sales Performance</div>
         <div class="recon-row"><span>Customers</span><span>${c.customer_count}</span></div>
         <div class="recon-row"><span>Cash Up Total</span><span>R ${c.cash_up_total.toFixed(2)}</span></div>
-        <div class="recon-row subtotal"><span><strong>Avg per Customer</strong></span><span><strong>${c.customer_count > 0 ? `R ${c.average_spend.toFixed(2)}` : '—'}</strong></span></div>
+        <div class="recon-row subtotal"><span><strong>Avg per Customer</strong></span><span><strong>${c.customer_count>0?`R ${c.average_spend.toFixed(2)}`:'—'}</strong></span></div>
         <br/>
         <div class="section-title">Notes & Problems</div>
-        <div class="notes-box">${c.notes || 'No notes recorded.'}</div>
+        <div class="notes-box">${c.notes||'No notes recorded.'}</div>
       </div>
     </div>
-
     <div class="variance-box">
       <div class="variance-label">Variance</div>
-      <div class="variance-amount">${c.variance === 0 ? 'R 0.00' : `R ${Math.abs(c.variance).toFixed(2)}`}</div>
+      <div class="variance-amount">${c.variance===0?'R 0.00':`R ${Math.abs(c.variance).toFixed(2)}`}</div>
       <div class="variance-status">${vLabel}</div>
     </div>
-
     <div class="sign-section">
-      <div class="sign-block"><div class="sign-line"></div><div class="sign-label">Manager Signature</div><div class="sign-name">${c.signed_by_name || '________________________'}</div></div>
-      <div class="sign-block"><div class="sign-line"></div><div class="sign-label">Date & Time</div><div class="sign-name">${c.signed_off_at ? new Date(c.signed_off_at).toLocaleString('en-ZA') : '________________________'}</div></div>
+      <div class="sign-block"><div class="sign-line"></div><div class="sign-label">Manager Signature</div><div class="sign-name">${c.signed_by_name||'________________________'}</div></div>
+      <div class="sign-block"><div class="sign-line"></div><div class="sign-label">Date & Time</div><div class="sign-name">${c.signed_off_at?new Date(c.signed_off_at).toLocaleString('en-ZA'):'________________________'}</div></div>
       <div class="sign-block"><div class="sign-line"></div><div class="sign-label">Franchisor / Owner</div><div class="sign-name">________________________</div></div>
     </div>
-
     <div class="footer">Generated by CompliTrack &bull; complitrack.co.za &bull; ${new Date().toLocaleString('en-ZA')}</div>
-    <script>window.onload = function() { window.print(); }</script>
+    <script>window.onload=function(){window.print()}</script>
     </body></html>`);
     win.document.close();
   }
 
-  const inputStyle = (disabled: boolean) => ({ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1.5px solid #eef2ee', fontSize: 13, outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box' as const, background: disabled ? '#f8faf8' : '#fff', textAlign: 'center' as const });
+  const denomInputStyle = (disabled: boolean) => ({
+    width: '100%', padding: '8px 10px', borderRadius: 8,
+    border: '1.5px solid #eef2ee', fontSize: 13, outline: 'none',
+    fontFamily: 'inherit', boxSizing: 'border-box' as const,
+    background: disabled ? '#f8faf8' : '#fff', textAlign: 'center' as const
+  });
+  const reconInputStyle = {
+    width: '100%', padding: '10px 14px', borderRadius: 10,
+    border: '1.5px solid #eef2ee', fontSize: 14, outline: 'none',
+    fontFamily: 'inherit', boxSizing: 'border-box' as const,
+    background: readOnly ? '#f8faf8' : '#fff'
+  };
   const cardStyle = { background: '#fff', borderRadius: 20, padding: 24, border: '1px solid #eef2ee', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' };
   const labelStyle = { display: 'block' as const, fontSize: 13, fontWeight: 600 as const, color: '#555', marginBottom: 6 };
-  const reconInputStyle = { width: '100%', padding: '10px 14px', borderRadius: 10, border: '1.5px solid #eef2ee', fontSize: 14, outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box' as const, background: readOnly ? '#f8faf8' : '#fff' };
   const steps = ['Cash Count', 'Reconciliation', 'Performance', 'Notes', 'Sign Off'];
 
   return (
@@ -374,20 +401,19 @@ export default function CashUpPage() {
                 ))}
               </div>
 
-              {/* STEP 1 — TWO COLUMN CASH COUNT */}
               {activeStep === 1 && (
                 <div style={cardStyle}>
                   <div style={{ fontSize: 18, fontWeight: 700, color: '#333', marginBottom: 4 }}>Count Your Cash</div>
-                  <div style={{ fontSize: 13, color: '#888', marginBottom: 20 }}>Enter quantities separately for Till Float and Bank</div>
+                  <div style={{ fontSize: 13, color: '#888', marginBottom: 20 }}>Enter quantities for Till Float and To Bank separately</div>
 
-                  <div style={{ display: 'grid', gridTemplateColumns: '80px 1fr 20px 1fr', gap: 8, marginBottom: 8, alignItems: 'center' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '80px 1fr 20px 1fr', gap: 8, marginBottom: 8 }}>
                     <div />
                     <div style={{ background: DARK, color: '#fff', borderRadius: 8, padding: '8px 12px', textAlign: 'center' as const, fontWeight: 700, fontSize: 13 }}>TILL FLOAT</div>
                     <div />
                     <div style={{ background: PRIMARY, color: '#fff', borderRadius: 8, padding: '8px 12px', textAlign: 'center' as const, fontWeight: 700, fontSize: 13 }}>TO BANK</div>
                   </div>
 
-                  <div style={{ display: 'grid', gridTemplateColumns: '80px 1fr 20px 1fr', gap: 8, marginBottom: 4, alignItems: 'center' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '80px 1fr 20px 1fr', gap: 8, marginBottom: 6 }}>
                     <div />
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
                       <div style={{ fontSize: 11, color: '#888', textAlign: 'center' as const, fontWeight: 600 }}>QTY</div>
@@ -404,36 +430,18 @@ export default function CashUpPage() {
                     <div key={d.key} style={{ display: 'grid', gridTemplateColumns: '80px 1fr 20px 1fr', gap: 8, alignItems: 'center', marginBottom: 6 }}>
                       <div style={{ fontWeight: 700, color: '#333', fontSize: 15 }}>{d.label}</div>
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, background: '#f0f7f4', borderRadius: 8, padding: 4 }}>
-                        <input
-                          type="number" min="0"
-                          value={floatDenoms[d.key] || ''}
-                          onChange={e => setFloatDenoms(p => ({ ...p, [d.key]: parseInt(e.target.value) || 0 }))}
-                          disabled={readOnly}
-                          placeholder="0"
-                          style={inputStyle(readOnly)}
-                        />
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 600, color: DARK, fontSize: 13 }}>
-                          {fmt((floatDenoms[d.key] || 0) * d.value)}
-                        </div>
+                        <input type="number" min="0" value={floatDenoms[d.key] || ''} onChange={e => setFloatDenoms(p => ({ ...p, [d.key]: parseInt(e.target.value) || 0 }))} disabled={readOnly} placeholder="0" style={denomInputStyle(readOnly)} />
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 600, color: DARK, fontSize: 13 }}>{fmt((floatDenoms[d.key] || 0) * d.value)}</div>
                       </div>
                       <div style={{ textAlign: 'center' as const, color: '#ddd', fontSize: 18 }}>|</div>
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, background: '#e8f5e9', borderRadius: 8, padding: 4 }}>
-                        <input
-                          type="number" min="0"
-                          value={bankDenoms[d.key] || ''}
-                          onChange={e => setBankDenoms(p => ({ ...p, [d.key]: parseInt(e.target.value) || 0 }))}
-                          disabled={readOnly}
-                          placeholder="0"
-                          style={inputStyle(readOnly)}
-                        />
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 600, color: PRIMARY, fontSize: 13 }}>
-                          {fmt((bankDenoms[d.key] || 0) * d.value)}
-                        </div>
+                        <input type="number" min="0" value={bankDenoms[d.key] || ''} onChange={e => setBankDenoms(p => ({ ...p, [d.key]: parseInt(e.target.value) || 0 }))} disabled={readOnly} placeholder="0" style={denomInputStyle(readOnly)} />
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 600, color: PRIMARY, fontSize: 13 }}>{fmt((bankDenoms[d.key] || 0) * d.value)}</div>
                       </div>
                     </div>
                   ))}
 
-                  <div style={{ display: 'grid', gridTemplateColumns: '80px 1fr 20px 1fr', gap: 8, marginTop: 16, alignItems: 'center' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '80px 1fr 20px 1fr', gap: 8, marginTop: 16 }}>
                     <div style={{ fontWeight: 700, color: '#333', fontSize: 13 }}>TOTAL</div>
                     <div style={{ background: DARK, color: '#fff', borderRadius: 10, padding: '12px 16px', textAlign: 'center' as const, fontWeight: 800, fontSize: 18 }}>{fmt(floatTotal)}</div>
                     <div />
@@ -453,7 +461,6 @@ export default function CashUpPage() {
                 </div>
               )}
 
-              {/* STEP 2 — RECONCILIATION */}
               {activeStep === 2 && (
                 <div style={cardStyle}>
                   <div style={{ fontSize: 18, fontWeight: 700, color: '#333', marginBottom: 4 }}>Reconciliation</div>
@@ -465,7 +472,7 @@ export default function CashUpPage() {
                       <span style={{ fontWeight: 700, color: '#333', fontSize: 16 }}>{fmt(totalCash)}</span>
                     </div>
                     {[
-                      { label: 'Previous Float', key: 'previous_float', sign: '−', hint: 'Opening float', color: '#ef4444' },
+                      { label: 'Previous Float', key: 'previous_float', sign: '−', hint: 'Auto-filled from yesterday', color: '#ef4444' },
                       { label: 'EFT / Card', key: 'eft_total', sign: '+', hint: 'Total card payments', color: PRIMARY },
                       { label: 'Payouts', key: 'payouts', sign: '+', hint: 'Cash paid out', color: PRIMARY },
                     ].map(f => (
@@ -532,7 +539,6 @@ export default function CashUpPage() {
                 </div>
               )}
 
-              {/* STEP 3 — PERFORMANCE */}
               {activeStep === 3 && (
                 <div style={cardStyle}>
                   <div style={{ fontSize: 18, fontWeight: 700, color: '#333', marginBottom: 4 }}>Sales Performance</div>
@@ -558,7 +564,6 @@ export default function CashUpPage() {
                 </div>
               )}
 
-              {/* STEP 4 — NOTES */}
               {activeStep === 4 && (
                 <div style={cardStyle}>
                   <div style={{ fontSize: 18, fontWeight: 700, color: '#333', marginBottom: 4 }}>Notes & Problems</div>
@@ -573,7 +578,6 @@ export default function CashUpPage() {
                 </div>
               )}
 
-              {/* STEP 5 — SIGN OFF */}
               {activeStep === 5 && (
                 <div style={cardStyle}>
                   <div style={{ fontSize: 18, fontWeight: 700, color: '#333', marginBottom: 4 }}>{isSignedOff ? 'Signed Off' : 'Sign Off'}</div>
@@ -604,10 +608,42 @@ export default function CashUpPage() {
                   {!isSignedOff ? (
                     <div>
                       <div style={{ marginBottom: 16 }}>
-                        <label style={labelStyle}>Signed by (full name)</label>
-                        <input value={signedByName} onChange={e => setSignedByName(e.target.value)} placeholder="Full name of person signing off" style={{ width: '100%', padding: '12px 14px', borderRadius: 10, border: '1.5px solid #eef2ee', fontSize: 14, outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box' as const }} />
+                        <label style={labelStyle}>Signed by</label>
+                        {staff.length > 0 ? (
+                          <div>
+                            <select
+                              value={signedByName}
+                              onChange={e => setSignedByName(e.target.value)}
+                              style={{ ...reconInputStyle, marginBottom: signedByName === '__custom__' ? 10 : 0 }}
+                            >
+                              <option value="">— Select staff member —</option>
+                              {staff.map(s => (
+                                <option key={s.id} value={s.full_name}>{s.full_name} ({s.role})</option>
+                              ))}
+                              <option value="__custom__">Other (type name)</option>
+                            </select>
+                            {signedByName === '__custom__' && (
+                              <input
+                                value=""
+                                onChange={e => setSignedByName(e.target.value)}
+                                placeholder="Enter full name"
+                                style={reconInputStyle}
+                              />
+                            )}
+                          </div>
+                        ) : (
+                          <input
+                            value={signedByName}
+                            onChange={e => setSignedByName(e.target.value)}
+                            placeholder="Full name of person signing off"
+                            style={reconInputStyle}
+                          />
+                        )}
                       </div>
-                      <button onClick={signOff} disabled={saving || !signedByName.trim()} style={{ width: '100%', padding: '16px', background: signedByName.trim() ? PRIMARY : '#eee', color: signedByName.trim() ? '#fff' : '#aaa', border: 'none', borderRadius: 12, fontWeight: 700, cursor: signedByName.trim() ? 'pointer' : 'default', fontSize: 16 }}>
+                      <button
+                        onClick={signOff}
+                        disabled={saving || !signedByName.trim() || signedByName === '__custom__'}
+                        style={{ width: '100%', padding: '16px', background: signedByName.trim() && signedByName !== '__custom__' ? PRIMARY : '#eee', color: signedByName.trim() && signedByName !== '__custom__' ? '#fff' : '#aaa', border: 'none', borderRadius: 12, fontWeight: 700, cursor: signedByName.trim() && signedByName !== '__custom__' ? 'pointer' : 'default', fontSize: 16 }}>
                         {saving ? 'Signing off...' : 'Sign Off Cash Up'}
                       </button>
                       <button onClick={() => setActiveStep(4)} style={{ width: '100%', marginTop: 10, padding: '12px', background: '#f0f4f0', color: '#333', border: 'none', borderRadius: 12, fontWeight: 600, cursor: 'pointer', fontSize: 14 }}>← Back</button>
@@ -628,7 +664,6 @@ export default function CashUpPage() {
               )}
             </div>
 
-            {/* SIDEBAR */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
               <div style={cardStyle}>
                 <div style={{ fontSize: 14, fontWeight: 700, color: '#333', marginBottom: 16 }}>Today's Summary</div>
