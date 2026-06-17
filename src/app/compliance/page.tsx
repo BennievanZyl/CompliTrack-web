@@ -14,6 +14,8 @@ type Session = {
   status: string;
   signed_off_at: string | null;
   pdf_report_url: string | null;
+  started_at: string | null;
+  duration_seconds: number | null;
 };
 
 type ChecklistItem = {
@@ -50,6 +52,21 @@ type TempLog = {
 
 type Tab = 'checklist' | 'uniforms' | 'temperature';
 
+function formatDuration(seconds: number): string {
+  if (seconds >= 3600) {
+    return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
+  }
+  return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+}
+
+function formatElapsed(startedAt: string): string {
+  const elapsed = Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000);
+  const h = Math.floor(elapsed / 3600);
+  const m = Math.floor((elapsed % 3600) / 60);
+  const s = elapsed % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+
 export default function CompliancePage() {
   const router = useRouter();
   const [session, setSession] = useState<Session | null>(null);
@@ -58,8 +75,18 @@ export default function CompliancePage() {
   const [tempLogs, setTempLogs] = useState<TempLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<Tab>('checklist');
+  const [elapsed, setElapsed] = useState('00:00:00');
 
   useEffect(() => { checkAuthAndLoad(); }, []);
+
+  useEffect(() => {
+    if (!session?.started_at || session.status === 'signed_off') return;
+    const interval = setInterval(() => {
+      setElapsed(formatElapsed(session.started_at!));
+    }, 1000);
+    setElapsed(formatElapsed(session.started_at));
+    return () => clearInterval(interval);
+  }, [session?.started_at, session?.status]);
 
   async function checkAuthAndLoad() {
     const { data: { user } } = await supabase.auth.getUser();
@@ -87,6 +114,8 @@ export default function CompliancePage() {
   const total = checklist.length;
   const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
   const tempCompliant = tempLogs.filter(t => t.is_compliant).length;
+  const pctColor = pct === 100 ? PRIMARY : pct >= 70 ? '#f59e0b' : '#ef4444';
+  const tempColor = tempLogs.length === 0 ? '#ccc' : tempCompliant === tempLogs.length ? PRIMARY : '#ef4444';
 
   const sections = checklist.reduce<Record<string, ChecklistItem[]>>((acc, item) => {
     const sec = item.checklist_templates?.section || 'General';
@@ -95,12 +124,8 @@ export default function CompliancePage() {
     return acc;
   }, {});
 
-  const pctColor = pct === 100 ? PRIMARY : pct >= 70 ? '#f59e0b' : '#ef4444';
-  const tempColor = tempLogs.length === 0 ? '#ccc' : tempCompliant === tempLogs.length ? PRIMARY : '#ef4444';
-
   const cardStyle = { background: '#fff', borderRadius: 20, padding: 24, border: '1px solid #eef2ee', boxShadow: '0 2px 8px rgba(0,0,0,0.06)' };
-  const labelStyle = { fontSize: 13, color: '#666', marginBottom: 8, fontWeight: 500 };
-  const bigNumStyle = (color: string) => ({ fontSize: 36, fontWeight: 800, color });
+  const labelStyle = { fontSize: 13, color: '#666', marginBottom: 8, fontWeight: 500 as const };
 
   return (
     <div style={{ minHeight: '100vh', background: '#f8faf8', fontFamily: 'system-ui, sans-serif' }}>
@@ -129,11 +154,24 @@ export default function CompliancePage() {
         {!loading && session && (
           <div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 20, marginBottom: 32 }}>
+            {session.started_at && session.status !== 'signed_off' && (
+              <div style={{ background: PRIMARY, borderRadius: 16, padding: '16px 24px', marginBottom: 24, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span style={{ color: '#fff', fontWeight: 600, fontSize: 15 }}>Compliance Timer Running</span>
+                <span style={{ color: '#fff', fontWeight: 800, fontSize: 28, fontVariantNumeric: 'tabular-nums', letterSpacing: 2 }}>{elapsed}</span>
+              </div>
+            )}
+
+            {!session.started_at && session.status !== 'signed_off' && (
+              <div style={{ background: '#fff8e1', borderRadius: 16, padding: '16px 24px', marginBottom: 24, border: '1px solid #fde68a' }}>
+                <span style={{ color: '#92400e', fontWeight: 600, fontSize: 14 }}>Timer not started — open the mobile app and tap Start Compliance Check to begin timing.</span>
+              </div>
+            )}
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 20, marginBottom: 32 }}>
 
               <div style={cardStyle}>
                 <div style={labelStyle}>CHECKLIST</div>
-                <div style={bigNumStyle(pctColor)}>{pct}%</div>
+                <div style={{ fontSize: 36, fontWeight: 800, color: pctColor }}>{pct}%</div>
                 <div style={{ fontSize: 13, color: '#888', marginTop: 4 }}>{completed} of {total} tasks</div>
                 <div style={{ marginTop: 12, height: 6, background: '#eef2ee', borderRadius: 3 }}>
                   <div style={{ height: '100%', width: `${pct}%`, background: pctColor, borderRadius: 3 }} />
@@ -142,21 +180,33 @@ export default function CompliancePage() {
 
               <div style={cardStyle}>
                 <div style={labelStyle}>STATUS</div>
-                <div style={{ fontSize: 20, fontWeight: 700, color: session.status === 'signed_off' ? PRIMARY : '#f59e0b' }}>
+                <div style={{ fontSize: 18, fontWeight: 700, color: session.status === 'signed_off' ? PRIMARY : '#f59e0b' }}>
                   {session.status === 'signed_off' ? 'Signed Off' : 'In Progress'}
                 </div>
-                {session.signed_off_at && <div style={{ fontSize: 12, color: '#888', marginTop: 4 }}>{new Date(session.signed_off_at).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })}</div>}
+                {session.signed_off_at && (
+                  <div style={{ fontSize: 12, color: '#888', marginTop: 4 }}>
+                    {new Date(session.signed_off_at).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })}
+                  </div>
+                )}
+              </div>
+
+              <div style={cardStyle}>
+                <div style={labelStyle}>TIME TAKEN</div>
+                <div style={{ fontSize: 22, fontWeight: 800, color: PRIMARY }}>
+                  {session.duration_seconds ? formatDuration(session.duration_seconds) : session.started_at && session.status !== 'signed_off' ? elapsed : 'Not started'}
+                </div>
+                <div style={{ fontSize: 13, color: '#888', marginTop: 4 }}>compliance duration</div>
               </div>
 
               <div style={cardStyle}>
                 <div style={labelStyle}>UNIFORMS</div>
-                <div style={bigNumStyle(PRIMARY)}>{uniforms.length}</div>
+                <div style={{ fontSize: 36, fontWeight: 800, color: PRIMARY }}>{uniforms.length}</div>
                 <div style={{ fontSize: 13, color: '#888', marginTop: 4 }}>photos captured</div>
               </div>
 
               <div style={cardStyle}>
                 <div style={labelStyle}>TEMPERATURE</div>
-                <div style={bigNumStyle(tempColor)}>{tempLogs.length === 0 ? '-' : `${tempCompliant}/${tempLogs.length}`}</div>
+                <div style={{ fontSize: 36, fontWeight: 800, color: tempColor }}>{tempLogs.length === 0 ? '-' : `${tempCompliant}/${tempLogs.length}`}</div>
                 <div style={{ fontSize: 13, color: '#888', marginTop: 4 }}>readings compliant</div>
               </div>
 
@@ -188,7 +238,7 @@ export default function CompliancePage() {
                           </div>
                           <div style={{ flex: 1 }}>
                             <div style={{ fontWeight: 500, color: item.completed ? '#333' : '#888', fontSize: 14 }}>{item.checklist_templates?.task_name || 'Unknown task'}</div>
-                            {item.notes && <div style={{ fontSize: 12, color: '#aaa', marginTop: 2 }}>{item.notes}</div>}
+                            {item.notes && <div style={{ fontSize: 12, color: '#888', fontStyle: 'italic', marginTop: 2 }}>Note: {item.notes}</div>}
                             {item.ai_photo_result && <div style={{ fontSize: 12, marginTop: 4, color: item.ai_photo_result === 'pass' ? PRIMARY : '#ef4444', fontWeight: 600 }}>AI: {item.ai_photo_result}</div>}
                           </div>
                           {item.completed_at && <div style={{ fontSize: 11, color: '#bbb' }}>{new Date(item.completed_at).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })}</div>}
@@ -226,7 +276,7 @@ export default function CompliancePage() {
                 {tempLogs.length === 0 && <div style={{ textAlign: 'center', padding: 60, color: '#888' }}>No temperature logs today.</div>}
                 {tempLogs.map((log, idx) => (
                   <div key={log.id} style={{ padding: '16px 24px', display: 'flex', alignItems: 'center', gap: 16, borderBottom: idx < tempLogs.length - 1 ? '1px solid #f0f4f0' : 'none' }}>
-                    <div style={{ width: 48, height: 48, borderRadius: 12, flexShrink: 0, background: log.is_compliant ? '#e8f5e9' : '#fdecea', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20 }}>T</div>
+                    <div style={{ width: 48, height: 48, borderRadius: 12, flexShrink: 0, background: log.is_compliant ? '#e8f5e9' : '#fdecea', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, color: log.is_compliant ? PRIMARY : '#ef4444' }}>T</div>
                     <div style={{ flex: 1 }}>
                       <div style={{ fontWeight: 600, color: '#333', fontSize: 14 }}>{log.equipment_name}</div>
                       <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>{log.period} - {log.equipment_type}</div>
