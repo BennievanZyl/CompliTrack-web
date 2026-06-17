@@ -1,12 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 
 const STORE_ID = '05328298-fc27-4c9f-b091-bb7f6598b601';
 const PRIMARY = '#1a5c38';
 const DARK = '#0a1f12';
+const POLL_INTERVAL = 30000;
 
 type Session = {
   id: string;
@@ -53,9 +54,7 @@ type TempLog = {
 type Tab = 'checklist' | 'uniforms' | 'temperature';
 
 function formatDuration(seconds: number): string {
-  if (seconds >= 3600) {
-    return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
-  }
+  if (seconds >= 3600) return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
   return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
 }
 
@@ -76,17 +75,46 @@ export default function CompliancePage() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<Tab>('checklist');
   const [elapsed, setElapsed] = useState('00:00:00');
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const sessionRef = useRef<Session | null>(null);
 
-  useEffect(() => { checkAuthAndLoad(); }, []);
+  useEffect(() => {
+    checkAuthAndLoad();
+  }, []);
+
+  useEffect(() => {
+    sessionRef.current = session;
+  }, [session]);
 
   useEffect(() => {
     if (!session?.started_at || session.status === 'signed_off') return;
-    const interval = setInterval(() => {
-      setElapsed(formatElapsed(session.started_at!));
-    }, 1000);
     setElapsed(formatElapsed(session.started_at));
+    const interval = setInterval(() => {
+      if (sessionRef.current?.started_at) {
+        setElapsed(formatElapsed(sessionRef.current.started_at));
+      }
+    }, 1000);
     return () => clearInterval(interval);
   }, [session?.started_at, session?.status]);
+
+  useEffect(() => {
+    if (!session?.id) return;
+
+    const channel = supabase
+      .channel(`compliance-${session.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'checklist_items', filter: `session_id=eq.${session.id}` }, () => { loadSessionData(session.id); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'daily_sessions', filter: `id=eq.${session.id}` }, () => { loadSessionData(session.id); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'uniform_sessions', filter: `session_id=eq.${session.id}` }, () => { loadSessionData(session.id); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'temperature_logs', filter: `session_id=eq.${session.id}` }, () => { loadSessionData(session.id); })
+      .subscribe();
+
+    const poll = setInterval(() => { loadSessionData(session.id); }, POLL_INTERVAL);
+
+    return () => {
+      supabase.removeChannel(channel);
+      clearInterval(poll);
+    };
+  }, [session?.id]);
 
   async function checkAuthAndLoad() {
     const { data: { user } } = await supabase.auth.getUser();
@@ -99,15 +127,24 @@ export default function CompliancePage() {
     const today = new Date().toISOString().split('T')[0];
     const { data: sessionData } = await supabase.from('daily_sessions').select('*').eq('store_id', STORE_ID).eq('session_date', today).single();
     setSession(sessionData);
-    if (sessionData) {
-      const { data: checklistData } = await supabase.from('checklist_items').select('*, checklist_templates(task_name, section, requires_photo)').eq('session_id', sessionData.id).order('created_at');
-      setChecklist(checklistData || []);
-      const { data: uniformData } = await supabase.from('uniform_sessions').select('*').eq('session_id', sessionData.id).order('taken_at', { ascending: false });
-      setUniforms(uniformData || []);
-      const { data: tempData } = await supabase.from('temperature_logs').select('*').eq('session_id', sessionData.id).order('logged_at');
-      setTempLogs(tempData || []);
-    }
+    if (sessionData) await loadSessionData(sessionData.id);
     setLoading(false);
+  }
+
+  async function loadSessionData(sessionId: string) {
+    const { data: sessionData } = await supabase.from('daily_sessions').select('*').eq('id', sessionId).single();
+    if (sessionData) setSession(sessionData);
+
+    const { data: checklistData } = await supabase.from('checklist_items').select('*, checklist_templates(task_name, section, requires_photo)').eq('session_id', sessionId).order('created_at');
+    setChecklist(checklistData || []);
+
+    const { data: uniformData } = await supabase.from('uniform_sessions').select('*').eq('session_id', sessionId).order('taken_at', { ascending: false });
+    setUniforms(uniformData || []);
+
+    const { data: tempData } = await supabase.from('temperature_logs').select('*').eq('session_id', sessionId).order('logged_at');
+    setTempLogs(tempData || []);
+
+    setLastUpdated(new Date());
   }
 
   const completed = checklist.filter(i => i.completed).length;
@@ -136,7 +173,11 @@ export default function CompliancePage() {
             <button onClick={() => router.push('/dashboard')} style={{ background: 'rgba(255,255,255,0.15)', border: 'none', color: '#fff', borderRadius: 8, padding: '6px 14px', cursor: 'pointer', fontSize: 14 }}>Back</button>
             <span style={{ color: '#fff', fontWeight: 700, fontSize: 18 }}>Daily Compliance</span>
           </div>
-          <span style={{ color: 'rgba(255,255,255,0.7)', fontSize: 14 }}>{new Date().toLocaleDateString('en-ZA', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+            {lastUpdated && <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: 12 }}>Live</span>}
+            <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#4ade80', boxShadow: '0 0 6px #4ade80' }} />
+            <span style={{ color: 'rgba(255,255,255,0.7)', fontSize: 14 }}>{new Date().toLocaleDateString('en-ZA', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</span>
+          </div>
         </div>
       </div>
 
@@ -156,14 +197,24 @@ export default function CompliancePage() {
 
             {session.started_at && session.status !== 'signed_off' && (
               <div style={{ background: PRIMARY, borderRadius: 16, padding: '16px 24px', marginBottom: 24, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <span style={{ color: '#fff', fontWeight: 600, fontSize: 15 }}>Compliance Timer Running</span>
-                <span style={{ color: '#fff', fontWeight: 800, fontSize: 28, fontVariantNumeric: 'tabular-nums', letterSpacing: 2 }}>{elapsed}</span>
+                <div>
+                  <div style={{ color: 'rgba(255,255,255,0.7)', fontSize: 12, marginBottom: 2 }}>COMPLIANCE TIMER RUNNING</div>
+                  <div style={{ color: '#fff', fontWeight: 600, fontSize: 14 }}>Started at {new Date(session.started_at).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })}</div>
+                </div>
+                <span style={{ color: '#fff', fontWeight: 800, fontSize: 32, fontVariantNumeric: 'tabular-nums', letterSpacing: 3 }}>{elapsed}</span>
               </div>
             )}
 
             {!session.started_at && session.status !== 'signed_off' && (
               <div style={{ background: '#fff8e1', borderRadius: 16, padding: '16px 24px', marginBottom: 24, border: '1px solid #fde68a' }}>
                 <span style={{ color: '#92400e', fontWeight: 600, fontSize: 14 }}>Timer not started — open the mobile app and tap Start Compliance Check to begin timing.</span>
+              </div>
+            )}
+
+            {session.status === 'signed_off' && session.duration_seconds && (
+              <div style={{ background: '#e8f5e9', borderRadius: 16, padding: '16px 24px', marginBottom: 24, border: '1px solid #c8e6c9', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span style={{ color: PRIMARY, fontWeight: 600, fontSize: 15 }}>Compliance completed and signed off</span>
+                <span style={{ color: PRIMARY, fontWeight: 800, fontSize: 20 }}>Completed in {formatDuration(session.duration_seconds)}</span>
               </div>
             )}
 
@@ -193,7 +244,11 @@ export default function CompliancePage() {
               <div style={cardStyle}>
                 <div style={labelStyle}>TIME TAKEN</div>
                 <div style={{ fontSize: 22, fontWeight: 800, color: PRIMARY }}>
-                  {session.duration_seconds ? formatDuration(session.duration_seconds) : session.started_at && session.status !== 'signed_off' ? elapsed : 'Not started'}
+                  {session.duration_seconds
+                    ? formatDuration(session.duration_seconds)
+                    : session.started_at && session.status !== 'signed_off'
+                    ? elapsed
+                    : 'Not started'}
                 </div>
                 <div style={{ fontSize: 13, color: '#888', marginTop: 4 }}>compliance duration</div>
               </div>
@@ -227,13 +282,18 @@ export default function CompliancePage() {
                   const secDone = items.filter(i => i.completed).length;
                   return (
                     <div key={section} style={{ background: '#fff', borderRadius: 20, border: '1px solid #eef2ee', overflow: 'hidden' }}>
-                      <div style={{ padding: '16px 24px', background: '#f8faf8', borderBottom: '1px solid #eef2ee', display: 'flex', justifyContent: 'space-between' }}>
+                      <div style={{ padding: '16px 24px', background: '#f8faf8', borderBottom: '1px solid #eef2ee', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <span style={{ fontWeight: 700, color: '#333' }}>{section}</span>
-                        <span style={{ fontSize: 13, color: secDone === items.length ? PRIMARY : '#888', fontWeight: 600 }}>{secDone}/{items.length}</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                          <div style={{ width: 80, height: 6, background: '#eef2ee', borderRadius: 3 }}>
+                            <div style={{ height: '100%', width: `${items.length > 0 ? (secDone / items.length) * 100 : 0}%`, background: secDone === items.length ? PRIMARY : '#f59e0b', borderRadius: 3 }} />
+                          </div>
+                          <span style={{ fontSize: 13, color: secDone === items.length ? PRIMARY : '#888', fontWeight: 600 }}>{secDone}/{items.length}</span>
+                        </div>
                       </div>
                       {items.map((item, idx) => (
                         <div key={item.id} style={{ padding: '14px 24px', display: 'flex', alignItems: 'center', gap: 14, borderBottom: idx < items.length - 1 ? '1px solid #f0f4f0' : 'none' }}>
-                          <div style={{ width: 28, height: 28, borderRadius: '50%', flexShrink: 0, background: item.completed ? PRIMARY : '#eef2ee', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 14 }}>
+                          <div style={{ width: 28, height: 28, borderRadius: '50%', flexShrink: 0, background: item.completed ? PRIMARY : '#eef2ee', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 14, fontWeight: 700 }}>
                             {item.completed ? 'v' : ''}
                           </div>
                           <div style={{ flex: 1 }}>
@@ -241,7 +301,7 @@ export default function CompliancePage() {
                             {item.notes && <div style={{ fontSize: 12, color: '#888', fontStyle: 'italic', marginTop: 2 }}>Note: {item.notes}</div>}
                             {item.ai_photo_result && <div style={{ fontSize: 12, marginTop: 4, color: item.ai_photo_result === 'pass' ? PRIMARY : '#ef4444', fontWeight: 600 }}>AI: {item.ai_photo_result}</div>}
                           </div>
-                          {item.completed_at && <div style={{ fontSize: 11, color: '#bbb' }}>{new Date(item.completed_at).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })}</div>}
+                          {item.completed_at && <div style={{ fontSize: 11, color: '#bbb', whiteSpace: 'nowrap' }}>{new Date(item.completed_at).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })}</div>}
                           {item.photo_url && <img src={item.photo_url} alt="task" style={{ width: 40, height: 40, borderRadius: 8, objectFit: 'cover' }} />}
                         </div>
                       ))}
@@ -276,7 +336,7 @@ export default function CompliancePage() {
                 {tempLogs.length === 0 && <div style={{ textAlign: 'center', padding: 60, color: '#888' }}>No temperature logs today.</div>}
                 {tempLogs.map((log, idx) => (
                   <div key={log.id} style={{ padding: '16px 24px', display: 'flex', alignItems: 'center', gap: 16, borderBottom: idx < tempLogs.length - 1 ? '1px solid #f0f4f0' : 'none' }}>
-                    <div style={{ width: 48, height: 48, borderRadius: 12, flexShrink: 0, background: log.is_compliant ? '#e8f5e9' : '#fdecea', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, color: log.is_compliant ? PRIMARY : '#ef4444' }}>T</div>
+                    <div style={{ width: 48, height: 48, borderRadius: 12, flexShrink: 0, background: log.is_compliant ? '#e8f5e9' : '#fdecea', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 18, color: log.is_compliant ? PRIMARY : '#ef4444' }}>T</div>
                     <div style={{ flex: 1 }}>
                       <div style={{ fontWeight: 600, color: '#333', fontSize: 14 }}>{log.equipment_name}</div>
                       <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>{log.period} - {log.equipment_type}</div>
