@@ -51,6 +51,14 @@ type TempLog = {
   logged_at: string;
 };
 
+type Comment = {
+  id: string;
+  message: string;
+  created_at: string;
+  sender_id: string;
+  profiles: { full_name: string; role: string } | null;
+};
+
 type Tab = 'checklist' | 'uniforms' | 'temperature';
 
 function formatDuration(seconds: number): string {
@@ -76,49 +84,49 @@ export default function CompliancePage() {
   const [activeTab, setActiveTab] = useState<Tab>('checklist');
   const [elapsed, setElapsed] = useState('00:00:00');
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+  const [lightboxTitle, setLightboxTitle] = useState('');
+  const [selectedItem, setSelectedItem] = useState<ChecklistItem | null>(null);
+  const [comments, setComments] = useState<Comment[]>([]);
+  const [newComment, setNewComment] = useState('');
+  const [sendingComment, setSendingComment] = useState(false);
+  const [currentUser, setCurrentUser] = useState<{ id: string; role: string } | null>(null);
   const sessionRef = useRef<Session | null>(null);
 
-  useEffect(() => {
-    checkAuthAndLoad();
-  }, []);
+  useEffect(() => { checkAuthAndLoad(); }, []);
 
-  useEffect(() => {
-    sessionRef.current = session;
-  }, [session]);
+  useEffect(() => { sessionRef.current = session; }, [session]);
 
   useEffect(() => {
     if (!session?.started_at || session.status === 'signed_off') return;
     setElapsed(formatElapsed(session.started_at));
     const interval = setInterval(() => {
-      if (sessionRef.current?.started_at) {
-        setElapsed(formatElapsed(sessionRef.current.started_at));
-      }
+      if (sessionRef.current?.started_at) setElapsed(formatElapsed(sessionRef.current.started_at));
     }, 1000);
     return () => clearInterval(interval);
   }, [session?.started_at, session?.status]);
 
   useEffect(() => {
     if (!session?.id) return;
-
     const channel = supabase
       .channel(`compliance-${session.id}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'checklist_items', filter: `session_id=eq.${session.id}` }, () => { loadSessionData(session.id); })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'daily_sessions', filter: `id=eq.${session.id}` }, () => { loadSessionData(session.id); })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'uniform_sessions', filter: `session_id=eq.${session.id}` }, () => { loadSessionData(session.id); })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'temperature_logs', filter: `session_id=eq.${session.id}` }, () => { loadSessionData(session.id); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'checklist_items', filter: `session_id=eq.${session.id}` }, () => loadSessionData(session.id))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'daily_sessions', filter: `id=eq.${session.id}` }, () => loadSessionData(session.id))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'uniform_sessions', filter: `session_id=eq.${session.id}` }, () => loadSessionData(session.id))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'temperature_logs', filter: `session_id=eq.${session.id}` }, () => loadSessionData(session.id))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'compliance_comments', filter: `session_id=eq.${session.id}` }, () => {
+        if (selectedItem) loadComments(selectedItem.id);
+      })
       .subscribe();
-
-    const poll = setInterval(() => { loadSessionData(session.id); }, POLL_INTERVAL);
-
-    return () => {
-      supabase.removeChannel(channel);
-      clearInterval(poll);
-    };
-  }, [session?.id]);
+    const poll = setInterval(() => loadSessionData(session.id), POLL_INTERVAL);
+    return () => { supabase.removeChannel(channel); clearInterval(poll); };
+  }, [session?.id, selectedItem]);
 
   async function checkAuthAndLoad() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { router.push('/login'); return; }
+    const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single();
+    setCurrentUser({ id: user.id, role: profile?.role || 'staff' });
     await loadData();
   }
 
@@ -134,17 +142,48 @@ export default function CompliancePage() {
   async function loadSessionData(sessionId: string) {
     const { data: sessionData } = await supabase.from('daily_sessions').select('*').eq('id', sessionId).single();
     if (sessionData) setSession(sessionData);
-
     const { data: checklistData } = await supabase.from('checklist_items').select('*, checklist_templates(task_name, section, requires_photo)').eq('session_id', sessionId).order('created_at');
     setChecklist(checklistData || []);
-
     const { data: uniformData } = await supabase.from('uniform_sessions').select('*').eq('session_id', sessionId).order('taken_at', { ascending: false });
     setUniforms(uniformData || []);
-
     const { data: tempData } = await supabase.from('temperature_logs').select('*').eq('session_id', sessionId).order('logged_at');
     setTempLogs(tempData || []);
-
     setLastUpdated(new Date());
+  }
+
+  async function loadComments(itemId: string) {
+    const { data } = await supabase
+      .from('compliance_comments')
+      .select('*, profiles(full_name, role)')
+      .eq('checklist_item_id', itemId)
+      .order('created_at');
+    setComments(data || []);
+  }
+
+  async function sendComment() {
+    if (!newComment.trim() || !selectedItem || !session || !currentUser) return;
+    setSendingComment(true);
+    await supabase.from('compliance_comments').insert({
+      checklist_item_id: selectedItem.id,
+      session_id: session.id,
+      store_id: STORE_ID,
+      sender_id: currentUser.id,
+      message: newComment.trim(),
+    });
+    setNewComment('');
+    await loadComments(selectedItem.id);
+    setSendingComment(false);
+  }
+
+  function openItemDetail(item: ChecklistItem) {
+    setSelectedItem(item);
+    loadComments(item.id);
+  }
+
+  function closeItemDetail() {
+    setSelectedItem(null);
+    setComments([]);
+    setNewComment('');
   }
 
   const completed = checklist.filter(i => i.completed).length;
@@ -167,6 +206,100 @@ export default function CompliancePage() {
   return (
     <div style={{ minHeight: '100vh', background: '#f8faf8', fontFamily: 'system-ui, sans-serif' }}>
 
+      {/* Lightbox */}
+      {lightboxUrl && (
+        <div onClick={() => setLightboxUrl(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.92)', zIndex: 1000, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
+          <div style={{ color: '#fff', fontSize: 14, marginBottom: 16, opacity: 0.7 }}>{lightboxTitle}</div>
+          <img src={lightboxUrl} alt="inspection" style={{ maxWidth: '90vw', maxHeight: '80vh', objectFit: 'contain', borderRadius: 12 }} />
+          <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: 13, marginTop: 16 }}>Tap anywhere to close</div>
+        </div>
+      )}
+
+      {/* Item Detail + Comments Panel */}
+      {selectedItem && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 900, display: 'flex', alignItems: 'flex-end', justifyContent: 'flex-end' }}>
+          <div style={{ background: '#fff', width: 420, height: '100vh', display: 'flex', flexDirection: 'column', boxShadow: '-4px 0 24px rgba(0,0,0,0.15)' }}>
+
+            <div style={{ padding: '20px 24px', borderBottom: '1px solid #eef2ee', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: PRIMARY }}>
+              <div>
+                <div style={{ color: '#fff', fontWeight: 700, fontSize: 15 }}>{selectedItem.checklist_templates?.task_name}</div>
+                <div style={{ color: 'rgba(255,255,255,0.7)', fontSize: 12, marginTop: 2 }}>{selectedItem.checklist_templates?.section}</div>
+              </div>
+              <button onClick={closeItemDetail} style={{ background: 'rgba(255,255,255,0.2)', border: 'none', color: '#fff', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', fontSize: 14 }}>Close</button>
+            </div>
+
+            <div style={{ flex: 1, overflowY: 'auto', padding: 24 }}>
+
+              <div style={{ marginBottom: 20 }}>
+                <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, padding: '4px 10px', borderRadius: 20, background: selectedItem.completed ? '#e8f5e9' : '#fdecea', color: selectedItem.completed ? PRIMARY : '#ef4444' }}>
+                    {selectedItem.completed ? 'COMPLETED' : 'INCOMPLETE'}
+                  </span>
+                  {selectedItem.ai_photo_result && (
+                    <span style={{ fontSize: 12, fontWeight: 700, padding: '4px 10px', borderRadius: 20, background: selectedItem.ai_photo_result === 'pass' ? '#e8f5e9' : '#fdecea', color: selectedItem.ai_photo_result === 'pass' ? PRIMARY : '#ef4444' }}>
+                      AI: {selectedItem.ai_photo_result.toUpperCase()}
+                    </span>
+                  )}
+                </div>
+                {selectedItem.notes && (
+                  <div style={{ background: '#f8faf8', borderRadius: 10, padding: '10px 14px', fontSize: 13, color: '#666', fontStyle: 'italic', marginBottom: 12 }}>Note: {selectedItem.notes}</div>
+                )}
+                {selectedItem.completed_at && (
+                  <div style={{ fontSize: 12, color: '#aaa' }}>Completed at {new Date(selectedItem.completed_at).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })}</div>
+                )}
+              </div>
+
+              {selectedItem.photo_url && (
+                <div style={{ marginBottom: 24 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: '#333', marginBottom: 8 }}>Photo Evidence</div>
+                  <img
+                    src={selectedItem.photo_url}
+                    alt="evidence"
+                    onClick={() => { setLightboxUrl(selectedItem.photo_url!); setLightboxTitle(selectedItem.checklist_templates?.task_name || ''); }}
+                    style={{ width: '100%', borderRadius: 12, objectFit: 'cover', cursor: 'zoom-in', maxHeight: 280 }}
+                  />
+                  <div style={{ fontSize: 11, color: '#aaa', marginTop: 6, textAlign: 'center' }}>Tap to enlarge</div>
+                </div>
+              )}
+
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: '#333', marginBottom: 12 }}>Comments & Follow-up</div>
+                {comments.length === 0 && (
+                  <div style={{ textAlign: 'center', padding: '24px 0', color: '#ccc', fontSize: 13 }}>No comments yet. Flag an issue below.</div>
+                )}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {comments.map(c => {
+                    const isMe = c.sender_id === currentUser?.id;
+                    return (
+                      <div key={c.id} style={{ display: 'flex', flexDirection: 'column', alignItems: isMe ? 'flex-end' : 'flex-start' }}>
+                        <div style={{ fontSize: 11, color: '#aaa', marginBottom: 3 }}>{c.profiles?.full_name} · {c.profiles?.role}</div>
+                        <div style={{ background: isMe ? PRIMARY : '#f0f4f0', color: isMe ? '#fff' : '#333', padding: '10px 14px', borderRadius: isMe ? '16px 16px 4px 16px' : '16px 16px 16px 4px', maxWidth: '85%', fontSize: 14, lineHeight: 1.4 }}>
+                          {c.message}
+                        </div>
+                        <div style={{ fontSize: 11, color: '#ccc', marginTop: 3 }}>{new Date(c.created_at).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            <div style={{ padding: '16px 24px', borderTop: '1px solid #eef2ee', display: 'flex', gap: 10 }}>
+              <input
+                value={newComment}
+                onChange={e => setNewComment(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && sendComment()}
+                placeholder="Flag an issue or add a comment..."
+                style={{ flex: 1, padding: '10px 14px', borderRadius: 10, border: '1.5px solid #eef2ee', fontSize: 14, outline: 'none', fontFamily: 'inherit' }}
+              />
+              <button onClick={sendComment} disabled={sendingComment || !newComment.trim()} style={{ padding: '10px 18px', background: newComment.trim() ? PRIMARY : '#eee', color: newComment.trim() ? '#fff' : '#aaa', border: 'none', borderRadius: 10, fontWeight: 700, cursor: newComment.trim() ? 'pointer' : 'default', fontSize: 14 }}>
+                Send
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div style={{ background: `linear-gradient(135deg, ${DARK}, ${PRIMARY})`, padding: '0 32px' }}>
         <div style={{ maxWidth: 1100, margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 64 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -174,8 +307,12 @@ export default function CompliancePage() {
             <span style={{ color: '#fff', fontWeight: 700, fontSize: 18 }}>Daily Compliance</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-            {lastUpdated && <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: 12 }}>Live</span>}
-            <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#4ade80', boxShadow: '0 0 6px #4ade80' }} />
+            {lastUpdated && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#4ade80', boxShadow: '0 0 6px #4ade80' }} />
+                <span style={{ color: 'rgba(255,255,255,0.6)', fontSize: 12 }}>Live</span>
+              </div>
+            )}
             <span style={{ color: 'rgba(255,255,255,0.7)', fontSize: 14 }}>{new Date().toLocaleDateString('en-ZA', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</span>
           </div>
         </div>
@@ -201,13 +338,13 @@ export default function CompliancePage() {
                   <div style={{ color: 'rgba(255,255,255,0.7)', fontSize: 12, marginBottom: 2 }}>COMPLIANCE TIMER RUNNING</div>
                   <div style={{ color: '#fff', fontWeight: 600, fontSize: 14 }}>Started at {new Date(session.started_at).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })}</div>
                 </div>
-                <span style={{ color: '#fff', fontWeight: 800, fontSize: 32, fontVariantNumeric: 'tabular-nums', letterSpacing: 3 }}>{elapsed}</span>
+                <span style={{ color: '#fff', fontWeight: 800, fontSize: 32, letterSpacing: 3 }}>{elapsed}</span>
               </div>
             )}
 
             {!session.started_at && session.status !== 'signed_off' && (
               <div style={{ background: '#fff8e1', borderRadius: 16, padding: '16px 24px', marginBottom: 24, border: '1px solid #fde68a' }}>
-                <span style={{ color: '#92400e', fontWeight: 600, fontSize: 14 }}>Timer not started — open the mobile app and tap Start Compliance Check to begin timing.</span>
+                <span style={{ color: '#92400e', fontWeight: 600, fontSize: 14 }}>Timer not started — open the mobile app and tap Start Compliance Check.</span>
               </div>
             )}
 
@@ -219,7 +356,6 @@ export default function CompliancePage() {
             )}
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 20, marginBottom: 32 }}>
-
               <div style={cardStyle}>
                 <div style={labelStyle}>CHECKLIST</div>
                 <div style={{ fontSize: 36, fontWeight: 800, color: pctColor }}>{pct}%</div>
@@ -244,11 +380,7 @@ export default function CompliancePage() {
               <div style={cardStyle}>
                 <div style={labelStyle}>TIME TAKEN</div>
                 <div style={{ fontSize: 22, fontWeight: 800, color: PRIMARY }}>
-                  {session.duration_seconds
-                    ? formatDuration(session.duration_seconds)
-                    : session.started_at && session.status !== 'signed_off'
-                    ? elapsed
-                    : 'Not started'}
+                  {session.duration_seconds ? formatDuration(session.duration_seconds) : session.started_at && session.status !== 'signed_off' ? elapsed : 'Not started'}
                 </div>
                 <div style={{ fontSize: 13, color: '#888', marginTop: 4 }}>compliance duration</div>
               </div>
@@ -264,7 +396,6 @@ export default function CompliancePage() {
                 <div style={{ fontSize: 36, fontWeight: 800, color: tempColor }}>{tempLogs.length === 0 ? '-' : `${tempCompliant}/${tempLogs.length}`}</div>
                 <div style={{ fontSize: 13, color: '#888', marginTop: 4 }}>readings compliant</div>
               </div>
-
             </div>
 
             <div style={{ display: 'flex', gap: 4, marginBottom: 24, background: '#fff', padding: 4, borderRadius: 14, border: '1px solid #eef2ee', width: 'fit-content' }}>
@@ -292,7 +423,7 @@ export default function CompliancePage() {
                         </div>
                       </div>
                       {items.map((item, idx) => (
-                        <div key={item.id} style={{ padding: '14px 24px', display: 'flex', alignItems: 'center', gap: 14, borderBottom: idx < items.length - 1 ? '1px solid #f0f4f0' : 'none' }}>
+                        <div key={item.id} style={{ padding: '14px 24px', display: 'flex', alignItems: 'center', gap: 14, borderBottom: idx < items.length - 1 ? '1px solid #f0f4f0' : 'none', cursor: 'pointer' }} onClick={() => openItemDetail(item)}>
                           <div style={{ width: 28, height: 28, borderRadius: '50%', flexShrink: 0, background: item.completed ? PRIMARY : '#eef2ee', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 14, fontWeight: 700 }}>
                             {item.completed ? 'v' : ''}
                           </div>
@@ -302,7 +433,20 @@ export default function CompliancePage() {
                             {item.ai_photo_result && <div style={{ fontSize: 12, marginTop: 4, color: item.ai_photo_result === 'pass' ? PRIMARY : '#ef4444', fontWeight: 600 }}>AI: {item.ai_photo_result}</div>}
                           </div>
                           {item.completed_at && <div style={{ fontSize: 11, color: '#bbb', whiteSpace: 'nowrap' }}>{new Date(item.completed_at).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })}</div>}
-                          {item.photo_url && <img src={item.photo_url} alt="task" style={{ width: 40, height: 40, borderRadius: 8, objectFit: 'cover' }} />}
+                          {item.photo_url && (
+                            <div style={{ position: 'relative' }}>
+                              <img
+                                src={item.photo_url}
+                                alt="task"
+                                onClick={e => { e.stopPropagation(); setLightboxUrl(item.photo_url!); setLightboxTitle(item.checklist_templates?.task_name || ''); }}
+                                style={{ width: 48, height: 48, borderRadius: 8, objectFit: 'cover', cursor: 'zoom-in', border: '2px solid #eef2ee' }}
+                              />
+                              <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.3)', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'zoom-in', pointerEvents: 'none' }}>
+                                <span style={{ color: '#fff', fontSize: 16 }}>+</span>
+                              </div>
+                            </div>
+                          )}
+                          <span style={{ color: '#ddd', fontSize: 16 }}>›</span>
                         </div>
                       ))}
                     </div>
@@ -317,7 +461,7 @@ export default function CompliancePage() {
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 20 }}>
                   {uniforms.map(u => (
                     <div key={u.id} style={{ background: '#fff', borderRadius: 20, border: '1px solid #eef2ee', overflow: 'hidden' }}>
-                      <img src={u.photo_url} alt="uniform" style={{ width: '100%', height: 220, objectFit: 'cover' }} />
+                      <img src={u.photo_url} alt="uniform" onClick={() => { setLightboxUrl(u.photo_url); setLightboxTitle('Uniform Check'); }} style={{ width: '100%', height: 220, objectFit: 'cover', cursor: 'zoom-in' }} />
                       <div style={{ padding: 16 }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                           <span style={{ fontSize: 13, color: '#666' }}>{new Date(u.taken_at).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })}</span>
