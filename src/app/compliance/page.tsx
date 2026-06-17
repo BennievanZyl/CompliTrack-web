@@ -332,7 +332,7 @@ export default function CompliancePage() {
                   rel="noopener noreferrer"
                   style={{ display: 'inline-block', padding: '14px 32px', background: PRIMARY, color: '#fff', borderRadius: 12, fontWeight: 700, textDecoration: 'none', fontSize: 15 }}
                 >
-                  📄 Download PDF Report
+                  Download PDF Report
                 </a>
               </div>
             )}
