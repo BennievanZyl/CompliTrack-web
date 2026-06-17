@@ -41,11 +41,14 @@ type UniformSession = {
 type TempLog = {
   id: string;
   equipment_name: string;
+  equipment_type: string;
   temperature_c: number;
   period: string;
   is_compliant: boolean;
   logged_at: string;
 };
+
+type Tab = 'checklist' | 'uniforms' | 'temperature';
 
 export default function CompliancePage() {
   const router = useRouter();
@@ -54,10 +57,11 @@ export default function CompliancePage() {
   const [uniforms, setUniforms] = useState<UniformSession[]>([]);
   const [tempLogs, setTempLogs] = useState<TempLog[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'checklist' | 'uniforms' | 'temperature'>('checklist');
+  const [activeTab, setActiveTab] = useState<Tab>('checklist');
 
   useEffect(() => {
     checkAuthAndLoad();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function checkAuthAndLoad() {
@@ -70,7 +74,6 @@ export default function CompliancePage() {
     setLoading(true);
     const today = new Date().toISOString().split('T')[0];
 
-    // Load today's session
     const { data: sessionData } = await supabase
       .from('daily_sessions')
       .select('*')
@@ -81,31 +84,25 @@ export default function CompliancePage() {
     setSession(sessionData);
 
     if (sessionData) {
-      // Load checklist items with template names
       const { data: checklistData } = await supabase
         .from('checklist_items')
         .select('*, checklist_templates(task_name, section, requires_photo)')
         .eq('session_id', sessionData.id)
         .order('created_at');
-
       setChecklist(checklistData || []);
 
-      // Load uniform photos
       const { data: uniformData } = await supabase
         .from('uniform_sessions')
         .select('*')
         .eq('session_id', sessionData.id)
         .order('taken_at', { ascending: false });
-
       setUniforms(uniformData || []);
 
-      // Load temperature logs
       const { data: tempData } = await supabase
         .from('temperature_logs')
         .select('*')
         .eq('session_id', sessionData.id)
         .order('logged_at');
-
       setTempLogs(tempData || []);
     }
 
@@ -115,24 +112,28 @@ export default function CompliancePage() {
   const completed = checklist.filter(i => i.completed).length;
   const total = checklist.length;
   const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
+  const tempCompliant = tempLogs.filter(t => t.is_compliant).length;
 
-  // Group checklist by section
-  const sections = checklist.reduce((acc, item) => {
+  const sections = checklist.reduce<Record<string, ChecklistItem[]>>((acc, item) => {
     const sec = item.checklist_templates?.section || 'General';
     if (!acc[sec]) acc[sec] = [];
     acc[sec].push(item);
     return acc;
-  }, {} as Record<string, ChecklistItem[]>);
+  }, {});
 
-  const tempCompliant = tempLogs.filter(t => t.is_compliant).length;
+  const scoreColor = (val: number, max: number) => val === max ? PRIMARY : val / max >= 0.7 ? '#f59e0b' : '#ef4444';
 
   return (
     <div style={{ minHeight: '100vh', background: '#f8faf8', fontFamily: 'system-ui, sans-serif' }}>
+
       {/* Header */}
       <div style={{ background: `linear-gradient(135deg, ${DARK}, ${PRIMARY})`, padding: '0 32px' }}>
         <div style={{ maxWidth: 1100, margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 64 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <button onClick={() => router.push('/dashboard')} style={{ background: 'rgba(255,255,255,0.15)', border: 'none', color: '#fff', borderRadius: 8, padding: '6px 14px', cursor: 'pointer', fontSize: 14 }}>
+            <button
+              onClick={() => router.push('/dashboard')}
+              style={{ background: 'rgba(255,255,255,0.15)', border: 'none', color: '#fff', borderRadius: 8, padding: '6px 14px', cursor: 'pointer', fontSize: 14 }}
+            >
               ← Dashboard
             </button>
             <span style={{ color: '#fff', fontWeight: 700, fontSize: 18 }}>Daily Compliance</span>
@@ -144,33 +145,37 @@ export default function CompliancePage() {
       </div>
 
       <div style={{ maxWidth: 1100, margin: '0 auto', padding: '32px 24px' }}>
-        {loading ? (
+
+        {loading && (
           <div style={{ textAlign: 'center', padding: 80, color: '#666' }}>Loading compliance data...</div>
-        ) : !session ? (
+        )}
+
+        {!loading && !session && (
           <div style={{ textAlign: 'center', padding: 80 }}>
             <div style={{ fontSize: 48, marginBottom: 16 }}>📋</div>
             <div style={{ fontSize: 20, fontWeight: 600, color: '#333', marginBottom: 8 }}>No session today</div>
-            <div style={{ color: '#666' }}>No compliance session has been opened for today yet. Open the mobile app to start one.</div>
+            <div style={{ color: '#666' }}>No compliance session has been opened yet. Open the mobile app to start one.</div>
           </div>
-        ) : (
+        )}
+
+        {!loading && session && (
           <>
-            {/* Score cards */}
+            {/* Score Cards */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 20, marginBottom: 32 }}>
-              {/* Completion */}
+
               <div style={{ background: '#fff', borderRadius: 20, padding: 24, border: '1px solid #eef2ee', boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}>
                 <div style={{ fontSize: 13, color: '#666', marginBottom: 8, fontWeight: 500 }}>CHECKLIST</div>
-                <div style={{ fontSize: 36, fontWeight: 800, color: pct === 100 ? PRIMARY : pct >= 70 ? '#f59e0b' : '#ef4444' }}>{pct}%</div>
+                <div style={{ fontSize: 36, fontWeight: 800, color: scoreColor(pct, 100) }}>{pct}%</div>
                 <div style={{ fontSize: 13, color: '#888', marginTop: 4 }}>{completed} of {total} tasks</div>
                 <div style={{ marginTop: 12, height: 6, background: '#eef2ee', borderRadius: 3 }}>
-                  <div style={{ height: '100%', width: `${pct}%`, background: pct === 100 ? PRIMARY : pct >= 70 ? '#f59e0b' : '#ef4444', borderRadius: 3, transition: 'width 0.5s' }} />
+                  <div style={{ height: '100%', width: `${pct}%`, background: scoreColor(pct, 100), borderRadius: 3, transition: 'width 0.5s' }} />
                 </div>
               </div>
 
-              {/* Status */}
               <div style={{ background: '#fff', borderRadius: 20, padding: 24, border: '1px solid #eef2ee', boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}>
                 <div style={{ fontSize: 13, color: '#666', marginBottom: 8, fontWeight: 500 }}>STATUS</div>
-                <div style={{ fontSize: 20, fontWeight: 700, color: session.status === 'signed_off' ? PRIMARY : '#f59e0b', textTransform: 'capitalize' }}>
-                  {session.status === 'signed_off' ? '✅ Signed Off' : session.status === 'open' ? '🔄 In Progress' : session.status}
+                <div style={{ fontSize: 20, fontWeight: 700, color: session.status === 'signed_off' ? PRIMARY : '#f59e0b' }}>
+                  {session.status === 'signed_off' ? '✅ Signed Off' : '🔄 In Progress'}
                 </div>
                 {session.signed_off_at && (
                   <div style={{ fontSize: 12, color: '#888', marginTop: 4 }}>
@@ -179,33 +184,36 @@ export default function CompliancePage() {
                 )}
               </div>
 
-              {/* Uniforms */}
               <div style={{ background: '#fff', borderRadius: 20, padding: 24, border: '1px solid #eef2ee', boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}>
                 <div style={{ fontSize: 13, color: '#666', marginBottom: 8, fontWeight: 500 }}>UNIFORMS</div>
                 <div style={{ fontSize: 36, fontWeight: 800, color: PRIMARY }}>{uniforms.length}</div>
                 <div style={{ fontSize: 13, color: '#888', marginTop: 4 }}>photos captured</div>
               </div>
 
-              {/* Temperature */}
               <div style={{ background: '#fff', borderRadius: 20, padding: 24, border: '1px solid #eef2ee', boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}>
                 <div style={{ fontSize: 13, color: '#666', marginBottom: 8, fontWeight: 500 }}>TEMPERATURE</div>
-                <div style={{ fontSize: 36, fontWeight: 800, color: tempLogs.length === 0 ? '#ccc' : tempCompliant === tempLogs.length ? PRIMARY : '#ef4444' }}>
+                <div style={{ fontSize: 36, fontWeight: 800, color: tempLogs.length === 0 ? '#ccc' : scoreColor(tempCompliant, tempLogs.length) }}>
                   {tempLogs.length === 0 ? '—' : `${tempCompliant}/${tempLogs.length}`}
                 </div>
                 <div style={{ fontSize: 13, color: '#888', marginTop: 4 }}>readings compliant</div>
               </div>
+
             </div>
 
             {/* Tabs */}
             <div style={{ display: 'flex', gap: 4, marginBottom: 24, background: '#fff', padding: 4, borderRadius: 14, border: '1px solid #eef2ee', width: 'fit-content' }}>
-              {(['checklist', 'uniforms', 'temperature'] as const).map(tab => (
-                <button key={tab} onClick={() => setActiveTab(tab)} style={{
-                  padding: '8px 20px', borderRadius: 10, border: 'none', cursor: 'pointer', fontWeight: 600, fontSize: 14,
-                  background: activeTab === tab ? PRIMARY : 'transparent',
-                  color: activeTab === tab ? '#fff' : '#666',
-                  textTransform: 'capitalize', transition: 'all 0.2s'
-                }}>
-                  {tab === 'checklist' ? `✅ Checklist` : tab === 'uniforms' ? `📸 Uniforms` : `🌡️ Temperature`}
+              {(['checklist', 'uniforms', 'temperature'] as Tab[]).map(tab => (
+                <button
+                  key={tab}
+                  onClick={() => setActiveTab(tab)}
+                  style={{
+                    padding: '8px 20px', borderRadius: 10, border: 'none', cursor: 'pointer',
+                    fontWeight: 600, fontSize: 14, transition: 'all 0.2s',
+                    background: activeTab === tab ? PRIMARY : 'transparent',
+                    color: activeTab === tab ? '#fff' : '#666',
+                  }}
+                >
+                  {tab === 'checklist' ? '✅ Checklist' : tab === 'uniforms' ? '📸 Uniforms' : '🌡️ Temperature'}
                 </button>
               ))}
             </div>
@@ -213,6 +221,9 @@ export default function CompliancePage() {
             {/* Checklist Tab */}
             {activeTab === 'checklist' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+                {checklist.length === 0 && (
+                  <div style={{ textAlign: 'center', padding: 60, color: '#888' }}>No checklist items for this session yet.</div>
+                )}
                 {Object.entries(sections).map(([section, items]) => {
                   const secDone = items.filter(i => i.completed).length;
                   return (
@@ -222,16 +233,8 @@ export default function CompliancePage() {
                         <span style={{ fontSize: 13, color: secDone === items.length ? PRIMARY : '#888', fontWeight: 600 }}>{secDone}/{items.length}</span>
                       </div>
                       {items.map((item, idx) => (
-                        <div key={item.id} style={{
-                          padding: '14px 24px', display: 'flex', alignItems: 'center', gap: 14,
-                          borderBottom: idx < items.length - 1 ? '1px solid #f0f4f0' : 'none'
-                        }}>
-                          <div style={{
-                            width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
-                            background: item.completed ? PRIMARY : '#eef2ee',
-                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            fontSize: 14
-                          }}>
+                        <div key={item.id} style={{ padding: '14px 24px', display: 'flex', alignItems: 'center', gap: 14, borderBottom: idx < items.length - 1 ? '1px solid #f0f4f0' : 'none' }}>
+                          <div style={{ width: 28, height: 28, borderRadius: '50%', flexShrink: 0, background: item.completed ? PRIMARY : '#eef2ee', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, color: '#fff' }}>
                             {item.completed ? '✓' : ''}
                           </div>
                           <div style={{ flex: 1 }}>
@@ -251,16 +254,13 @@ export default function CompliancePage() {
                             </div>
                           )}
                           {item.photo_url && (
-                            <img src={item.photo_url} alt="task" style={{ width: 40, height: 40, borderRadius: 8, objectFit: 'cover' }} />
+                            <img src={item.photo_url} alt="task photo" style={{ width: 40, height: 40, borderRadius: 8, objectFit: 'cover' }} />
                           )}
                         </div>
                       ))}
                     </div>
                   );
                 })}
-                {checklist.length === 0 && (
-                  <div style={{ textAlign: 'center', padding: 60, color: '#888' }}>No checklist items for this session yet.</div>
-                )}
               </div>
             )}
 
@@ -273,18 +273,14 @@ export default function CompliancePage() {
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 20 }}>
                     {uniforms.map(u => (
                       <div key={u.id} style={{ background: '#fff', borderRadius: 20, border: '1px solid #eef2ee', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
-                        <img src={u.photo_url} alt="uniform" style={{ width: '100%', height: 220, objectFit: 'cover' }} />
+                        <img src={u.photo_url} alt="uniform check" style={{ width: '100%', height: 220, objectFit: 'cover' }} />
                         <div style={{ padding: 16 }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                             <span style={{ fontSize: 13, color: '#666' }}>
                               {new Date(u.taken_at).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })}
                             </span>
                             {u.ai_overall_result && (
-                              <span style={{
-                                fontSize: 12, fontWeight: 700, padding: '3px 10px', borderRadius: 20,
-                                background: u.ai_overall_result === 'pass' ? '#e8f5e9' : '#fdecea',
-                                color: u.ai_overall_result === 'pass' ? PRIMARY : '#ef4444'
-                              }}>
+                              <span style={{ fontSize: 12, fontWeight: 700, padding: '3px 10px', borderRadius: 20, background: u.ai_overall_result === 'pass' ? '#e8f5e9' : '#fdecea', color: u.ai_overall_result === 'pass' ? PRIMARY : '#ef4444' }}>
                                 {u.ai_overall_result.toUpperCase()}
                               </span>
                             )}
@@ -305,15 +301,8 @@ export default function CompliancePage() {
                   <div style={{ textAlign: 'center', padding: 60, color: '#888' }}>No temperature logs for today.</div>
                 ) : (
                   tempLogs.map((log, idx) => (
-                    <div key={log.id} style={{
-                      padding: '16px 24px', display: 'flex', alignItems: 'center', gap: 16,
-                      borderBottom: idx < tempLogs.length - 1 ? '1px solid #f0f4f0' : 'none'
-                    }}>
-                      <div style={{
-                        width: 48, height: 48, borderRadius: 12, flexShrink: 0,
-                        background: log.is_compliant ? '#e8f5e9' : '#fdecea',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20
-                      }}>
+                    <div key={log.id} style={{ padding: '16px 24px', display: 'flex', alignItems: 'center', gap: 16, borderBottom: idx < tempLogs.length - 1 ? '1px solid #f0f4f0' : 'none' }}>
+                      <div style={{ width: 48, height: 48, borderRadius: 12, flexShrink: 0, background: log.is_compliant ? '#e8f5e9' : '#fdecea', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20 }}>
                         🌡️
                       </div>
                       <div style={{ flex: 1 }}>
@@ -337,10 +326,12 @@ export default function CompliancePage() {
             {/* PDF Download */}
             {session.pdf_report_url && (
               <div style={{ marginTop: 32, textAlign: 'center' }}>
-                <a href={session.pdf_report_url} target="_blank" rel="noopener noreferrer" style={{
-                  display: 'inline-block', padding: '14px 32px', background: PRIMARY, color: '#fff',
-                  borderRadius: 12, fontWeight: 700, textDecoration: 'none', fontSize: 15
-                }}>
+                
+                  href={session.pdf_report_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ display: 'inline-block', padding: '14px 32px', background: PRIMARY, color: '#fff', borderRadius: 12, fontWeight: 700, textDecoration: 'none', fontSize: 15 }}
+                >
                   📄 Download PDF Report
                 </a>
               </div>
