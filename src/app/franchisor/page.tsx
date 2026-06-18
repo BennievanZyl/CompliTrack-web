@@ -7,35 +7,10 @@ import { supabase } from '@/lib/supabase';
 const PRIMARY = '#1a5c38';
 const DARK = '#0a1f12';
 
-type Organisation = {
-  id: string;
-  name: string;
-};
-
-type Store = {
-  id: string;
-  name: string;
-  city: string;
-  manager_name: string | null;
-  organisation_id: string;
-  is_active: boolean;
-};
-
-type StoreStats = {
-  store_id: string;
-  session_id: string | null;
-  status: string | null;
-  total: number;
-  completed: number;
-  uniform_photos: number;
-  temp_violations: number;
-  duration_seconds: number | null;
-};
-
-type Profile = {
-  full_name: string;
-  franchisor_id: string;
-};
+type Organisation = { id: string; name: string; };
+type Store = { id: string; name: string; city: string; manager_name: string | null; organisation_id: string; is_active: boolean; };
+type StoreStats = { store_id: string; session_id: string | null; status: string | null; total: number; completed: number; uniform_photos: number; temp_violations: number; duration_seconds: number | null; };
+type Profile = { full_name: string; franchisor_id: string; };
 
 function formatDuration(seconds: number): string {
   if (seconds >= 3600) return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
@@ -72,44 +47,30 @@ export default function FranchisorPage() {
     if (!user) { router.push('/login'); return; }
 
     const { data: profileData } = await supabase
-      .from('profiles')
-      .select('full_name, franchisor_id, role')
-      .eq('id', user.id)
-      .single();
+      .from('profiles').select('full_name, franchisor_id, role').eq('id', user.id).single();
 
     if (!profileData) { router.push('/login'); return; }
     if (profileData.role !== 'franchisor_admin' && profileData.role !== 'platform_admin') {
-      router.push('/dashboard');
-      return;
+      router.push('/dashboard'); return;
     }
 
     setProfile(profileData);
 
     const { data: franchisorData } = await supabase
-      .from('franchisors')
-      .select('name')
-      .eq('id', profileData.franchisor_id)
-      .single();
-
+      .from('franchisors').select('name').eq('id', profileData.franchisor_id).single();
     setFranchisorName(franchisorData?.name || 'Franchisor');
 
     const { data: orgData } = await supabase
-      .from('organisations')
-      .select('id, name')
-      .eq('franchisor_id', profileData.franchisor_id)
-      .order('name');
-
+      .from('organisations').select('id, name')
+      .eq('franchisor_id', profileData.franchisor_id).order('name');
     setOrgs(orgData || []);
 
     const orgIds = (orgData || []).map(o => o.id);
     if (orgIds.length === 0) { setLoading(false); return; }
 
     const { data: storeData } = await supabase
-      .from('stores')
-      .select('id, name, city, manager_name, organisation_id, is_active')
-      .in('organisation_id', orgIds)
-      .eq('is_active', true)
-      .order('name');
+      .from('stores').select('id, name, city, manager_name, organisation_id, is_active')
+      .in('organisation_id', orgIds).eq('is_active', true).order('name');
 
     setStores(storeData || []);
     if (storeData) await loadStats(storeData);
@@ -121,12 +82,14 @@ export default function FranchisorPage() {
     const statsMap: Record<string, StoreStats> = {};
 
     await Promise.all(storeList.map(async (store) => {
+      // KEY FIX: use maybeSingle() + filter by session_type = daily only
       const { data: session } = await supabase
         .from('daily_sessions')
         .select('id, status, duration_seconds')
         .eq('store_id', store.id)
         .eq('session_date', today)
-        .single();
+        .eq('session_type', 'daily')
+        .maybeSingle();
 
       if (!session) {
         statsMap[store.id] = { store_id: store.id, session_id: null, status: null, total: 0, completed: 0, uniform_photos: 0, temp_violations: 0, duration_seconds: null };
@@ -139,13 +102,9 @@ export default function FranchisorPage() {
       const { count: temp_violations } = await supabase.from('temperature_logs').select('*', { count: 'exact', head: true }).eq('session_id', session.id).eq('is_compliant', false);
 
       statsMap[store.id] = {
-        store_id: store.id,
-        session_id: session.id,
-        status: session.status,
-        total: total || 0,
-        completed: completed || 0,
-        uniform_photos: uniform_photos || 0,
-        temp_violations: temp_violations || 0,
+        store_id: store.id, session_id: session.id, status: session.status,
+        total: total || 0, completed: completed || 0,
+        uniform_photos: uniform_photos || 0, temp_violations: temp_violations || 0,
         duration_seconds: session.duration_seconds,
       };
     }));
@@ -171,7 +130,6 @@ export default function FranchisorPage() {
 
   const cardStyle = { background: '#fff', borderRadius: 20, padding: 24, border: '1px solid #eef2ee', boxShadow: '0 2px 8px rgba(0,0,0,0.06)' };
   const labelStyle = { fontSize: 13, color: '#666', marginBottom: 8, fontWeight: 500 as const };
-
   const getOrgName = (orgId: string) => orgs.find(o => o.id === orgId)?.name || '';
 
   return (
@@ -202,12 +160,10 @@ export default function FranchisorPage() {
       </div>
 
       <div style={{ maxWidth: 1400, margin: '0 auto', padding: '32px 24px' }}>
-
         {loading && <div style={{ textAlign: 'center', padding: 80, color: '#666' }}>Loading franchise data...</div>}
 
         {!loading && (
           <div>
-
             <div style={{ marginBottom: 32 }}>
               <h1 style={{ fontSize: 28, fontWeight: 800, color: '#111', margin: '0 0 4px 0' }}>
                 Good {new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 17 ? 'afternoon' : 'evening'}, {profile?.full_name?.split(' ')[0]}
@@ -216,13 +172,11 @@ export default function FranchisorPage() {
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 20, marginBottom: 32 }}>
-
               <div style={cardStyle}>
                 <div style={labelStyle}>TOTAL STORES</div>
                 <div style={{ fontSize: 40, fontWeight: 800, color: PRIMARY }}>{stores.length}</div>
                 <div style={{ fontSize: 13, color: '#888', marginTop: 4 }}>{orgs.length} organisations</div>
               </div>
-
               <div style={cardStyle}>
                 <div style={labelStyle}>SIGNED OFF</div>
                 <div style={{ fontSize: 40, fontWeight: 800, color: signedOff === stores.length && stores.length > 0 ? PRIMARY : '#f59e0b' }}>{signedOff}</div>
@@ -231,19 +185,16 @@ export default function FranchisorPage() {
                   <div style={{ height: '100%', width: `${stores.length > 0 ? (signedOff / stores.length) * 100 : 0}%`, background: PRIMARY, borderRadius: 3 }} />
                 </div>
               </div>
-
               <div style={cardStyle}>
                 <div style={labelStyle}>IN PROGRESS</div>
                 <div style={{ fontSize: 40, fontWeight: 800, color: '#f59e0b' }}>{inProgress}</div>
                 <div style={{ fontSize: 13, color: '#888', marginTop: 4 }}>sessions active now</div>
               </div>
-
               <div style={cardStyle}>
                 <div style={labelStyle}>NO SESSION</div>
                 <div style={{ fontSize: 40, fontWeight: 800, color: noSession > 0 ? '#ef4444' : PRIMARY }}>{noSession}</div>
                 <div style={{ fontSize: 13, color: '#888', marginTop: 4 }}>stores not started</div>
               </div>
-
               <div style={cardStyle}>
                 <div style={labelStyle}>AVG COMPLIANCE</div>
                 <div style={{ fontSize: 40, fontWeight: 800, color: pctColor(avgCompliance) }}>{avgCompliance}%</div>
@@ -252,31 +203,24 @@ export default function FranchisorPage() {
                   <div style={{ height: '100%', width: `${avgCompliance}%`, background: pctColor(avgCompliance), borderRadius: 3 }} />
                 </div>
               </div>
-
               <div style={cardStyle}>
                 <div style={labelStyle}>TEMP VIOLATIONS</div>
                 <div style={{ fontSize: 40, fontWeight: 800, color: totalViolations > 0 ? '#ef4444' : PRIMARY }}>{totalViolations}</div>
                 <div style={{ fontSize: 13, color: '#888', marginTop: 4 }}>out of range today</div>
               </div>
-
             </div>
 
-            <div style={{ display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap' }}>
-              <input
-                placeholder="Search stores..."
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-                style={{ padding: '10px 16px', borderRadius: 10, border: '1.5px solid #eef2ee', fontSize: 14, outline: 'none', fontFamily: 'inherit', minWidth: 220, background: '#fff' }}
-              />
+            <div style={{ display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap' as const }}>
+              <input placeholder="Search stores..." value={search} onChange={e => setSearch(e.target.value)} style={{ padding: '10px 16px', borderRadius: 10, border: '1.5px solid #eef2ee', fontSize: 14, outline: 'none', fontFamily: 'inherit', minWidth: 220, background: '#fff' }} />
               <div style={{ display: 'flex', gap: 4, background: '#fff', padding: 4, borderRadius: 12, border: '1px solid #eef2ee' }}>
                 <button onClick={() => setSelectedOrg('all')} style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', fontWeight: 600, fontSize: 13, background: selectedOrg === 'all' ? PRIMARY : 'transparent', color: selectedOrg === 'all' ? '#fff' : '#666' }}>All</button>
                 {orgs.map(org => (
-                  <button key={org.id} onClick={() => setSelectedOrg(org.id)} style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', fontWeight: 600, fontSize: 13, background: selectedOrg === org.id ? PRIMARY : 'transparent', color: selectedOrg === org.id ? '#fff' : '#666', whiteSpace: 'nowrap' }}>{org.name}</button>
+                  <button key={org.id} onClick={() => setSelectedOrg(org.id)} style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', fontWeight: 600, fontSize: 13, background: selectedOrg === org.id ? PRIMARY : 'transparent', color: selectedOrg === org.id ? '#fff' : '#666', whiteSpace: 'nowrap' as const }}>{org.name}</button>
                 ))}
               </div>
             </div>
 
-            <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ marginBottom: 16 }}>
               <h2 style={{ fontSize: 18, fontWeight: 700, color: '#333', margin: 0 }}>Store Health — Today ({filteredStores.length} stores)</h2>
             </div>
 
@@ -291,14 +235,13 @@ export default function FranchisorPage() {
 
                 return (
                   <div key={store.id} style={{ background: '#fff', borderRadius: 16, border: `1.5px solid ${borderColor}`, padding: 20, cursor: 'pointer', boxShadow: '0 2px 6px rgba(0,0,0,0.04)' }} onClick={() => router.push('/dashboard')}>
-
                     <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 12 }}>
                       <div>
                         <div style={{ fontWeight: 700, color: '#333', fontSize: 15, marginBottom: 2 }}>{store.name}</div>
                         <div style={{ fontSize: 12, color: '#aaa' }}>{getOrgName(store.organisation_id)}</div>
                         {store.city && <div style={{ fontSize: 12, color: '#bbb' }}>{store.city}</div>}
                       </div>
-                      <span style={{ fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 20, whiteSpace: 'nowrap', background: !hasSession ? '#f3f4f6' : s?.status === 'signed_off' ? '#e8f5e9' : '#fff8e1', color: !hasSession ? '#9ca3af' : s?.status === 'signed_off' ? PRIMARY : '#f59e0b' }}>
+                      <span style={{ fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 20, whiteSpace: 'nowrap' as const, background: !hasSession ? '#f3f4f6' : s?.status === 'signed_off' ? '#e8f5e9' : '#fff8e1', color: !hasSession ? '#9ca3af' : s?.status === 'signed_off' ? PRIMARY : '#f59e0b' }}>
                         {!hasSession ? 'NO SESSION' : s?.status === 'signed_off' ? 'SIGNED OFF' : 'IN PROGRESS'}
                       </span>
                     </div>
@@ -313,16 +256,16 @@ export default function FranchisorPage() {
                           <div style={{ height: '100%', width: `${p}%`, background: color, borderRadius: 4 }} />
                         </div>
                         <div style={{ display: 'flex', gap: 8 }}>
-                          <div style={{ flex: 1, textAlign: 'center', background: '#f8faf8', borderRadius: 8, padding: '6px 4px' }}>
+                          <div style={{ flex: 1, textAlign: 'center' as const, background: '#f8faf8', borderRadius: 8, padding: '6px 4px' }}>
                             <div style={{ fontSize: 14, fontWeight: 700, color: '#333' }}>{s.uniform_photos}</div>
                             <div style={{ fontSize: 10, color: '#aaa' }}>Uniforms</div>
                           </div>
-                          <div style={{ flex: 1, textAlign: 'center', background: s.temp_violations > 0 ? '#fdecea' : '#f8faf8', borderRadius: 8, padding: '6px 4px' }}>
+                          <div style={{ flex: 1, textAlign: 'center' as const, background: s.temp_violations > 0 ? '#fdecea' : '#f8faf8', borderRadius: 8, padding: '6px 4px' }}>
                             <div style={{ fontSize: 14, fontWeight: 700, color: s.temp_violations > 0 ? '#ef4444' : '#333' }}>{s.temp_violations}</div>
                             <div style={{ fontSize: 10, color: '#aaa' }}>Violations</div>
                           </div>
                           {s.duration_seconds && (
-                            <div style={{ flex: 1, textAlign: 'center', background: '#f8faf8', borderRadius: 8, padding: '6px 4px' }}>
+                            <div style={{ flex: 1, textAlign: 'center' as const, background: '#f8faf8', borderRadius: 8, padding: '6px 4px' }}>
                               <div style={{ fontSize: 11, fontWeight: 700, color: PRIMARY }}>{formatDuration(s.duration_seconds)}</div>
                               <div style={{ fontSize: 10, color: '#aaa' }}>Duration</div>
                             </div>
@@ -330,14 +273,12 @@ export default function FranchisorPage() {
                         </div>
                       </div>
                     ) : (
-                      <div style={{ textAlign: 'center', padding: '16px 0', color: '#ddd', fontSize: 13 }}>No session started today</div>
+                      <div style={{ textAlign: 'center' as const, padding: '16px 0', color: '#ddd', fontSize: 13 }}>No session started today</div>
                     )}
-
                   </div>
                 );
               })}
             </div>
-
           </div>
         )}
       </div>
