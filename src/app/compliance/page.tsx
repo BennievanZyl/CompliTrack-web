@@ -31,6 +31,7 @@ type ChecklistItem = {
     task_name: string;
     section: string;
     requires_photo: boolean;
+    sort_order: number | null;
   } | null;
 };
 
@@ -73,6 +74,18 @@ function formatElapsed(startedAt: string): string {
   const m = Math.floor((elapsed % 3600) / 60);
   const s = elapsed % 60;
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+
+function sortChecklist(items: ChecklistItem[]): ChecklistItem[] {
+  return [...items].sort((a, b) => {
+    const secA = a.checklist_templates?.section || 'General';
+    const secB = b.checklist_templates?.section || 'General';
+    if (secA !== secB) return secA.localeCompare(secB);
+    const orderA = a.checklist_templates?.sort_order ?? 999;
+    const orderB = b.checklist_templates?.sort_order ?? 999;
+    if (orderA !== orderB) return orderA - orderB;
+    return (a.checklist_templates?.task_name || '').localeCompare(b.checklist_templates?.task_name || '');
+  });
 }
 
 export default function CompliancePage() {
@@ -142,8 +155,11 @@ export default function CompliancePage() {
   async function loadSessionData(sessionId: string) {
     const { data: sessionData } = await supabase.from('daily_sessions').select('*').eq('id', sessionId).single();
     if (sessionData) setSession(sessionData);
-    const { data: checklistData } = await supabase.from('checklist_items').select('*, checklist_templates(task_name, section, requires_photo)').eq('session_id', sessionId).order('created_at');
-    setChecklist(checklistData || []);
+    const { data: checklistData } = await supabase
+      .from('checklist_items')
+      .select('*, checklist_templates(task_name, section, requires_photo, sort_order)')
+      .eq('session_id', sessionId);
+    setChecklist(sortChecklist(checklistData || []));
     const { data: uniformData } = await supabase.from('uniform_sessions').select('*').eq('session_id', sessionId).order('taken_at', { ascending: false });
     setUniforms(uniformData || []);
     const { data: tempData } = await supabase.from('temperature_logs').select('*').eq('session_id', sessionId).order('logged_at');
@@ -179,7 +195,6 @@ export default function CompliancePage() {
   async function sendComment() {
     if (!newComment.trim() || !selectedItem || !session || !currentUser) return;
     setSendingComment(true);
-
     await supabase.from('compliance_comments').insert({
       checklist_item_id: selectedItem.id,
       session_id: session.id,
@@ -187,7 +202,6 @@ export default function CompliancePage() {
       sender_id: currentUser.id,
       message: newComment.trim(),
     });
-
     const recipientId = session.opened_by;
     if (recipientId && recipientId !== currentUser.id) {
       const convId = await getOrCreateConversation(recipientId);
@@ -195,19 +209,10 @@ export default function CompliancePage() {
         const taskName = selectedItem.checklist_templates?.task_name || 'Checklist item';
         const sessionDate = new Date(session.session_date).toLocaleDateString('en-ZA');
         const chatMessage = `Compliance query on "${taskName}" (${sessionDate}): ${newComment.trim()}`;
-        await supabase.from('chat_messages').insert({
-          conversation_id: convId,
-          sender_id: currentUser.id,
-          recipient_id: recipientId,
-          message: chatMessage,
-        });
-        await supabase.from('conversations').update({
-          last_message: chatMessage,
-          last_message_at: new Date().toISOString(),
-        }).eq('id', convId);
+        await supabase.from('chat_messages').insert({ conversation_id: convId, sender_id: currentUser.id, recipient_id: recipientId, message: chatMessage });
+        await supabase.from('conversations').update({ last_message: chatMessage, last_message_at: new Date().toISOString() }).eq('id', convId);
       }
     }
-
     setNewComment('');
     await loadComments(selectedItem.id);
     setSendingComment(false);
@@ -238,6 +243,8 @@ export default function CompliancePage() {
     return acc;
   }, {});
 
+  const sortedSectionEntries = Object.entries(sections).sort(([a], [b]) => a.localeCompare(b));
+
   const cardStyle = { background: '#fff', borderRadius: 20, padding: 24, border: '1px solid #eef2ee', boxShadow: '0 2px 8px rgba(0,0,0,0.06)' };
   const labelStyle = { fontSize: 13, color: '#666', marginBottom: 8, fontWeight: 500 as const };
 
@@ -255,7 +262,6 @@ export default function CompliancePage() {
       {selectedItem && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 900, display: 'flex', alignItems: 'flex-end', justifyContent: 'flex-end' }}>
           <div style={{ background: '#fff', width: 420, height: '100vh', display: 'flex', flexDirection: 'column', boxShadow: '-4px 0 24px rgba(0,0,0,0.15)' }}>
-
             <div style={{ padding: '20px 24px', borderBottom: '1px solid #eef2ee', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: PRIMARY }}>
               <div>
                 <div style={{ color: '#fff', fontWeight: 700, fontSize: 15 }}>{selectedItem.checklist_templates?.task_name}</div>
@@ -263,9 +269,7 @@ export default function CompliancePage() {
               </div>
               <button onClick={closeItemDetail} style={{ background: 'rgba(255,255,255,0.2)', border: 'none', color: '#fff', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', fontSize: 14 }}>Close</button>
             </div>
-
             <div style={{ flex: 1, overflowY: 'auto', padding: 24 }}>
-
               <div style={{ marginBottom: 20 }}>
                 <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
                   <span style={{ fontSize: 12, fontWeight: 700, padding: '4px 10px', borderRadius: 20, background: selectedItem.completed ? '#e8f5e9' : '#fdecea', color: selectedItem.completed ? PRIMARY : '#ef4444' }}>
@@ -284,7 +288,6 @@ export default function CompliancePage() {
                   <div style={{ fontSize: 12, color: '#aaa' }}>Completed at {new Date(selectedItem.completed_at).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })}</div>
                 )}
               </div>
-
               {selectedItem.photo_url && (
                 <div style={{ marginBottom: 24 }}>
                   <div style={{ fontSize: 13, fontWeight: 600, color: '#333', marginBottom: 8 }}>Photo Evidence</div>
@@ -297,7 +300,6 @@ export default function CompliancePage() {
                   <div style={{ fontSize: 11, color: '#aaa', marginTop: 6, textAlign: 'center' }}>Tap to enlarge for inspection</div>
                 </div>
               )}
-
               <div>
                 <div style={{ fontSize: 13, fontWeight: 600, color: '#333', marginBottom: 12 }}>
                   Comments & Follow-up
@@ -322,19 +324,12 @@ export default function CompliancePage() {
                 </div>
               </div>
             </div>
-
             <div style={{ padding: '16px 24px', borderTop: '1px solid #eef2ee', background: '#f8faf8' }}>
-              {currentUser?.role === 'franchisor_admin' || currentUser?.role === 'platform_admin' ? (
+              {(currentUser?.role === 'franchisor_admin' || currentUser?.role === 'platform_admin') && (
                 <div style={{ marginBottom: 8, fontSize: 12, color: '#888', fontStyle: 'italic' }}>This comment will also be sent as a chat message to the store manager.</div>
-              ) : null}
+              )}
               <div style={{ display: 'flex', gap: 10 }}>
-                <input
-                  value={newComment}
-                  onChange={e => setNewComment(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && sendComment()}
-                  placeholder="Flag an issue or add a comment..."
-                  style={{ flex: 1, padding: '10px 14px', borderRadius: 10, border: '1.5px solid #eef2ee', fontSize: 14, outline: 'none', fontFamily: 'inherit', background: '#fff' }}
-                />
+                <input value={newComment} onChange={e => setNewComment(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendComment()} placeholder="Flag an issue or add a comment..." style={{ flex: 1, padding: '10px 14px', borderRadius: 10, border: '1.5px solid #eef2ee', fontSize: 14, outline: 'none', fontFamily: 'inherit', background: '#fff' }} />
                 <button onClick={sendComment} disabled={sendingComment || !newComment.trim()} style={{ padding: '10px 18px', background: newComment.trim() ? PRIMARY : '#eee', color: newComment.trim() ? '#fff' : '#aaa', border: 'none', borderRadius: 10, fontWeight: 700, cursor: newComment.trim() ? 'pointer' : 'default', fontSize: 14 }}>
                   {sendingComment ? '...' : 'Send'}
                 </button>
@@ -400,7 +395,6 @@ export default function CompliancePage() {
             )}
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 20, marginBottom: 32 }}>
-
               <div style={cardStyle}>
                 <div style={labelStyle}>CHECKLIST</div>
                 <div style={{ fontSize: 36, fontWeight: 800, color: pctColor }}>{pct}%</div>
@@ -409,7 +403,6 @@ export default function CompliancePage() {
                   <div style={{ height: '100%', width: `${pct}%`, background: pctColor, borderRadius: 3 }} />
                 </div>
               </div>
-
               <div style={cardStyle}>
                 <div style={labelStyle}>STATUS</div>
                 <div style={{ fontSize: 18, fontWeight: 700, color: session.status === 'signed_off' ? PRIMARY : '#f59e0b' }}>
@@ -421,7 +414,6 @@ export default function CompliancePage() {
                   </div>
                 )}
               </div>
-
               <div style={cardStyle}>
                 <div style={labelStyle}>TIME TAKEN</div>
                 <div style={{ fontSize: 22, fontWeight: 800, color: PRIMARY }}>
@@ -433,19 +425,16 @@ export default function CompliancePage() {
                 </div>
                 <div style={{ fontSize: 13, color: '#888', marginTop: 4 }}>compliance duration</div>
               </div>
-
               <div style={cardStyle}>
                 <div style={labelStyle}>UNIFORMS</div>
                 <div style={{ fontSize: 36, fontWeight: 800, color: PRIMARY }}>{uniforms.length}</div>
                 <div style={{ fontSize: 13, color: '#888', marginTop: 4 }}>photos captured</div>
               </div>
-
               <div style={cardStyle}>
                 <div style={labelStyle}>TEMPERATURE</div>
                 <div style={{ fontSize: 36, fontWeight: 800, color: tempColor }}>{tempLogs.length === 0 ? '-' : `${tempCompliant}/${tempLogs.length}`}</div>
                 <div style={{ fontSize: 13, color: '#888', marginTop: 4 }}>readings compliant</div>
               </div>
-
             </div>
 
             <div style={{ display: 'flex', gap: 4, marginBottom: 24, background: '#fff', padding: 4, borderRadius: 14, border: '1px solid #eef2ee', width: 'fit-content' }}>
@@ -459,7 +448,7 @@ export default function CompliancePage() {
             {activeTab === 'checklist' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
                 {checklist.length === 0 && <div style={{ textAlign: 'center', padding: 60, color: '#888' }}>No checklist items yet.</div>}
-                {Object.entries(sections).map(([section, items]) => {
+                {sortedSectionEntries.map(([section, items]) => {
                   const secDone = items.filter(i => i.completed).length;
                   return (
                     <div key={section} style={{ background: '#fff', borderRadius: 20, border: '1px solid #eef2ee', overflow: 'hidden' }}>
