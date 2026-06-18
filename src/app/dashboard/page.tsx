@@ -1,14 +1,18 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import { Suspense } from 'react'
 
 interface Store { id: string; name: string; city: string }
 interface DailySession { id: string; session_date: string; status: string; signed_off_at: string | null }
 interface Profile { full_name: string; role: string; organisation_id: string }
 
-export default function DashboardPage() {
+function DashboardContent() {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const storeParam = searchParams.get('store')
+
   const [profile, setProfile] = useState<Profile | null>(null)
   const [stores, setStores] = useState<Store[]>([])
   const [selectedStore, setSelectedStore] = useState<Store | null>(null)
@@ -17,6 +21,7 @@ export default function DashboardPage() {
   const [totalTasks, setTotalTasks] = useState(0)
   const [loading, setLoading] = useState(true)
   const [unreadMessages, setUnreadMessages] = useState(0)
+  const [viewingAsStore, setViewingAsStore] = useState<Store | null>(null)
 
   useEffect(() => { loadDashboard() }, [])
   useEffect(() => { if (selectedStore) loadStoreData(selectedStore.id) }, [selectedStore])
@@ -24,22 +29,37 @@ export default function DashboardPage() {
   async function loadDashboard() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) { router.push('/login'); return }
+
     const { data: profileData } = await supabase
       .from('profiles').select('full_name, role, organisation_id').eq('id', user.id).single()
-    if (profileData) {
-      setProfile(profileData)
+
+    if (!profileData) { setLoading(false); return }
+    setProfile(profileData)
+
+    const isFranchisor = profileData.role === 'franchisor_admin' || profileData.role === 'platform_admin'
+
+    if (storeParam && isFranchisor) {
+      // Franchisor viewing a specific store
+      const { data: storeData } = await supabase
+        .from('stores').select('id, name, city').eq('id', storeParam).single()
+      if (storeData) {
+        setViewingAsStore(storeData)
+        setStores([storeData])
+        setSelectedStore(storeData)
+      }
+    } else {
+      // Normal user — load their own stores
       const { data: storesData } = await supabase
         .from('stores').select('id, name, city')
         .eq('organisation_id', profileData.organisation_id)
         .eq('is_active', true).order('name')
       if (storesData?.length) { setStores(storesData); setSelectedStore(storesData[0]) }
-      const { count } = await supabase
-        .from('chat_messages')
-        .select('*', { count: 'exact', head: true })
-        .eq('recipient_id', user.id)
-        .is('read_at', null)
-      setUnreadMessages(count || 0)
     }
+
+    const { count } = await supabase
+      .from('chat_messages').select('*', { count: 'exact', head: true })
+      .eq('recipient_id', user.id).is('read_at', null)
+    setUnreadMessages(count || 0)
     setLoading(false)
   }
 
@@ -53,6 +73,10 @@ export default function DashboardPage() {
       const { data: items } = await supabase
         .from('checklist_items').select('completed').eq('session_id', session.id)
       if (items) { setTotalTasks(items.length); setCompletedTasks(items.filter(i => i.completed).length) }
+    } else {
+      setTodaySession(null)
+      setTotalTasks(0)
+      setCompletedTasks(0)
     }
   }
 
@@ -109,55 +133,13 @@ export default function DashboardPage() {
         </div>
       ) : null
     },
-    {
-      icon: <span style={{ fontSize: '26px' }}>💰</span>,
-      iconBg: '#eff6ff',
-      title: 'Cash Up',
-      subtitle: 'Daily cash reconciliation',
-      href: '/cashup',
-    },
-    {
-      icon: <span style={{ fontSize: '26px' }}>📊</span>,
-      iconBg: '#f5f3ff',
-      title: 'Analytics & Reports',
-      subtitle: 'View reports and compliance analytics',
-      href: '/reports',
-    },
-    {
-      icon: <span style={{ fontSize: '26px' }}>📈</span>,
-      iconBg: '#ecfdf5',
-      title: 'Income & Expenses',
-      subtitle: 'Financial tracking and food cost',
-      href: '/finances',
-    },
-    {
-      icon: <span style={{ fontSize: '26px' }}>🌡️</span>,
-      iconBg: '#fff1f2',
-      title: 'Temperature Logs',
-      subtitle: 'Equipment temperature monitoring',
-      href: '/temperatures',
-    },
-    {
-      icon: <span style={{ fontSize: '26px' }}>📦</span>,
-      iconBg: '#faf5ff',
-      title: 'Stock',
-      subtitle: 'Stock counts and orders',
-      href: '/stock',
-    },
-    {
-      icon: <span style={{ fontSize: '26px' }}>🕐</span>,
-      iconBg: '#eff6ff',
-      title: 'Time & Attendance',
-      subtitle: 'Staff shifts and wages',
-      href: '/attendance',
-    },
-    {
-      icon: <span style={{ fontSize: '26px' }}>🔧</span>,
-      iconBg: '#fff7ed',
-      title: 'Equipment',
-      subtitle: 'Service schedules and alerts',
-      href: '/equipment',
-    },
+    { icon: <span style={{ fontSize: '26px' }}>💰</span>, iconBg: '#eff6ff', title: 'Cash Up', subtitle: 'Daily cash reconciliation', href: '/cashup' },
+    { icon: <span style={{ fontSize: '26px' }}>📊</span>, iconBg: '#f5f3ff', title: 'Analytics & Reports', subtitle: 'View reports and compliance analytics', href: '/reports' },
+    { icon: <span style={{ fontSize: '26px' }}>📈</span>, iconBg: '#ecfdf5', title: 'Income & Expenses', subtitle: 'Financial tracking and food cost', href: '/finances' },
+    { icon: <span style={{ fontSize: '26px' }}>🌡️</span>, iconBg: '#fff1f2', title: 'Temperature Logs', subtitle: 'Equipment temperature monitoring', href: '/temperatures' },
+    { icon: <span style={{ fontSize: '26px' }}>📦</span>, iconBg: '#faf5ff', title: 'Stock', subtitle: 'Stock counts and orders', href: '/stock' },
+    { icon: <span style={{ fontSize: '26px' }}>🕐</span>, iconBg: '#eff6ff', title: 'Time & Attendance', subtitle: 'Staff shifts and wages', href: '/attendance' },
+    { icon: <span style={{ fontSize: '26px' }}>🔧</span>, iconBg: '#fff7ed', title: 'Equipment', subtitle: 'Service schedules and alerts', href: '/equipment' },
     {
       icon: (
         <div style={{ position: 'relative' }}>
@@ -175,17 +157,24 @@ export default function DashboardPage() {
       badgeColor: '#ef4444',
       badgeBg: '#fdecea',
     },
-    {
-      icon: <span style={{ fontSize: '26px' }}>⚙️</span>,
-      iconBg: '#f8fafc',
-      title: 'Settings',
-      subtitle: 'Company, stores and checklist',
-      href: '/settings',
-    },
+    { icon: <span style={{ fontSize: '26px' }}>⚙️</span>, iconBg: '#f8fafc', title: 'Settings', subtitle: 'Company, stores and checklist', href: '/settings' },
   ]
 
   return (
     <div style={{ minHeight: '100vh', background: '#f0f4f0' }}>
+
+      {/* Franchisor viewing banner */}
+      {viewingAsStore && (
+        <div style={{ background: '#0a1f12', padding: '10px 40px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ fontSize: 18 }}>👁️</span>
+            <span style={{ color: '#fff', fontSize: 13, fontWeight: 600 }}>Viewing store as Franchisor: <strong>{viewingAsStore.name}</strong></span>
+          </div>
+          <button onClick={() => window.close()} style={{ background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.3)', color: '#fff', borderRadius: 8, padding: '6px 14px', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
+            ← Close Store View
+          </button>
+        </div>
+      )}
 
       <header style={{ background: 'linear-gradient(135deg, #0a1f12 0%, #1a5c38 100%)', position: 'sticky', top: 0, zIndex: 10, padding: '0 40px' }}>
         <div style={{ maxWidth: '1200px', margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: '72px' }}>
@@ -204,7 +193,7 @@ export default function DashboardPage() {
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             {isFranchisor && (
               <button
-                onClick={() => router.push('/franchisor')}
+                onClick={() => viewingAsStore ? window.close() : router.push('/franchisor')}
                 style={{ padding: '8px 16px', border: '1.5px solid rgba(255,255,255,0.4)', borderRadius: '10px', fontSize: '13px', fontWeight: '700', color: 'white', background: 'rgba(255,255,255,0.15)', cursor: 'pointer' }}
               >
                 ← Franchisor Portal
@@ -232,7 +221,7 @@ export default function DashboardPage() {
       <div style={{ background: 'linear-gradient(135deg, #0a1f12 0%, #1a5c38 100%)', padding: '40px 40px 100px' }}>
         <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
           <h1 style={{ fontSize: '32px', fontWeight: '800', color: 'white', margin: '0 0 6px', letterSpacing: '-0.5px' }}>
-            {greeting()}, {profile?.full_name?.split(' ')[0]} 👋
+            {greeting()}, {viewingAsStore ? viewingAsStore.name : profile?.full_name?.split(' ')[0]} 👋
           </h1>
           <p style={{ fontSize: '15px', color: 'rgba(255,255,255,0.6)', margin: 0 }}>
             {selectedStore?.name} • {new Date().toLocaleDateString('en-ZA', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
@@ -297,5 +286,17 @@ export default function DashboardPage() {
         </div>
       </main>
     </div>
+  )
+}
+
+export default function DashboardPage() {
+  return (
+    <Suspense fallback={
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f0f4f0' }}>
+        <p style={{ color: '#9ca3af' }}>Loading...</p>
+      </div>
+    }>
+      <DashboardContent />
+    </Suspense>
   )
 }
