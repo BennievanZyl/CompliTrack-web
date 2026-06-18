@@ -47,7 +47,7 @@ export default function DashboardPage() {
     const today = new Date().toISOString().split('T')[0]
     const { data: session } = await supabase
       .from('daily_sessions').select('*')
-      .eq('store_id', storeId).eq('session_date', today).single()
+      .eq('store_id', storeId).eq('session_date', today).maybeSingle()
     setTodaySession(session)
     if (session) {
       const { data: items } = await supabase
@@ -81,6 +81,7 @@ export default function DashboardPage() {
   const isSignedOff = todaySession?.status === 'signed_off'
   const hasSession = !!todaySession
   const completionPercent = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0
+  const isFranchisor = profile?.role === 'franchisor_admin' || profile?.role === 'platform_admin'
 
   const cards = [
     {
@@ -201,6 +202,14 @@ export default function DashboardPage() {
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            {isFranchisor && (
+              <button
+                onClick={() => router.push('/franchisor')}
+                style={{ padding: '8px 16px', border: '1.5px solid rgba(255,255,255,0.4)', borderRadius: '10px', fontSize: '13px', fontWeight: '700', color: 'white', background: 'rgba(255,255,255,0.15)', cursor: 'pointer' }}
+              >
+                ← Franchisor Portal
+              </button>
+            )}
             {unreadMessages > 0 && (
               <button onClick={() => router.push('/chat')} style={{ position: 'relative', background: 'rgba(255,255,255,0.1)', border: '1.5px solid rgba(255,255,255,0.2)', borderRadius: '10px', padding: '8px 14px', color: '#fff', cursor: 'pointer', fontSize: '13px', fontWeight: 600 }}>
                 💬 {unreadMessages} unread
