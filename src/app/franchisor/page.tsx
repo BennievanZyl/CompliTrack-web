@@ -12,6 +12,9 @@ type Store = { id: string; name: string; city: string; manager_name: string | nu
 type StoreStats = { store_id: string; session_id: string | null; status: string | null; total: number; completed: number; uniform_photos: number; temp_violations: number; duration_seconds: number | null; };
 type Profile = { full_name: string; franchisor_id: string; role: string; };
 type HistorySession = { id: string; session_date: string; status: string; store_id: string; duration_seconds: number | null; total: number; completed: number; };
+type ChecklistItem = { id: string; completed: boolean; completed_at: string | null; notes: string | null; photo_url: string | null; checklist_templates: { task_name: string; section: string; } | null; };
+type UniformSession = { id: string; photo_url: string; taken_at: string; ai_overall_result: string | null; };
+type TempLog = { id: string; equipment_name: string; temperature_c: number; period: string; is_compliant: boolean; };
 
 function formatDuration(seconds: number): string {
   if (seconds >= 3600) return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
@@ -32,6 +35,14 @@ export default function FranchisorPage() {
   const [search, setSearch] = useState('');
   const [activeTab, setActiveTab] = useState<'today' | 'history'>('today');
 
+  // Store detail panel
+  const [selectedStore, setSelectedStore] = useState<Store | null>(null);
+  const [panelLoading, setPanelLoading] = useState(false);
+  const [panelChecklist, setPanelChecklist] = useState<ChecklistItem[]>([]);
+  const [panelUniforms, setPanelUniforms] = useState<UniformSession[]>([]);
+  const [panelTemps, setPanelTemps] = useState<TempLog[]>([]);
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+
   useEffect(() => { checkAuthAndLoad(); }, []);
 
   useEffect(() => {
@@ -48,94 +59,44 @@ export default function FranchisorPage() {
   async function checkAuthAndLoad() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { router.push('/login'); return; }
-
-    const { data: profileData } = await supabase
-      .from('profiles').select('full_name, franchisor_id, role').eq('id', user.id).single();
-
+    const { data: profileData } = await supabase.from('profiles').select('full_name, franchisor_id, role').eq('id', user.id).single();
     if (!profileData) { router.push('/login'); return; }
-    if (profileData.role !== 'franchisor_admin' && profileData.role !== 'platform_admin') {
-      router.push('/dashboard'); return;
-    }
-
+    if (profileData.role !== 'franchisor_admin' && profileData.role !== 'platform_admin') { router.push('/dashboard'); return; }
     setProfile(profileData);
-
-    const { data: franchisorData } = await supabase
-      .from('franchisors').select('name').eq('id', profileData.franchisor_id).single();
+    const { data: franchisorData } = await supabase.from('franchisors').select('name').eq('id', profileData.franchisor_id).single();
     setFranchisorName(franchisorData?.name || 'Franchisor');
-
-    const { data: orgData } = await supabase
-      .from('organisations').select('id, name')
-      .eq('franchisor_id', profileData.franchisor_id).order('name');
+    const { data: orgData } = await supabase.from('organisations').select('id, name').eq('franchisor_id', profileData.franchisor_id).order('name');
     setOrgs(orgData || []);
-
     const orgIds = (orgData || []).map(o => o.id);
     if (orgIds.length === 0) { setLoading(false); return; }
-
-    const { data: storeData } = await supabase
-      .from('stores').select('id, name, city, manager_name, organisation_id, is_active')
-      .in('organisation_id', orgIds).eq('is_active', true).order('name');
-
+    const { data: storeData } = await supabase.from('stores').select('id, name, city, manager_name, organisation_id, is_active').in('organisation_id', orgIds).eq('is_active', true).order('name');
     setStores(storeData || []);
-    if (storeData) {
-      await Promise.all([loadStats(storeData), loadHistory(storeData)]);
-    }
+    if (storeData) await Promise.all([loadStats(storeData), loadHistory(storeData)]);
     setLoading(false);
   }
 
   async function loadStats(storeList: Store[]) {
     const today = new Date().toISOString().split('T')[0];
     const statsMap: Record<string, StoreStats> = {};
-
     await Promise.all(storeList.map(async (store) => {
-      const { data: session } = await supabase
-        .from('daily_sessions')
-        .select('id, status, duration_seconds')
-        .eq('store_id', store.id)
-        .eq('session_date', today)
-        .eq('session_type', 'daily')
-        .maybeSingle();
-
-      if (!session) {
-        statsMap[store.id] = { store_id: store.id, session_id: null, status: null, total: 0, completed: 0, uniform_photos: 0, temp_violations: 0, duration_seconds: null };
-        return;
-      }
-
-      // Use select('id') instead of HEAD count to avoid 503 errors
+      const { data: session } = await supabase.from('daily_sessions').select('id, status, duration_seconds').eq('store_id', store.id).eq('session_date', today).eq('session_type', 'daily').maybeSingle();
+      if (!session) { statsMap[store.id] = { store_id: store.id, session_id: null, status: null, total: 0, completed: 0, uniform_photos: 0, temp_violations: 0, duration_seconds: null }; return; }
       const [totalRes, completedRes, uniformRes, violationRes] = await Promise.all([
         supabase.from('checklist_items').select('id').eq('session_id', session.id),
         supabase.from('checklist_items').select('id').eq('session_id', session.id).eq('completed', true),
         supabase.from('uniform_sessions').select('id').eq('session_id', session.id),
         supabase.from('temperature_logs').select('id').eq('session_id', session.id).eq('is_compliant', false),
       ]);
-
-      statsMap[store.id] = {
-        store_id: store.id,
-        session_id: session.id,
-        status: session.status,
-        total: totalRes.data?.length || 0,
-        completed: completedRes.data?.length || 0,
-        uniform_photos: uniformRes.data?.length || 0,
-        temp_violations: violationRes.data?.length || 0,
-        duration_seconds: session.duration_seconds,
-      };
+      statsMap[store.id] = { store_id: store.id, session_id: session.id, status: session.status, total: totalRes.data?.length || 0, completed: completedRes.data?.length || 0, uniform_photos: uniformRes.data?.length || 0, temp_violations: violationRes.data?.length || 0, duration_seconds: session.duration_seconds };
     }));
-
     setStats(statsMap);
     setLastUpdated(new Date());
   }
 
   async function loadHistory(storeList: Store[]) {
     const storeIds = storeList.map(s => s.id);
-    const { data: sessions } = await supabase
-      .from('daily_sessions')
-      .select('id, session_date, status, store_id, duration_seconds')
-      .in('store_id', storeIds)
-      .eq('session_type', 'daily')
-      .order('session_date', { ascending: false })
-      .limit(60);
-
+    const { data: sessions } = await supabase.from('daily_sessions').select('id, session_date, status, store_id, duration_seconds').in('store_id', storeIds).eq('session_type', 'daily').order('session_date', { ascending: false }).limit(60);
     if (!sessions) return;
-
     const enriched = await Promise.all(sessions.map(async (s) => {
       const [totalRes, completedRes] = await Promise.all([
         supabase.from('checklist_items').select('id').eq('session_id', s.id),
@@ -143,8 +104,26 @@ export default function FranchisorPage() {
       ]);
       return { ...s, total: totalRes.data?.length || 0, completed: completedRes.data?.length || 0 };
     }));
-
     setHistory(enriched);
+  }
+
+  async function openStorePanel(store: Store) {
+    setSelectedStore(store);
+    setPanelLoading(true);
+    setPanelChecklist([]);
+    setPanelUniforms([]);
+    setPanelTemps([]);
+    const s = stats[store.id];
+    if (!s?.session_id) { setPanelLoading(false); return; }
+    const [checklistRes, uniformRes, tempRes] = await Promise.all([
+      supabase.from('checklist_items').select('id, completed, completed_at, notes, photo_url, checklist_templates(task_name, section)').eq('session_id', s.session_id).order('created_at'),
+      supabase.from('uniform_sessions').select('id, photo_url, taken_at, ai_overall_result').eq('session_id', s.session_id),
+      supabase.from('temperature_logs').select('id, equipment_name, temperature_c, period, is_compliant').eq('session_id', s.session_id),
+    ]);
+    setPanelChecklist(checklistRes.data || []);
+    setPanelUniforms(uniformRes.data || []);
+    setPanelTemps(tempRes.data || []);
+    setPanelLoading(false);
   }
 
   const pct = (s: StoreStats | HistorySession) => s.total > 0 ? Math.round((s.completed / s.total) * 100) : 0;
@@ -167,9 +146,145 @@ export default function FranchisorPage() {
   const cardStyle = { background: '#fff', borderRadius: 20, padding: 24, border: '1px solid #eef2ee', boxShadow: '0 2px 8px rgba(0,0,0,0.06)' };
   const labelStyle = { fontSize: 13, color: '#666', marginBottom: 8, fontWeight: 500 as const };
 
+  // Group checklist by section
+  const panelSections = panelChecklist.reduce<Record<string, ChecklistItem[]>>((acc, item) => {
+    const sec = item.checklist_templates?.section || 'General';
+    if (!acc[sec]) acc[sec] = [];
+    acc[sec].push(item);
+    return acc;
+  }, {});
+  const sortedPanelSections = Object.entries(panelSections).sort(([a], [b]) => a.localeCompare(b));
+
   return (
     <div style={{ minHeight: '100vh', background: '#f8faf8', fontFamily: 'system-ui, sans-serif' }}>
 
+      {/* Lightbox */}
+      {lightboxUrl && (
+        <div onClick={() => setLightboxUrl(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.92)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
+          <img src={lightboxUrl} alt="inspection" style={{ maxWidth: '90vw', maxHeight: '85vh', objectFit: 'contain', borderRadius: 12 }} />
+          <div style={{ position: 'absolute', top: 20, right: 24, color: 'rgba(255,255,255,0.6)', fontSize: 14 }}>Tap anywhere to close</div>
+        </div>
+      )}
+
+      {/* Store detail slide-in panel */}
+      {selectedStore && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex' }}>
+          <div onClick={() => setSelectedStore(null)} style={{ flex: 1, background: 'rgba(0,0,0,0.4)', cursor: 'pointer' }} />
+          <div style={{ width: 500, background: '#fff', height: '100vh', overflowY: 'auto', display: 'flex', flexDirection: 'column', boxShadow: '-4px 0 32px rgba(0,0,0,0.15)' }}>
+            {/* Panel header */}
+            <div style={{ background: `linear-gradient(135deg, ${DARK}, ${PRIMARY})`, padding: '20px 24px', flexShrink: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                <span style={{ color: '#fff', fontWeight: 700, fontSize: 17 }}>{selectedStore.name}</span>
+                <button onClick={() => setSelectedStore(null)} style={{ background: 'rgba(255,255,255,0.2)', border: 'none', color: '#fff', borderRadius: 8, padding: '6px 14px', cursor: 'pointer', fontSize: 14 }}>Close</button>
+              </div>
+              <div style={{ color: 'rgba(255,255,255,0.7)', fontSize: 13 }}>{getOrgName(selectedStore.organisation_id)} {selectedStore.city ? `· ${selectedStore.city}` : ''}</div>
+              {stats[selectedStore.id]?.session_id && (
+                <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
+                  {[
+                    { label: 'Tasks', value: `${stats[selectedStore.id].completed}/${stats[selectedStore.id].total}` },
+                    { label: 'Compliance', value: `${pct(stats[selectedStore.id])}%` },
+                    { label: 'Duration', value: stats[selectedStore.id].duration_seconds ? formatDuration(stats[selectedStore.id].duration_seconds!) : '—' },
+                  ].map(item => (
+                    <div key={item.label} style={{ flex: 1, background: 'rgba(255,255,255,0.15)', borderRadius: 10, padding: '8px 12px', textAlign: 'center' as const }}>
+                      <div style={{ color: '#fff', fontWeight: 800, fontSize: 16 }}>{item.value}</div>
+                      <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: 11, marginTop: 2 }}>{item.label}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {panelLoading && <div style={{ textAlign: 'center', padding: 60, color: '#aaa' }}>Loading session data...</div>}
+
+            {!panelLoading && !stats[selectedStore.id]?.session_id && (
+              <div style={{ textAlign: 'center' as const, padding: 60, color: '#aaa' }}>
+                <div style={{ fontSize: 40, marginBottom: 12 }}>📋</div>
+                <div style={{ fontWeight: 600, color: '#555' }}>No session today</div>
+                <div style={{ fontSize: 13, marginTop: 4 }}>This store hasn&apos;t started a compliance session yet</div>
+              </div>
+            )}
+
+            {!panelLoading && stats[selectedStore.id]?.session_id && (
+              <div style={{ flex: 1, padding: 24 }}>
+
+                {/* Checklist */}
+                {panelChecklist.length > 0 && (
+                  <div style={{ marginBottom: 28 }}>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: '#333', marginBottom: 16 }}>Checklist</div>
+                    {sortedPanelSections.map(([section, items]) => {
+                      const secDone = items.filter(i => i.completed).length;
+                      return (
+                        <div key={section} style={{ marginBottom: 16, background: '#f8faf8', borderRadius: 14, overflow: 'hidden', border: '1px solid #eef2ee' }}>
+                          <div style={{ padding: '10px 16px', background: '#f0f4f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <span style={{ fontWeight: 600, color: '#333', fontSize: 13 }}>{section}</span>
+                            <span style={{ fontSize: 12, color: secDone === items.length ? PRIMARY : '#888', fontWeight: 600 }}>{secDone}/{items.length}</span>
+                          </div>
+                          {items.map((item, idx) => (
+                            <div key={item.id} style={{ padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 12, borderTop: idx === 0 ? 'none' : '1px solid #f0f4f0', background: '#fff' }}>
+                              <div style={{ width: 22, height: 22, borderRadius: '50%', flexShrink: 0, background: item.completed ? PRIMARY : '#eef2ee', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 12, fontWeight: 700 }}>
+                                {item.completed ? '✓' : ''}
+                              </div>
+                              <div style={{ flex: 1 }}>
+                                <div style={{ fontSize: 13, color: item.completed ? '#333' : '#999', fontWeight: item.completed ? 500 : 400 }}>{item.checklist_templates?.task_name || 'Unknown task'}</div>
+                                {item.notes && <div style={{ fontSize: 11, color: '#aaa', marginTop: 2, fontStyle: 'italic' }}>{item.notes}</div>}
+                              </div>
+                              {item.photo_url && (
+                                <img onClick={() => setLightboxUrl(item.photo_url!)} src={item.photo_url} alt="evidence" style={{ width: 40, height: 40, borderRadius: 8, objectFit: 'cover', cursor: 'zoom-in', border: '2px solid #eef2ee', flexShrink: 0 }} />
+                              )}
+                              {item.completed_at && <div style={{ fontSize: 10, color: '#bbb', whiteSpace: 'nowrap' as const }}>{new Date(item.completed_at).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })}</div>}
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Uniforms */}
+                {panelUniforms.length > 0 && (
+                  <div style={{ marginBottom: 28 }}>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: '#333', marginBottom: 16 }}>Uniform Checks ({panelUniforms.length})</div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                      {panelUniforms.map(u => (
+                        <div key={u.id} style={{ borderRadius: 12, overflow: 'hidden', border: '1px solid #eef2ee', cursor: 'zoom-in' }} onClick={() => setLightboxUrl(u.photo_url)}>
+                          <img src={u.photo_url} alt="uniform" style={{ width: '100%', height: 120, objectFit: 'cover' }} />
+                          <div style={{ padding: '8px 10px', background: '#f8faf8', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <span style={{ fontSize: 11, color: '#888' }}>{new Date(u.taken_at).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })}</span>
+                            {u.ai_overall_result && <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 6px', borderRadius: 20, background: u.ai_overall_result === 'pass' ? '#e8f5e9' : '#fdecea', color: u.ai_overall_result === 'pass' ? PRIMARY : '#ef4444' }}>{u.ai_overall_result.toUpperCase()}</span>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Temperature */}
+                {panelTemps.length > 0 && (
+                  <div style={{ marginBottom: 28 }}>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: '#333', marginBottom: 16 }}>Temperature Logs</div>
+                    {panelTemps.map(log => (
+                      <div key={log.id} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 16px', background: log.is_compliant ? '#f8faf8' : '#fdecea', borderRadius: 12, marginBottom: 8, border: `1px solid ${log.is_compliant ? '#eef2ee' : '#fca5a5'}` }}>
+                        <div style={{ width: 40, height: 40, borderRadius: 10, background: log.is_compliant ? '#e8f5e9' : '#fdecea', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 14, color: log.is_compliant ? PRIMARY : '#ef4444', flexShrink: 0 }}>T</div>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontWeight: 600, color: '#333', fontSize: 14 }}>{log.equipment_name}</div>
+                          <div style={{ fontSize: 12, color: '#888' }}>{log.period}</div>
+                        </div>
+                        <div style={{ textAlign: 'right' as const }}>
+                          <div style={{ fontSize: 18, fontWeight: 800, color: log.is_compliant ? PRIMARY : '#ef4444' }}>{log.temperature_c}°C</div>
+                          <div style={{ fontSize: 10, fontWeight: 700, color: log.is_compliant ? PRIMARY : '#ef4444' }}>{log.is_compliant ? 'OK' : 'OUT OF RANGE'}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Header */}
       <div style={{ background: `linear-gradient(135deg, ${DARK}, ${PRIMARY})`, padding: '0 32px' }}>
         <div style={{ maxWidth: 1400, margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 64 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -207,42 +322,25 @@ export default function FranchisorPage() {
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 20, marginBottom: 32 }}>
-              <div style={cardStyle}>
-                <div style={labelStyle}>TOTAL STORES</div>
-                <div style={{ fontSize: 40, fontWeight: 800, color: PRIMARY }}>{stores.length}</div>
-                <div style={{ fontSize: 13, color: '#888', marginTop: 4 }}>{orgs.length} organisations</div>
-              </div>
-              <div style={cardStyle}>
-                <div style={labelStyle}>SIGNED OFF</div>
-                <div style={{ fontSize: 40, fontWeight: 800, color: signedOff === stores.length && stores.length > 0 ? PRIMARY : '#f59e0b' }}>{signedOff}</div>
-                <div style={{ fontSize: 13, color: '#888', marginTop: 4 }}>of {stores.length} stores</div>
-                <div style={{ marginTop: 12, height: 6, background: '#eef2ee', borderRadius: 3 }}>
-                  <div style={{ height: '100%', width: `${stores.length > 0 ? (signedOff / stores.length) * 100 : 0}%`, background: PRIMARY, borderRadius: 3 }} />
+              {[
+                { label: 'TOTAL STORES', value: stores.length, sub: `${orgs.length} organisations`, color: PRIMARY },
+                { label: 'SIGNED OFF', value: signedOff, sub: `of ${stores.length} stores`, color: signedOff === stores.length && stores.length > 0 ? PRIMARY : '#f59e0b', progress: stores.length > 0 ? (signedOff / stores.length) * 100 : 0 },
+                { label: 'IN PROGRESS', value: inProgress, sub: 'sessions active now', color: '#f59e0b' },
+                { label: 'NO SESSION', value: noSession, sub: 'stores not started', color: noSession > 0 ? '#ef4444' : PRIMARY },
+                { label: 'AVG COMPLIANCE', value: `${avgCompliance}%`, sub: `across ${sessionsToday} sessions`, color: pctColor(avgCompliance), progress: avgCompliance },
+                { label: 'TEMP VIOLATIONS', value: totalViolations, sub: 'out of range today', color: totalViolations > 0 ? '#ef4444' : PRIMARY },
+              ].map(item => (
+                <div key={item.label} style={cardStyle}>
+                  <div style={labelStyle}>{item.label}</div>
+                  <div style={{ fontSize: 38, fontWeight: 800, color: item.color }}>{item.value}</div>
+                  <div style={{ fontSize: 13, color: '#888', marginTop: 4 }}>{item.sub}</div>
+                  {item.progress !== undefined && (
+                    <div style={{ marginTop: 12, height: 6, background: '#eef2ee', borderRadius: 3 }}>
+                      <div style={{ height: '100%', width: `${item.progress}%`, background: item.color, borderRadius: 3 }} />
+                    </div>
+                  )}
                 </div>
-              </div>
-              <div style={cardStyle}>
-                <div style={labelStyle}>IN PROGRESS</div>
-                <div style={{ fontSize: 40, fontWeight: 800, color: '#f59e0b' }}>{inProgress}</div>
-                <div style={{ fontSize: 13, color: '#888', marginTop: 4 }}>sessions active now</div>
-              </div>
-              <div style={cardStyle}>
-                <div style={labelStyle}>NO SESSION</div>
-                <div style={{ fontSize: 40, fontWeight: 800, color: noSession > 0 ? '#ef4444' : PRIMARY }}>{noSession}</div>
-                <div style={{ fontSize: 13, color: '#888', marginTop: 4 }}>stores not started</div>
-              </div>
-              <div style={cardStyle}>
-                <div style={labelStyle}>AVG COMPLIANCE</div>
-                <div style={{ fontSize: 40, fontWeight: 800, color: pctColor(avgCompliance) }}>{avgCompliance}%</div>
-                <div style={{ fontSize: 13, color: '#888', marginTop: 4 }}>across {sessionsToday} sessions</div>
-                <div style={{ marginTop: 12, height: 6, background: '#eef2ee', borderRadius: 3 }}>
-                  <div style={{ height: '100%', width: `${avgCompliance}%`, background: pctColor(avgCompliance), borderRadius: 3 }} />
-                </div>
-              </div>
-              <div style={cardStyle}>
-                <div style={labelStyle}>TEMP VIOLATIONS</div>
-                <div style={{ fontSize: 40, fontWeight: 800, color: totalViolations > 0 ? '#ef4444' : PRIMARY }}>{totalViolations}</div>
-                <div style={{ fontSize: 13, color: '#888', marginTop: 4 }}>out of range today</div>
-              </div>
+              ))}
             </div>
 
             <div style={{ display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap' as const, alignItems: 'center' }}>
@@ -263,6 +361,7 @@ export default function FranchisorPage() {
               <div>
                 <div style={{ marginBottom: 16 }}>
                   <h2 style={{ fontSize: 18, fontWeight: 700, color: '#333', margin: 0 }}>Store Health — Today ({filteredStores.length} stores)</h2>
+                  <p style={{ fontSize: 13, color: '#aaa', margin: '4px 0 0' }}>Click a store to view their compliance session detail</p>
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 16 }}>
                   {filteredStores.map(store => {
@@ -273,7 +372,10 @@ export default function FranchisorPage() {
                     const health = !hasSession ? 'none' : s?.status === 'signed_off' && p === 100 ? 'excellent' : p >= 70 ? 'good' : 'poor';
                     const borderColor = health === 'excellent' ? '#c8e6c9' : health === 'good' ? '#fde68a' : health === 'poor' ? '#fca5a5' : '#eef2ee';
                     return (
-                      <div key={store.id} style={{ background: '#fff', borderRadius: 16, border: `1.5px solid ${borderColor}`, padding: 20, boxShadow: '0 2px 6px rgba(0,0,0,0.04)' }}>
+                      <div key={store.id} onClick={() => openStorePanel(store)} style={{ background: '#fff', borderRadius: 16, border: `1.5px solid ${borderColor}`, padding: 20, cursor: 'pointer', boxShadow: '0 2px 6px rgba(0,0,0,0.04)', transition: 'transform 0.15s, box-shadow 0.15s' }}
+                        onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 6px 20px rgba(0,0,0,0.1)'; }}
+                        onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 2px 6px rgba(0,0,0,0.04)'; }}
+                      >
                         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 12 }}>
                           <div>
                             <div style={{ fontWeight: 700, color: '#333', fontSize: 15, marginBottom: 2 }}>{store.name}</div>
@@ -313,6 +415,7 @@ export default function FranchisorPage() {
                         ) : (
                           <div style={{ textAlign: 'center' as const, padding: '16px 0', color: '#ddd', fontSize: 13 }}>No session started today</div>
                         )}
+                        <div style={{ marginTop: 12, textAlign: 'center' as const, fontSize: 11, color: '#ccc' }}>Click to view detail →</div>
                       </div>
                     );
                   })}
@@ -340,9 +443,7 @@ export default function FranchisorPage() {
                         <div style={{ flex: 1 }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
                             <span style={{ fontWeight: 700, color: '#333', fontSize: 14 }}>{storeName}</span>
-                            <span style={{ fontSize: 11, color: '#aaa' }}>
-                              {isToday ? 'Today' : new Date(session.session_date).toLocaleDateString('en-ZA', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}
-                            </span>
+                            <span style={{ fontSize: 11, color: '#aaa' }}>{isToday ? 'Today' : new Date(session.session_date).toLocaleDateString('en-ZA', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}</span>
                             <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: session.status === 'signed_off' ? '#e8f5e9' : '#fff8e1', color: session.status === 'signed_off' ? PRIMARY : '#f59e0b' }}>
                               {session.status === 'signed_off' ? 'SIGNED OFF' : 'IN PROGRESS'}
                             </span>
