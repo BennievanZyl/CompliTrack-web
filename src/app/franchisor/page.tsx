@@ -372,7 +372,7 @@ export default function FranchisorPage() {
                     const health = !hasSession ? 'none' : s?.status === 'signed_off' && p === 100 ? 'excellent' : p >= 70 ? 'good' : 'poor';
                     const borderColor = health === 'excellent' ? '#c8e6c9' : health === 'good' ? '#fde68a' : health === 'poor' ? '#fca5a5' : '#eef2ee';
                     return (
-                      <div key={store.id} onClick={() => openStorePanel(store)} style={{ background: '#fff', borderRadius: 16, border: `1.5px solid ${borderColor}`, padding: 20, cursor: 'pointer', boxShadow: '0 2px 6px rgba(0,0,0,0.04)', transition: 'transform 0.15s, box-shadow 0.15s' }}
+                      <div key={store.id} onClick={() => window.open(`/dashboard?store=${store.id}`, '_blank')} style={{ background: '#fff', borderRadius: 16, border: `1.5px solid ${borderColor}`, padding: 20, cursor: 'pointer', boxShadow: '0 2px 6px rgba(0,0,0,0.04)', transition: 'transform 0.15s, box-shadow 0.15s' }}
                         onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 6px 20px rgba(0,0,0,0.1)'; }}
                         onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 2px 6px rgba(0,0,0,0.04)'; }}
                       >
