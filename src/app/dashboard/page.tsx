@@ -37,9 +37,10 @@ function DashboardContent() {
     setProfile(profileData)
 
     const isFranchisor = profileData.role === 'franchisor_admin' || profileData.role === 'platform_admin'
+    const isFranchiseeOwner = profileData.role === 'franchisee_owner'
 
-    if (storeParam && isFranchisor) {
-      // Franchisor viewing a specific store
+    if (storeParam && (isFranchisor || isFranchiseeOwner)) {
+      // Franchisor or franchisee owner viewing a specific store
       const { data: storeData } = await supabase
         .from('stores').select('id, name, city').eq('id', storeParam).single()
       if (storeData) {
@@ -106,6 +107,18 @@ function DashboardContent() {
   const hasSession = !!todaySession
   const completionPercent = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0
   const isFranchisor = profile?.role === 'franchisor_admin' || profile?.role === 'platform_admin'
+  const isFranchiseeOwner = profile?.role === 'franchisee_owner'
+
+  const portalBackLabel = isFranchisor ? '← Franchisor Portal' : '← Franchisee Portal'
+  const portalBackAction = () => {
+    if (viewingAsStore) {
+      window.close()
+    } else if (isFranchisor) {
+      router.push('/franchisor')
+    } else if (isFranchiseeOwner) {
+      router.push('/org')
+    }
+  }
 
   const cards = [
     {
@@ -163,14 +176,21 @@ function DashboardContent() {
   return (
     <div style={{ minHeight: '100vh', background: '#f0f4f0' }}>
 
-      {/* Franchisor viewing banner */}
+      {/* Viewing store banner — shows for both franchisor and franchisee owner */}
       {viewingAsStore && (
         <div style={{ background: '#0a1f12', padding: '10px 40px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <span style={{ fontSize: 18 }}>👁️</span>
-            <span style={{ color: '#fff', fontSize: 13, fontWeight: 600 }}>Viewing store as Franchisor: <strong>{viewingAsStore.name}</strong></span>
+            <span style={{ color: '#fff', fontSize: 13, fontWeight: 600 }}>
+              Viewing: <strong>{viewingAsStore.name}</strong>
+              {isFranchisor && <span style={{ color: 'rgba(255,255,255,0.5)', marginLeft: 8 }}>— Franchisor view</span>}
+              {isFranchiseeOwner && <span style={{ color: 'rgba(255,255,255,0.5)', marginLeft: 8 }}>— Franchisee owner view</span>}
+            </span>
           </div>
-          <button onClick={() => window.close()} style={{ background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.3)', color: '#fff', borderRadius: 8, padding: '6px 14px', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
+          <button
+            onClick={() => window.close()}
+            style={{ background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.3)', color: '#fff', borderRadius: 8, padding: '6px 14px', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}
+          >
             ← Close Store View
           </button>
         </div>
@@ -191,12 +211,22 @@ function DashboardContent() {
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            {isFranchisor && (
+            {/* Show portal back button for franchisor or franchisee owner */}
+            {(isFranchisor || (isFranchiseeOwner && viewingAsStore)) && (
               <button
-                onClick={() => viewingAsStore ? window.close() : router.push('/franchisor')}
+                onClick={portalBackAction}
                 style={{ padding: '8px 16px', border: '1.5px solid rgba(255,255,255,0.4)', borderRadius: '10px', fontSize: '13px', fontWeight: '700', color: 'white', background: 'rgba(255,255,255,0.15)', cursor: 'pointer' }}
               >
-                ← Franchisor Portal
+                {portalBackLabel}
+              </button>
+            )}
+            {/* Also show for franchisee owner when NOT viewing a specific store */}
+            {isFranchiseeOwner && !viewingAsStore && stores.length > 1 && (
+              <button
+                onClick={() => router.push('/org')}
+                style={{ padding: '8px 16px', border: '1.5px solid rgba(255,255,255,0.4)', borderRadius: '10px', fontSize: '13px', fontWeight: '700', color: 'white', background: 'rgba(255,255,255,0.15)', cursor: 'pointer' }}
+              >
+                ← All Stores
               </button>
             )}
             {unreadMessages > 0 && (
@@ -204,7 +234,7 @@ function DashboardContent() {
                 💬 {unreadMessages} unread
               </button>
             )}
-            {stores.length > 1 && (
+            {stores.length > 1 && !viewingAsStore && (
               <select
                 value={selectedStore?.id}
                 onChange={(e) => setSelectedStore(stores.find(s => s.id === e.target.value) || null)}
