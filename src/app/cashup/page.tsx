@@ -1,12 +1,13 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+import { Suspense } from 'react';
 
-const STORE_ID = '05328298-fc27-4c9f-b091-bb7f6598b601';
-const ORG_ID = 'e903386b-133a-4bad-b054-ef7ef616a3ff';
-const STORE_NAME = 'Mochachos Hartswater';
+const DEFAULT_STORE_ID = '05328298-fc27-4c9f-b091-bb7f6598b601';
+const DEFAULT_ORG_ID = 'e903386b-133a-4bad-b054-ef7ef616a3ff';
+const DEFAULT_STORE_NAME = 'Mochachos Hartswater';
 const PRIMARY = '#1a5c38';
 const DARK = '#0a1f12';
 
@@ -29,11 +30,7 @@ type CashUp = {
   signed_by_name: string | null; signed_off_at: string | null;
 };
 
-type StaffMember = {
-  id: string;
-  full_name: string;
-  role: string;
-};
+type StaffMember = { id: string; full_name: string; role: string; };
 
 const DENOMS = [
   { key: 'r200', label: 'R200', value: 200 },
@@ -50,9 +47,220 @@ const DENOMS = [
   { key: 'r005', label: 'R0.05', value: 0.05 },
 ];
 
-function fmt(n: number) { return `R ${n.toFixed(2)}`; }
+function fmt(n: number) { return `R ${(n || 0).toFixed(2)}`; }
 
-export default function CashUpPage() {
+// ─── FRANCHISOR READ-ONLY HISTORY VIEW ───────────────────────────────────────
+
+function CashUpHistoryView({ storeId, storeName }: { storeId: string; storeName: string }) {
+  const router = useRouter();
+  const [history, setHistory] = useState<CashUp[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  useEffect(() => { loadHistory(); }, []);
+
+  async function loadHistory() {
+    setLoading(true);
+    const { data } = await supabase
+      .from('cash_ups').select('*')
+      .eq('store_id', storeId)
+      .order('cash_up_date', { ascending: false })
+      .limit(60);
+    setHistory(data || []);
+    setLoading(false);
+  }
+
+  const vColor = (v: number) => v === 0 ? PRIMARY : v > 0 ? '#f59e0b' : '#ef4444';
+  const vLabel = (v: number) => v === 0 ? 'Balanced' : v > 0 ? `Over by ${fmt(Math.abs(v))}` : `Short by ${fmt(Math.abs(v))}`;
+
+  return (
+    <div style={{ minHeight: '100vh', background: '#f8faf8', fontFamily: 'system-ui, sans-serif' }}>
+      <div style={{ background: `linear-gradient(135deg, ${DARK}, ${PRIMARY})`, padding: '0 32px' }}>
+        <div style={{ maxWidth: 900, margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 64 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <button onClick={() => router.back()} style={{ background: 'rgba(255,255,255,0.15)', border: 'none', color: '#fff', borderRadius: 8, padding: '6px 14px', cursor: 'pointer', fontSize: 14 }}>Back</button>
+            <span style={{ color: '#fff', fontWeight: 700, fontSize: 18 }}>Cash Up History</span>
+            <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: 14 }}>— {storeName}</span>
+          </div>
+          <span style={{ color: 'rgba(255,255,255,0.6)', fontSize: 13 }}>Read-only view</span>
+        </div>
+      </div>
+
+      <div style={{ maxWidth: 900, margin: '0 auto', padding: '32px 24px' }}>
+        {loading && <div style={{ textAlign: 'center', padding: 80, color: '#666' }}>Loading cash ups...</div>}
+
+        {!loading && history.length === 0 && (
+          <div style={{ textAlign: 'center', padding: 80, background: '#fff', borderRadius: 20, border: '1px solid #eef2ee' }}>
+            <div style={{ fontSize: 40, marginBottom: 12 }}>💰</div>
+            <div style={{ fontWeight: 600, color: '#333', fontSize: 18 }}>No cash ups yet</div>
+            <div style={{ color: '#aaa', fontSize: 14, marginTop: 4 }}>This store hasn&apos;t submitted any cash ups</div>
+          </div>
+        )}
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {history.map(c => {
+            const isExpanded = expandedId === c.id;
+            const vc = vColor(c.variance || 0);
+            const vl = vLabel(c.variance || 0);
+            const isToday = c.cash_up_date === new Date().toISOString().split('T')[0];
+
+            return (
+              <div key={c.id} style={{ background: '#fff', borderRadius: 16, border: '1px solid #eef2ee', overflow: 'hidden', boxShadow: '0 2px 6px rgba(0,0,0,0.04)' }}>
+
+                {/* Row header — always visible */}
+                <div
+                  onClick={() => setExpandedId(isExpanded ? null : c.id)}
+                  style={{ padding: '16px 24px', display: 'flex', alignItems: 'center', gap: 16, cursor: 'pointer' }}
+                >
+                  <div style={{ width: 44, height: 44, borderRadius: 12, background: c.status === 'signed_off' ? '#e8f5e9' : '#fff8e1', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontWeight: 800, fontSize: 16, color: c.status === 'signed_off' ? PRIMARY : '#f59e0b' }}>
+                    {new Date(c.cash_up_date).getDate()}
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                      <span style={{ fontWeight: 700, color: '#333', fontSize: 15 }}>
+                        {isToday ? 'Today' : new Date(c.cash_up_date).toLocaleDateString('en-ZA', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+                      </span>
+                      <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: c.status === 'signed_off' ? '#e8f5e9' : '#fff8e1', color: c.status === 'signed_off' ? PRIMARY : '#f59e0b' }}>
+                        {c.status === 'signed_off' ? 'SIGNED OFF' : 'DRAFT'}
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', gap: 20, fontSize: 13 }}>
+                      <span style={{ color: '#666' }}>Cash Up Total: <strong style={{ color: '#333' }}>{fmt(c.cash_up_total || 0)}</strong></span>
+                      <span style={{ color: '#666' }}>Customers: <strong style={{ color: '#333' }}>{c.customer_count}</strong></span>
+                      {c.signed_by_name && <span style={{ color: '#666' }}>Signed: <strong style={{ color: '#333' }}>{c.signed_by_name}</strong></span>}
+                    </div>
+                  </div>
+                  <div style={{ textAlign: 'right' as const, flexShrink: 0 }}>
+                    <div style={{ fontSize: 15, fontWeight: 800, color: vc }}>{vl}</div>
+                    <div style={{ fontSize: 11, color: '#aaa', marginTop: 4 }}>{isExpanded ? '▲ collapse' : '▼ expand'}</div>
+                  </div>
+                </div>
+
+                {/* Expanded detail */}
+                {isExpanded && (
+                  <div style={{ borderTop: '1px solid #f0f4f0', padding: '24px', background: '#fafbfa' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, marginBottom: 24 }}>
+
+                      {/* Cash Count */}
+                      <div>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: '#333', marginBottom: 12, textTransform: 'uppercase' as const, letterSpacing: 0.5 }}>Cash Count</div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>
+                          <div style={{ background: DARK, color: '#fff', borderRadius: 8, padding: '8px 12px', textAlign: 'center' as const }}>
+                            <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 2 }}>TILL FLOAT</div>
+                            <div style={{ fontWeight: 800, fontSize: 16 }}>{fmt(c.float_total || 0)}</div>
+                          </div>
+                          <div style={{ background: PRIMARY, color: '#fff', borderRadius: 8, padding: '8px 12px', textAlign: 'center' as const }}>
+                            <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 2 }}>TO BANK</div>
+                            <div style={{ fontWeight: 800, fontSize: 16 }}>{fmt(c.bank_total || 0)}</div>
+                          </div>
+                        </div>
+                        <div style={{ background: '#e8f5e9', borderRadius: 8, padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ fontSize: 13, fontWeight: 600, color: '#333' }}>Total Cash</span>
+                          <span style={{ fontWeight: 800, color: PRIMARY, fontSize: 16 }}>{fmt(c.total_cash || 0)}</span>
+                        </div>
+
+                        {/* Denomination breakdown */}
+                        <div style={{ marginTop: 12 }}>
+                          <div style={{ fontSize: 11, color: '#aaa', marginBottom: 6, fontWeight: 600 }}>DENOMINATION BREAKDOWN</div>
+                          {DENOMS.filter(d => ((c[d.key as keyof CashUp] as number) || 0) + ((c[`float_${d.key}` as keyof CashUp] as number) || 0) > 0).map(d => {
+                            const bankQty = (c[d.key as keyof CashUp] as number) || 0;
+                            const floatQty = (c[`float_${d.key}` as keyof CashUp] as number) || 0;
+                            return (
+                              <div key={d.key} style={{ display: 'grid', gridTemplateColumns: '50px 1fr 1fr', gap: 6, alignItems: 'center', marginBottom: 4, fontSize: 12 }}>
+                                <span style={{ fontWeight: 600, color: '#333' }}>{d.label}</span>
+                                <span style={{ color: '#666', textAlign: 'center' as const }}>Float: {floatQty} = {fmt(floatQty * d.value)}</span>
+                                <span style={{ color: '#666', textAlign: 'center' as const }}>Bank: {bankQty} = {fmt(bankQty * d.value)}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* Reconciliation */}
+                      <div>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: '#333', marginBottom: 12, textTransform: 'uppercase' as const, letterSpacing: 0.5 }}>Reconciliation</div>
+                        {[
+                          { label: 'Total Cash Counted', value: fmt(c.total_cash || 0), bold: false },
+                          { label: '− Previous Float', value: fmt(c.previous_float || 0), bold: false },
+                          { label: '+ EFT / Card', value: fmt(c.eft_total || 0), bold: false },
+                          { label: '+ Payouts', value: fmt(c.payouts || 0), bold: false },
+                          { label: 'A Total', value: fmt(c.a_total || 0), bold: true },
+                          { label: 'POS Slip Total', value: fmt(c.pos_slip_total || 0), bold: false },
+                          { label: '− Voids', value: fmt(c.voids || 0), bold: false },
+                          { label: 'Cash Up Total', value: fmt(c.cash_up_total || 0), bold: true },
+                        ].map(row => (
+                          <div key={row.label} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 8, padding: row.bold ? '6px 8px' : '0 0', background: row.bold ? '#f0f4f0' : 'transparent', borderRadius: row.bold ? 6 : 0 }}>
+                            <span style={{ color: row.bold ? '#333' : '#666', fontWeight: row.bold ? 700 : 400 }}>{row.label}</span>
+                            <span style={{ fontWeight: row.bold ? 800 : 500, color: row.bold ? PRIMARY : '#333' }}>{row.value}</span>
+                          </div>
+                        ))}
+                        {c.banked && (
+                          <div style={{ marginTop: 8, padding: '8px', background: '#eff6ff', borderRadius: 8, fontSize: 12 }}>
+                            <div style={{ fontWeight: 700, color: '#1e40af', marginBottom: 4 }}>Banked</div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                              <span style={{ color: '#666' }}>Deposit Amount</span>
+                              <span style={{ fontWeight: 600 }}>{fmt(c.bank_deposit_amount || 0)}</span>
+                            </div>
+                            {c.bank_reference && (
+                              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
+                                <span style={{ color: '#666' }}>Reference</span>
+                                <span style={{ fontWeight: 600 }}>{c.bank_reference}</span>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Variance */}
+                    <div style={{ background: (c.variance || 0) === 0 ? '#e8f5e9' : (c.variance || 0) > 0 ? '#fff8e1' : '#fdecea', borderRadius: 12, padding: '16px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, border: `2px solid ${vc}` }}>
+                      <span style={{ fontWeight: 700, color: vc, fontSize: 15 }}>VARIANCE</span>
+                      <div style={{ textAlign: 'right' as const }}>
+                        <div style={{ fontWeight: 900, color: vc, fontSize: 28 }}>{(c.variance || 0) === 0 ? 'R 0.00' : fmt(Math.abs(c.variance || 0))}</div>
+                        <div style={{ fontWeight: 700, color: vc, fontSize: 14 }}>{vl}</div>
+                      </div>
+                    </div>
+
+                    {/* Performance + Notes + Sign off */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
+                      <div style={{ background: '#fff', borderRadius: 12, padding: 16, border: '1px solid #eef2ee' }}>
+                        <div style={{ fontSize: 12, color: '#aaa', fontWeight: 600, marginBottom: 10, textTransform: 'uppercase' as const }}>Performance</div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 6 }}>
+                          <span style={{ color: '#666' }}>Customers</span>
+                          <span style={{ fontWeight: 700 }}>{c.customer_count}</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
+                          <span style={{ color: '#666' }}>Avg Spend</span>
+                          <span style={{ fontWeight: 700 }}>{c.customer_count > 0 ? fmt(c.average_spend || 0) : '—'}</span>
+                        </div>
+                      </div>
+                      <div style={{ background: '#fff', borderRadius: 12, padding: 16, border: '1px solid #eef2ee' }}>
+                        <div style={{ fontSize: 12, color: '#aaa', fontWeight: 600, marginBottom: 10, textTransform: 'uppercase' as const }}>Notes</div>
+                        <div style={{ fontSize: 13, color: c.notes ? '#333' : '#ccc', fontStyle: c.notes ? 'normal' : 'italic', lineHeight: 1.5 }}>{c.notes || 'No notes'}</div>
+                      </div>
+                      <div style={{ background: c.status === 'signed_off' ? '#e8f5e9' : '#fff8e1', borderRadius: 12, padding: 16, border: `1px solid ${c.status === 'signed_off' ? '#c8e6c9' : '#fde68a'}` }}>
+                        <div style={{ fontSize: 12, color: '#aaa', fontWeight: 600, marginBottom: 10, textTransform: 'uppercase' as const }}>Sign Off</div>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: c.status === 'signed_off' ? PRIMARY : '#f59e0b', marginBottom: 4 }}>
+                          {c.status === 'signed_off' ? '✅ Signed Off' : '⏳ Draft'}
+                        </div>
+                        {c.signed_by_name && <div style={{ fontSize: 12, color: '#666' }}>by {c.signed_by_name}</div>}
+                        {c.signed_off_at && <div style={{ fontSize: 11, color: '#aaa', marginTop: 4 }}>{new Date(c.signed_off_at).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })}</div>}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── STORE MANAGER CASH UP WIZARD ────────────────────────────────────────────
+
+function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: string; storeName: string }) {
   const router = useRouter();
   const [cashUp, setCashUp] = useState<CashUp | null>(null);
   const [history, setHistory] = useState<CashUp[]>([]);
@@ -61,19 +269,9 @@ export default function CashUpPage() {
   const [saving, setSaving] = useState(false);
   const [activeStep, setActiveStep] = useState(1);
 
-  const [bankDenoms, setBankDenoms] = useState<Record<string, number>>({
-    r200: 0, r100: 0, r50: 0, r20: 0, r10: 0, r5: 0,
-    r2: 0, r1: 0, r050: 0, r020: 0, r010: 0, r005: 0
-  });
-  const [floatDenoms, setFloatDenoms] = useState<Record<string, number>>({
-    r200: 0, r100: 0, r50: 0, r20: 0, r10: 0, r5: 0,
-    r2: 0, r1: 0, r050: 0, r020: 0, r010: 0, r005: 0
-  });
-  const [recon, setRecon] = useState({
-    previous_float: '', eft_total: '', payouts: '',
-    pos_slip_total: '', voids: '',
-    banked: false, bank_deposit_amount: '', bank_reference: ''
-  });
+  const [bankDenoms, setBankDenoms] = useState<Record<string, number>>({ r200: 0, r100: 0, r50: 0, r20: 0, r10: 0, r5: 0, r2: 0, r1: 0, r050: 0, r020: 0, r010: 0, r005: 0 });
+  const [floatDenoms, setFloatDenoms] = useState<Record<string, number>>({ r200: 0, r100: 0, r50: 0, r20: 0, r10: 0, r5: 0, r2: 0, r1: 0, r050: 0, r020: 0, r010: 0, r005: 0 });
+  const [recon, setRecon] = useState({ previous_float: '', eft_total: '', payouts: '', pos_slip_total: '', voids: '', banked: false, bank_deposit_amount: '', bank_reference: '' });
   const [perf, setPerf] = useState({ customer_count: '' });
   const [notes, setNotes] = useState('');
   const [signedByName, setSignedByName] = useState('');
@@ -87,46 +285,21 @@ export default function CashUpPage() {
   }
 
   async function loadStaff() {
-    const { data } = await supabase
-      .from('store_staff')
-      .select('id, full_name, role')
-      .eq('store_id', STORE_ID)
-      .order('full_name');
+    const { data } = await supabase.from('store_staff').select('id, full_name, role').eq('store_id', storeId).order('full_name');
     setStaff(data || []);
   }
 
   async function loadCashUp() {
     setLoading(true);
     const today = new Date().toISOString().split('T')[0];
-    const { data: todayCashUp } = await supabase
-      .from('cash_ups').select('*')
-      .eq('store_id', STORE_ID)
-      .eq('cash_up_date', today)
-      .maybeSingle();
-
-    if (todayCashUp) {
-      setCashUp(todayCashUp);
-      populateForm(todayCashUp);
-    } else {
-      // Auto-fill previous float from yesterday
-      const yesterday = new Date();
-      yesterday.setDate(yesterday.getDate() - 1);
-      const { data: yesterdayCashUp } = await supabase
-        .from('cash_ups')
-        .select('float_total')
-        .eq('store_id', STORE_ID)
-        .eq('cash_up_date', yesterday.toISOString().split('T')[0])
-        .maybeSingle();
-      if (yesterdayCashUp?.float_total) {
-        setRecon(p => ({ ...p, previous_float: yesterdayCashUp.float_total.toString() }));
-      }
+    const { data: todayCashUp } = await supabase.from('cash_ups').select('*').eq('store_id', storeId).eq('cash_up_date', today).maybeSingle();
+    if (todayCashUp) { setCashUp(todayCashUp); populateForm(todayCashUp); }
+    else {
+      const yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1);
+      const { data: yCashUp } = await supabase.from('cash_ups').select('float_total').eq('store_id', storeId).eq('cash_up_date', yesterday.toISOString().split('T')[0]).maybeSingle();
+      if (yCashUp?.float_total) setRecon(p => ({ ...p, previous_float: yCashUp.float_total.toString() }));
     }
-
-    const { data: hist } = await supabase
-      .from('cash_ups').select('*')
-      .eq('store_id', STORE_ID)
-      .order('cash_up_date', { ascending: false })
-      .limit(14);
+    const { data: hist } = await supabase.from('cash_ups').select('*').eq('store_id', storeId).order('cash_up_date', { ascending: false }).limit(14);
     setHistory(hist || []);
     setLoading(false);
   }
@@ -153,7 +326,6 @@ export default function CashUpPage() {
   const variance = aTotal - cashUpTotal;
   const customers = parseInt(perf.customer_count) || 0;
   const avgSpend = customers > 0 ? cashUpTotal / customers : 0;
-
   const varianceColor = variance === 0 ? PRIMARY : variance > 0 ? '#f59e0b' : '#ef4444';
   const varianceLabel = variance === 0 ? 'BALANCED' : variance > 0 ? `OVER by ${fmt(Math.abs(variance))}` : `SHORT by ${fmt(Math.abs(variance))}`;
   const isSignedOff = cashUp?.status === 'signed_off';
@@ -161,27 +333,16 @@ export default function CashUpPage() {
 
   function buildPayload(status: string) {
     return {
-      store_id: STORE_ID,
-      organisation_id: ORG_ID,
-      cash_up_date: new Date().toISOString().split('T')[0],
-      r200: bankDenoms.r200, r100: bankDenoms.r100, r50: bankDenoms.r50,
-      r20: bankDenoms.r20, r10: bankDenoms.r10, r5: bankDenoms.r5,
-      r2: bankDenoms.r2, r1: bankDenoms.r1, r050: bankDenoms.r050,
-      r020: bankDenoms.r020, r010: bankDenoms.r010, r005: bankDenoms.r005,
-      float_r200: floatDenoms.r200, float_r100: floatDenoms.r100, float_r50: floatDenoms.r50,
-      float_r20: floatDenoms.r20, float_r10: floatDenoms.r10, float_r5: floatDenoms.r5,
-      float_r2: floatDenoms.r2, float_r1: floatDenoms.r1, float_r050: floatDenoms.r050,
-      float_r020: floatDenoms.r020, float_r010: floatDenoms.r010, float_r005: floatDenoms.r005,
+      store_id: storeId, organisation_id: orgId, cash_up_date: new Date().toISOString().split('T')[0],
+      r200: bankDenoms.r200, r100: bankDenoms.r100, r50: bankDenoms.r50, r20: bankDenoms.r20, r10: bankDenoms.r10, r5: bankDenoms.r5, r2: bankDenoms.r2, r1: bankDenoms.r1, r050: bankDenoms.r050, r020: bankDenoms.r020, r010: bankDenoms.r010, r005: bankDenoms.r005,
+      float_r200: floatDenoms.r200, float_r100: floatDenoms.r100, float_r50: floatDenoms.r50, float_r20: floatDenoms.r20, float_r10: floatDenoms.r10, float_r5: floatDenoms.r5, float_r2: floatDenoms.r2, float_r1: floatDenoms.r1, float_r050: floatDenoms.r050, float_r020: floatDenoms.r020, float_r010: floatDenoms.r010, float_r005: floatDenoms.r005,
       float_total: floatTotal, bank_total: bankTotal, total_cash: totalCash,
-      previous_float: prevFloat, eft_total: eft, payouts,
-      a_total: aTotal, pos_slip_total: posSlip, voids,
-      cash_up_total: cashUpTotal, variance,
+      previous_float: prevFloat, eft_total: eft, payouts, a_total: aTotal,
+      pos_slip_total: posSlip, voids, cash_up_total: cashUpTotal, variance,
       banked: recon.banked,
       bank_deposit_amount: recon.bank_deposit_amount ? parseFloat(recon.bank_deposit_amount) : null,
       bank_reference: recon.bank_reference || null,
-      customer_count: customers, average_spend: avgSpend,
-      notes: notes || null,
-      status,
+      customer_count: customers, average_spend: avgSpend, notes: notes || null, status,
     };
   }
 
@@ -189,17 +350,10 @@ export default function CashUpPage() {
     setSaving(true);
     try {
       const payload = buildPayload('draft');
-      if (cashUp?.id) {
-        await supabase.from('cash_ups').update(payload).eq('id', cashUp.id);
-      } else {
-        const { data, error } = await supabase.from('cash_ups').insert(payload).select().single();
-        if (error) throw error;
-        if (data) setCashUp(data);
-      }
+      if (cashUp?.id) { await supabase.from('cash_ups').update(payload).eq('id', cashUp.id); }
+      else { const { data } = await supabase.from('cash_ups').insert(payload).select().single(); if (data) setCashUp(data); }
       await loadCashUp();
-    } catch (e) {
-      console.error('Save error:', e);
-    }
+    } catch (e) { console.error('Save error:', e); }
     setSaving(false);
   }
 
@@ -207,90 +361,49 @@ export default function CashUpPage() {
     if (!signedByName.trim()) return;
     setSaving(true);
     try {
-      const payload = {
-        ...buildPayload('signed_off'),
-        signed_by_name: signedByName.trim(),
-        signed_off_at: new Date().toISOString(),
-      };
-      if (cashUp?.id) {
-        const { error } = await supabase.from('cash_ups').update(payload).eq('id', cashUp.id);
-        if (error) throw error;
-      } else {
-        const { data, error } = await supabase.from('cash_ups').insert(payload).select().single();
-        if (error) throw error;
-        if (data) setCashUp(data);
-      }
+      const payload = { ...buildPayload('signed_off'), signed_by_name: signedByName.trim(), signed_off_at: new Date().toISOString() };
+      if (cashUp?.id) { await supabase.from('cash_ups').update(payload).eq('id', cashUp.id); }
+      else { const { data } = await supabase.from('cash_ups').insert(payload).select().single(); if (data) setCashUp(data); }
       await loadCashUp();
-    } catch (e) {
-      console.error('Sign off error:', e);
-      alert('Sign off failed — check console for details');
-    }
+    } catch (e) { console.error('Sign off error:', e); alert('Sign off failed'); }
     setSaving(false);
   }
 
   function printCashUp() {
-    const c = cashUp;
-    if (!c) return;
-    const vColor = c.variance === 0 ? '#1a5c38' : c.variance > 0 ? '#f59e0b' : '#ef4444';
-    const vLabel = c.variance === 0 ? 'BALANCED' : c.variance > 0 ? `OVER by R ${Math.abs(c.variance).toFixed(2)}` : `SHORT by R ${Math.abs(c.variance).toFixed(2)}`;
+    const c = cashUp; if (!c) return;
+    const vColor = (c.variance || 0) === 0 ? '#1a5c38' : (c.variance || 0) > 0 ? '#f59e0b' : '#ef4444';
+    const vLabel = (c.variance || 0) === 0 ? 'BALANCED' : (c.variance || 0) > 0 ? `OVER by R ${Math.abs(c.variance || 0).toFixed(2)}` : `SHORT by R ${Math.abs(c.variance || 0).toFixed(2)}`;
     const denomRows = DENOMS.map(d => {
-      const bankQty = c[d.key as keyof CashUp] as number;
-      const floatQty = c[`float_${d.key}` as keyof CashUp] as number;
+      const bankQty = (c[d.key as keyof CashUp] as number) || 0;
+      const floatQty = (c[`float_${d.key}` as keyof CashUp] as number) || 0;
       if (!bankQty && !floatQty) return '';
-      return `<tr>
-        <td>${d.label}</td>
-        <td class="right">${floatQty || 0}</td>
-        <td class="right">R ${((floatQty || 0) * d.value).toFixed(2)}</td>
-        <td class="divider"></td>
-        <td class="right">${bankQty || 0}</td>
-        <td class="right">R ${((bankQty || 0) * d.value).toFixed(2)}</td>
-      </tr>`;
+      return `<tr><td>${d.label}</td><td class="right">${floatQty}</td><td class="right">R ${(floatQty * d.value).toFixed(2)}</td><td class="divider"></td><td class="right">${bankQty}</td><td class="right">R ${(bankQty * d.value).toFixed(2)}</td></tr>`;
     }).join('');
-    const win = window.open('', '_blank');
-    if (!win) return;
+    const win = window.open('', '_blank'); if (!win) return;
     win.document.write(`<!DOCTYPE html><html><head><title>Cash Up - ${c.cash_up_date}</title><style>
-      @page{size:A4;margin:18mm 20mm}*{box-sizing:border-box;margin:0;padding:0}
-      body{font-family:Arial,sans-serif;font-size:11px;color:#111}
-      .header{text-align:center;padding-bottom:12px;margin-bottom:16px;border-bottom:3px solid #1a5c38}
-      .header h1{font-size:22px;color:#1a5c38;font-weight:900}
-      .header h2{font-size:13px;color:#444;margin-top:2px;font-weight:600;letter-spacing:1px;text-transform:uppercase}
-      .header p{font-size:11px;color:#888;margin-top:4px}
-      .meta{display:flex;justify-content:space-between;background:#f0f7f2;padding:10px 14px;border-radius:6px;margin-bottom:16px;font-size:11px}
-      .meta strong{color:#1a5c38}
+      @page{size:A4;margin:18mm 20mm}*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,sans-serif;font-size:11px;color:#111}
+      .header{text-align:center;padding-bottom:12px;margin-bottom:16px;border-bottom:3px solid #1a5c38}.header h1{font-size:22px;color:#1a5c38;font-weight:900}
+      .header h2{font-size:13px;color:#444;margin-top:2px;font-weight:600;letter-spacing:1px;text-transform:uppercase}.header p{font-size:11px;color:#888;margin-top:4px}
+      .meta{display:flex;justify-content:space-between;background:#f0f7f2;padding:10px 14px;border-radius:6px;margin-bottom:16px;font-size:11px}.meta strong{color:#1a5c38}
       .section-title{font-size:11px;font-weight:800;color:#1a5c38;text-transform:uppercase;letter-spacing:.8px;border-bottom:2px solid #1a5c38;padding-bottom:3px;margin-bottom:8px}
-      table{width:100%;border-collapse:collapse;font-size:11px;margin-bottom:16px}
-      td,th{padding:5px 6px}
-      th{background:#1a5c38;color:#fff;font-weight:700;text-align:left}
-      th.right,td.right{text-align:right}
-      tr:nth-child(even) td{background:#f8f8f8}
-      .total-row td{font-weight:800;background:#e8f5e9;border-top:2px solid #1a5c38}
-      td.divider{width:12px;background:#fff;border-left:2px dashed #ccc;border-right:2px dashed #ccc}
-      th.divider{background:#fff;border-left:2px dashed #ccc;border-right:2px dashed #ccc}
+      table{width:100%;border-collapse:collapse;font-size:11px;margin-bottom:16px}td,th{padding:5px 6px}th{background:#1a5c38;color:#fff;font-weight:700;text-align:left}
+      th.right,td.right{text-align:right}tr:nth-child(even) td{background:#f8f8f8}.total-row td{font-weight:800;background:#e8f5e9;border-top:2px solid #1a5c38}
+      td.divider{width:12px;background:#fff;border-left:2px dashed #ccc;border-right:2px dashed #ccc}th.divider{background:#fff;border-left:2px dashed #ccc;border-right:2px dashed #ccc}
       .col-header{background:#0a1f12;color:#fff;text-align:center;font-weight:800;font-size:11px;padding:6px}
-      .two-col{display:flex;gap:16px;margin-bottom:16px}
-      .two-col>div{flex:1}
+      .two-col{display:flex;gap:16px;margin-bottom:16px}.two-col>div{flex:1}
       .recon-row{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #eee;font-size:11px}
       .recon-row.subtotal{font-weight:800;background:#e8f5e9;padding:6px 4px;margin-top:2px;border-top:2px solid #1a5c38;border-bottom:none}
-      .variance-box{border:3px solid ${vColor};background:${c.variance===0?'#e8f5e9':c.variance>0?'#fff8e1':'#fdecea'};padding:14px 20px;border-radius:8px;text-align:center;margin:14px 0}
-      .variance-label{font-size:10px;font-weight:800;color:${vColor};text-transform:uppercase;letter-spacing:1px}
-      .variance-amount{font-size:30px;font-weight:900;color:${vColor};margin:4px 0}
-      .variance-status{font-size:14px;font-weight:800;color:${vColor}}
-      .notes-box{border:1px solid #ddd;padding:8px 10px;border-radius:4px;min-height:50px;font-size:11px;color:#333;line-height:1.5}
+      .variance-box{border:3px solid ${vColor};background:${(c.variance||0)===0?'#e8f5e9':(c.variance||0)>0?'#fff8e1':'#fdecea'};padding:14px 20px;border-radius:8px;text-align:center;margin:14px 0}
+      .variance-label{font-size:10px;font-weight:800;color:${vColor};text-transform:uppercase;letter-spacing:1px}.variance-amount{font-size:30px;font-weight:900;color:${vColor};margin:4px 0}
+      .variance-status{font-size:14px;font-weight:800;color:${vColor}}.notes-box{border:1px solid #ddd;padding:8px 10px;border-radius:4px;min-height:50px;font-size:11px;color:#333;line-height:1.5}
       .sign-section{display:flex;justify-content:space-between;margin-top:24px;padding-top:16px;border-top:2px solid #1a5c38}
-      .sign-block{text-align:center}
-      .sign-line{border-bottom:1px solid #333;width:160px;margin:35px auto 6px}
-      .sign-label{font-size:10px;color:#666}
-      .sign-name{font-size:11px;font-weight:700;color:#333;margin-top:3px}
-      .footer{margin-top:20px;text-align:center;font-size:9px;color:#aaa;border-top:1px solid #eee;padding-top:8px}
-      .badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:800}
-      .badge-green{background:#e8f5e9;color:#1a5c38}
-      .badge-amber{background:#fff8e1;color:#f59e0b}
-      .totals-summary{display:flex;gap:12px;margin-bottom:16px}
-      .total-pill{flex:1;background:#f0f7f2;border:2px solid #1a5c38;border-radius:8px;padding:10px;text-align:center}
-      .total-pill .label{font-size:9px;color:#666;text-transform:uppercase;font-weight:700;letter-spacing:.5px}
-      .total-pill .amount{font-size:16px;font-weight:900;color:#1a5c38;margin-top:2px}
+      .sign-block{text-align:center}.sign-line{border-bottom:1px solid #333;width:160px;margin:35px auto 6px}.sign-label{font-size:10px;color:#666}
+      .sign-name{font-size:11px;font-weight:700;color:#333;margin-top:3px}.footer{margin-top:20px;text-align:center;font-size:9px;color:#aaa;border-top:1px solid #eee;padding-top:8px}
+      .badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:800}.badge-green{background:#e8f5e9;color:#1a5c38}.badge-amber{background:#fff8e1;color:#f59e0b}
+      .totals-summary{display:flex;gap:12px;margin-bottom:16px}.total-pill{flex:1;background:#f0f7f2;border:2px solid #1a5c38;border-radius:8px;padding:10px;text-align:center}
+      .total-pill .label{font-size:9px;color:#666;text-transform:uppercase;font-weight:700;letter-spacing:.5px}.total-pill .amount{font-size:16px;font-weight:900;color:#1a5c38;margin-top:2px}
     </style></head><body>
-    <div class="header"><h1>CompliTrack</h1><h2>Daily Cash Up Report</h2><p>${STORE_NAME}</p></div>
+    <div class="header"><h1>CompliTrack</h1><h2>Daily Cash Up Report</h2><p>${storeName}</p></div>
     <div class="meta">
       <div><strong>Date:</strong> ${new Date(c.cash_up_date).toLocaleDateString('en-ZA',{weekday:'long',day:'numeric',month:'long',year:'numeric'})}</div>
       <div><strong>Status:</strong> <span class="badge ${c.status==='signed_off'?'badge-green':'badge-amber'}">${c.status==='signed_off'?'SIGNED OFF':'DRAFT'}</span></div>
@@ -299,35 +412,35 @@ export default function CashUpPage() {
     </div>
     <div class="section-title">Cash Count</div>
     <div class="totals-summary">
-      <div class="total-pill"><div class="label">Till Float</div><div class="amount">R ${c.float_total.toFixed(2)}</div></div>
-      <div class="total-pill"><div class="label">To Bank</div><div class="amount">R ${c.bank_total.toFixed(2)}</div></div>
-      <div class="total-pill"><div class="label">Total Cash</div><div class="amount">R ${c.total_cash.toFixed(2)}</div></div>
+      <div class="total-pill"><div class="label">Till Float</div><div class="amount">R ${(c.float_total||0).toFixed(2)}</div></div>
+      <div class="total-pill"><div class="label">To Bank</div><div class="amount">R ${(c.bank_total||0).toFixed(2)}</div></div>
+      <div class="total-pill"><div class="label">Total Cash</div><div class="amount">R ${(c.total_cash||0).toFixed(2)}</div></div>
     </div>
     <table>
       <tr><th rowspan="2">Denom</th><th colspan="2" class="col-header" style="text-align:center">TILL FLOAT</th><th class="divider"></th><th colspan="2" class="col-header" style="text-align:center">TO BANK</th></tr>
       <tr><th class="right">Qty</th><th class="right">Value</th><th class="divider"></th><th class="right">Qty</th><th class="right">Value</th></tr>
       ${denomRows}
-      <tr class="total-row"><td><strong>TOTAL</strong></td><td></td><td class="right"><strong>R ${c.float_total.toFixed(2)}</strong></td><td class="divider"></td><td></td><td class="right"><strong>R ${c.bank_total.toFixed(2)}</strong></td></tr>
+      <tr class="total-row"><td><strong>TOTAL</strong></td><td></td><td class="right"><strong>R ${(c.float_total||0).toFixed(2)}</strong></td><td class="divider"></td><td></td><td class="right"><strong>R ${(c.bank_total||0).toFixed(2)}</strong></td></tr>
     </table>
     <div class="two-col">
       <div>
         <div class="section-title">Reconciliation</div>
-        <div class="recon-row"><span>Total Cash Counted</span><span>R ${c.total_cash.toFixed(2)}</span></div>
-        <div class="recon-row"><span>Less: Previous Float</span><span>— R ${c.previous_float.toFixed(2)}</span></div>
-        <div class="recon-row"><span>Plus: EFT / Card</span><span>+ R ${c.eft_total.toFixed(2)}</span></div>
-        <div class="recon-row"><span>Plus: Payouts</span><span>+ R ${c.payouts.toFixed(2)}</span></div>
-        <div class="recon-row subtotal"><span><strong>A Total</strong></span><span><strong>R ${c.a_total.toFixed(2)}</strong></span></div>
+        <div class="recon-row"><span>Total Cash Counted</span><span>R ${(c.total_cash||0).toFixed(2)}</span></div>
+        <div class="recon-row"><span>Less: Previous Float</span><span>— R ${(c.previous_float||0).toFixed(2)}</span></div>
+        <div class="recon-row"><span>Plus: EFT / Card</span><span>+ R ${(c.eft_total||0).toFixed(2)}</span></div>
+        <div class="recon-row"><span>Plus: Payouts</span><span>+ R ${(c.payouts||0).toFixed(2)}</span></div>
+        <div class="recon-row subtotal"><span><strong>A Total</strong></span><span><strong>R ${(c.a_total||0).toFixed(2)}</strong></span></div>
         <br/>
-        <div class="recon-row"><span>POS Slip Total</span><span>R ${c.pos_slip_total.toFixed(2)}</span></div>
-        <div class="recon-row"><span>Less: Voids</span><span>— R ${c.voids.toFixed(2)}</span></div>
-        <div class="recon-row subtotal"><span><strong>Cash Up Total</strong></span><span><strong>R ${c.cash_up_total.toFixed(2)}</strong></span></div>
+        <div class="recon-row"><span>POS Slip Total</span><span>R ${(c.pos_slip_total||0).toFixed(2)}</span></div>
+        <div class="recon-row"><span>Less: Voids</span><span>— R ${(c.voids||0).toFixed(2)}</span></div>
+        <div class="recon-row subtotal"><span><strong>Cash Up Total</strong></span><span><strong>R ${(c.cash_up_total||0).toFixed(2)}</strong></span></div>
         ${c.banked?`<br/><div class="recon-row"><span>Bank Deposit</span><span>R ${(c.bank_deposit_amount||0).toFixed(2)}</span></div><div class="recon-row"><span>Bank Ref</span><span>${c.bank_reference||'—'}</span></div>`:''}
       </div>
       <div>
         <div class="section-title">Sales Performance</div>
         <div class="recon-row"><span>Customers</span><span>${c.customer_count}</span></div>
-        <div class="recon-row"><span>Cash Up Total</span><span>R ${c.cash_up_total.toFixed(2)}</span></div>
-        <div class="recon-row subtotal"><span><strong>Avg per Customer</strong></span><span><strong>${c.customer_count>0?`R ${c.average_spend.toFixed(2)}`:'—'}</strong></span></div>
+        <div class="recon-row"><span>Cash Up Total</span><span>R ${(c.cash_up_total||0).toFixed(2)}</span></div>
+        <div class="recon-row subtotal"><span><strong>Avg per Customer</strong></span><span><strong>${c.customer_count>0?`R ${(c.average_spend||0).toFixed(2)}`:'—'}</strong></span></div>
         <br/>
         <div class="section-title">Notes & Problems</div>
         <div class="notes-box">${c.notes||'No notes recorded.'}</div>
@@ -335,7 +448,7 @@ export default function CashUpPage() {
     </div>
     <div class="variance-box">
       <div class="variance-label">Variance</div>
-      <div class="variance-amount">${c.variance===0?'R 0.00':`R ${Math.abs(c.variance).toFixed(2)}`}</div>
+      <div class="variance-amount">${(c.variance||0)===0?'R 0.00':`R ${Math.abs(c.variance||0).toFixed(2)}`}</div>
       <div class="variance-status">${vLabel}</div>
     </div>
     <div class="sign-section">
@@ -349,25 +462,14 @@ export default function CashUpPage() {
     win.document.close();
   }
 
-  const denomInputStyle = (disabled: boolean) => ({
-    width: '100%', padding: '8px 10px', borderRadius: 8,
-    border: '1.5px solid #eef2ee', fontSize: 13, outline: 'none',
-    fontFamily: 'inherit', boxSizing: 'border-box' as const,
-    background: disabled ? '#f8faf8' : '#fff', textAlign: 'center' as const
-  });
-  const reconInputStyle = {
-    width: '100%', padding: '10px 14px', borderRadius: 10,
-    border: '1.5px solid #eef2ee', fontSize: 14, outline: 'none',
-    fontFamily: 'inherit', boxSizing: 'border-box' as const,
-    background: readOnly ? '#f8faf8' : '#fff'
-  };
+  const denomInputStyle = (disabled: boolean) => ({ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1.5px solid #eef2ee', fontSize: 13, outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box' as const, background: disabled ? '#f8faf8' : '#fff', textAlign: 'center' as const });
+  const reconInputStyle = { width: '100%', padding: '10px 14px', borderRadius: 10, border: '1.5px solid #eef2ee', fontSize: 14, outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box' as const, background: readOnly ? '#f8faf8' : '#fff' };
   const cardStyle = { background: '#fff', borderRadius: 20, padding: 24, border: '1px solid #eef2ee', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' };
   const labelStyle = { display: 'block' as const, fontSize: 13, fontWeight: 600 as const, color: '#555', marginBottom: 6 };
   const steps = ['Cash Count', 'Reconciliation', 'Performance', 'Notes', 'Sign Off'];
 
   return (
     <div style={{ minHeight: '100vh', background: '#f8faf8', fontFamily: 'system-ui, sans-serif' }}>
-
       <div style={{ background: `linear-gradient(135deg, ${DARK}, ${PRIMARY})`, padding: '0 32px' }}>
         <div style={{ maxWidth: 1100, margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 64 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -389,7 +491,6 @@ export default function CashUpPage() {
 
       <div style={{ maxWidth: 1100, margin: '0 auto', padding: '32px 24px' }}>
         {loading && <div style={{ textAlign: 'center', padding: 80, color: '#666' }}>Loading...</div>}
-
         {!loading && (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 24 }}>
             <div>
@@ -405,14 +506,12 @@ export default function CashUpPage() {
                 <div style={cardStyle}>
                   <div style={{ fontSize: 18, fontWeight: 700, color: '#333', marginBottom: 4 }}>Count Your Cash</div>
                   <div style={{ fontSize: 13, color: '#888', marginBottom: 20 }}>Enter quantities for Till Float and To Bank separately</div>
-
                   <div style={{ display: 'grid', gridTemplateColumns: '80px 1fr 20px 1fr', gap: 8, marginBottom: 8 }}>
                     <div />
                     <div style={{ background: DARK, color: '#fff', borderRadius: 8, padding: '8px 12px', textAlign: 'center' as const, fontWeight: 700, fontSize: 13 }}>TILL FLOAT</div>
                     <div />
                     <div style={{ background: PRIMARY, color: '#fff', borderRadius: 8, padding: '8px 12px', textAlign: 'center' as const, fontWeight: 700, fontSize: 13 }}>TO BANK</div>
                   </div>
-
                   <div style={{ display: 'grid', gridTemplateColumns: '80px 1fr 20px 1fr', gap: 8, marginBottom: 6 }}>
                     <div />
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
@@ -425,7 +524,6 @@ export default function CashUpPage() {
                       <div style={{ fontSize: 11, color: '#888', textAlign: 'center' as const, fontWeight: 600 }}>VALUE</div>
                     </div>
                   </div>
-
                   {DENOMS.map(d => (
                     <div key={d.key} style={{ display: 'grid', gridTemplateColumns: '80px 1fr 20px 1fr', gap: 8, alignItems: 'center', marginBottom: 6 }}>
                       <div style={{ fontWeight: 700, color: '#333', fontSize: 15 }}>{d.label}</div>
@@ -440,19 +538,16 @@ export default function CashUpPage() {
                       </div>
                     </div>
                   ))}
-
                   <div style={{ display: 'grid', gridTemplateColumns: '80px 1fr 20px 1fr', gap: 8, marginTop: 16 }}>
                     <div style={{ fontWeight: 700, color: '#333', fontSize: 13 }}>TOTAL</div>
                     <div style={{ background: DARK, color: '#fff', borderRadius: 10, padding: '12px 16px', textAlign: 'center' as const, fontWeight: 800, fontSize: 18 }}>{fmt(floatTotal)}</div>
                     <div />
                     <div style={{ background: PRIMARY, color: '#fff', borderRadius: 10, padding: '12px 16px', textAlign: 'center' as const, fontWeight: 800, fontSize: 18 }}>{fmt(bankTotal)}</div>
                   </div>
-
                   <div style={{ marginTop: 12, padding: '14px 20px', background: `linear-gradient(135deg, ${DARK}, ${PRIMARY})`, borderRadius: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span style={{ color: '#fff', fontWeight: 600, fontSize: 15 }}>Total Cash Counted</span>
                     <span style={{ color: '#fff', fontWeight: 800, fontSize: 26 }}>{fmt(totalCash)}</span>
                   </div>
-
                   {!readOnly && (
                     <button onClick={() => { saveDraft(); setActiveStep(2); }} disabled={saving} style={{ width: '100%', marginTop: 16, padding: '14px', background: PRIMARY, color: '#fff', border: 'none', borderRadius: 12, fontWeight: 700, cursor: 'pointer', fontSize: 15 }}>
                       {saving ? 'Saving...' : 'Next: Reconciliation →'}
@@ -465,7 +560,6 @@ export default function CashUpPage() {
                 <div style={cardStyle}>
                   <div style={{ fontSize: 18, fontWeight: 700, color: '#333', marginBottom: 4 }}>Reconciliation</div>
                   <div style={{ fontSize: 13, color: '#888', marginBottom: 24 }}>Enter your POS and payment totals</div>
-
                   <div style={{ background: '#f8faf8', borderRadius: 14, padding: 16, marginBottom: 16 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, paddingBottom: 12, borderBottom: '1px solid #eee' }}>
                       <span style={{ fontSize: 14, color: '#666' }}>Total Cash Counted</span>
@@ -489,7 +583,6 @@ export default function CashUpPage() {
                       <span style={{ fontWeight: 800, color: PRIMARY, fontSize: 22 }}>{fmt(aTotal)}</span>
                     </div>
                   </div>
-
                   <div style={{ background: '#f8faf8', borderRadius: 14, padding: 16, marginBottom: 16 }}>
                     {[
                       { label: 'POS Slip Total', key: 'pos_slip_total', sign: '', hint: 'Total from POS system', color: '#333' },
@@ -508,13 +601,11 @@ export default function CashUpPage() {
                       <span style={{ fontWeight: 800, color: PRIMARY, fontSize: 22 }}>{fmt(cashUpTotal)}</span>
                     </div>
                   </div>
-
                   <div style={{ background: variance === 0 ? '#e8f5e9' : variance > 0 ? '#fff8e1' : '#fdecea', borderRadius: 16, padding: 24, marginBottom: 16, textAlign: 'center' as const, border: `2px solid ${varianceColor}` }}>
                     <div style={{ fontSize: 12, color: varianceColor, fontWeight: 700, marginBottom: 8, letterSpacing: 1, textTransform: 'uppercase' as const }}>Variance</div>
                     <div style={{ fontSize: 40, fontWeight: 900, color: varianceColor }}>{variance === 0 ? 'R 0.00' : fmt(Math.abs(variance))}</div>
                     <div style={{ fontSize: 18, fontWeight: 700, color: varianceColor, marginTop: 8 }}>{varianceLabel}</div>
                   </div>
-
                   <div style={{ background: '#f8faf8', borderRadius: 14, padding: 16, marginBottom: 16 }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                       <label style={{ fontSize: 14, fontWeight: 600, color: '#333' }}>Did you bank the cash?</label>
@@ -529,7 +620,6 @@ export default function CashUpPage() {
                       </div>
                     )}
                   </div>
-
                   {!readOnly && (
                     <div style={{ display: 'flex', gap: 10 }}>
                       <button onClick={() => setActiveStep(1)} style={{ flex: 1, padding: '12px', background: '#f0f4f0', color: '#333', border: 'none', borderRadius: 12, fontWeight: 600, cursor: 'pointer', fontSize: 14 }}>← Back</button>
@@ -581,8 +671,7 @@ export default function CashUpPage() {
               {activeStep === 5 && (
                 <div style={cardStyle}>
                   <div style={{ fontSize: 18, fontWeight: 700, color: '#333', marginBottom: 4 }}>{isSignedOff ? 'Signed Off' : 'Sign Off'}</div>
-                  <div style={{ fontSize: 13, color: '#888', marginBottom: 24 }}>Review and confirm today's cash up</div>
-
+                  <div style={{ fontSize: 13, color: '#888', marginBottom: 24 }}>Review and confirm today&apos;s cash up</div>
                   <div style={{ background: '#f8faf8', borderRadius: 14, padding: 20, marginBottom: 20 }}>
                     <div style={{ fontSize: 13, fontWeight: 700, color: '#333', marginBottom: 14 }}>Summary</div>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 16 }}>
@@ -604,46 +693,24 @@ export default function CashUpPage() {
                       <span style={{ fontWeight: 800, fontSize: 20, color: varianceColor }}>{varianceLabel}</span>
                     </div>
                   </div>
-
                   {!isSignedOff ? (
                     <div>
                       <div style={{ marginBottom: 16 }}>
                         <label style={labelStyle}>Signed by</label>
                         {staff.length > 0 ? (
-                          <div>
-                            <select
-                              value={signedByName}
-                              onChange={e => setSignedByName(e.target.value)}
-                              style={{ ...reconInputStyle, marginBottom: signedByName === '__custom__' ? 10 : 0 }}
-                            >
-                              <option value="">— Select staff member —</option>
-                              {staff.map(s => (
-                                <option key={s.id} value={s.full_name}>{s.full_name} ({s.role})</option>
-                              ))}
-                              <option value="__custom__">Other (type name)</option>
-                            </select>
-                            {signedByName === '__custom__' && (
-                              <input
-                                value=""
-                                onChange={e => setSignedByName(e.target.value)}
-                                placeholder="Enter full name"
-                                style={reconInputStyle}
-                              />
-                            )}
-                          </div>
+                          <select value={signedByName} onChange={e => setSignedByName(e.target.value)} style={{ ...reconInputStyle }}>
+                            <option value="">— Select staff member —</option>
+                            {staff.map(s => <option key={s.id} value={s.full_name}>{s.full_name} ({s.role})</option>)}
+                            <option value="__other__">Other (type name)</option>
+                          </select>
                         ) : (
-                          <input
-                            value={signedByName}
-                            onChange={e => setSignedByName(e.target.value)}
-                            placeholder="Full name of person signing off"
-                            style={reconInputStyle}
-                          />
+                          <input value={signedByName} onChange={e => setSignedByName(e.target.value)} placeholder="Full name of person signing off" style={reconInputStyle} />
+                        )}
+                        {signedByName === '__other__' && (
+                          <input onChange={e => setSignedByName(e.target.value)} placeholder="Enter full name" style={{ ...reconInputStyle, marginTop: 8 }} />
                         )}
                       </div>
-                      <button
-                        onClick={signOff}
-                        disabled={saving || !signedByName.trim() || signedByName === '__custom__'}
-                        style={{ width: '100%', padding: '16px', background: signedByName.trim() && signedByName !== '__custom__' ? PRIMARY : '#eee', color: signedByName.trim() && signedByName !== '__custom__' ? '#fff' : '#aaa', border: 'none', borderRadius: 12, fontWeight: 700, cursor: signedByName.trim() && signedByName !== '__custom__' ? 'pointer' : 'default', fontSize: 16 }}>
+                      <button onClick={signOff} disabled={saving || !signedByName.trim() || signedByName === '__other__'} style={{ width: '100%', padding: '16px', background: signedByName.trim() && signedByName !== '__other__' ? PRIMARY : '#eee', color: signedByName.trim() && signedByName !== '__other__' ? '#fff' : '#aaa', border: 'none', borderRadius: 12, fontWeight: 700, cursor: 'pointer', fontSize: 16 }}>
                         {saving ? 'Signing off...' : 'Sign Off Cash Up'}
                       </button>
                       <button onClick={() => setActiveStep(4)} style={{ width: '100%', marginTop: 10, padding: '12px', background: '#f0f4f0', color: '#333', border: 'none', borderRadius: 12, fontWeight: 600, cursor: 'pointer', fontSize: 14 }}>← Back</button>
@@ -666,7 +733,7 @@ export default function CashUpPage() {
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
               <div style={cardStyle}>
-                <div style={{ fontSize: 14, fontWeight: 700, color: '#333', marginBottom: 16 }}>Today's Summary</div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: '#333', marginBottom: 16 }}>Today&apos;s Summary</div>
                 {[['Till Float', fmt(floatTotal)], ['To Bank', fmt(bankTotal)], ['Total Cash', fmt(totalCash)], ['A Total', fmt(aTotal)], ['Cash Up Total', fmt(cashUpTotal)], ['Customers', customers.toString()], ['Avg Spend', customers > 0 ? fmt(avgSpend) : '—']].map(([label, value]) => (
                   <div key={label} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 10 }}>
                     <span style={{ color: '#888' }}>{label}</span>
@@ -679,7 +746,6 @@ export default function CashUpPage() {
                   <div style={{ fontSize: 13, fontWeight: 700, color: varianceColor, marginTop: 6 }}>{varianceLabel}</div>
                 </div>
               </div>
-
               <div style={cardStyle}>
                 <div style={{ fontSize: 14, fontWeight: 700, color: '#333', marginBottom: 16 }}>Recent History</div>
                 {history.filter(h => h.cash_up_date !== new Date().toISOString().split('T')[0]).slice(0, 7).length === 0 && (
@@ -706,5 +772,62 @@ export default function CashUpPage() {
         )}
       </div>
     </div>
+  );
+}
+
+// ─── ROOT PAGE — DETECTS ROLE AND RENDERS CORRECT VIEW ───────────────────────
+
+function CashUpContent() {
+  const searchParams = useSearchParams();
+  const storeParam = searchParams.get('store');
+  const [role, setRole] = useState<string | null>(null);
+  const [storeId, setStoreId] = useState(DEFAULT_STORE_ID);
+  const [orgId, setOrgId] = useState(DEFAULT_ORG_ID);
+  const [storeName, setStoreName] = useState(DEFAULT_STORE_NAME);
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => { detectContext(); }, []);
+
+  async function detectContext() {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) { setReady(true); return; }
+    const { data: profile } = await supabase.from('profiles').select('role, organisation_id').eq('id', user.id).single();
+    setRole(profile?.role || null);
+
+    if (storeParam) {
+      // Viewing a specific store via ?store= param
+      const { data: store } = await supabase.from('stores').select('id, name, organisation_id').eq('id', storeParam).single();
+      if (store) {
+        setStoreId(store.id);
+        setStoreName(store.name);
+        setOrgId(store.organisation_id);
+      }
+    }
+    setReady(true);
+  }
+
+  if (!ready) return <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f8faf8' }}><div style={{ color: '#666' }}>Loading...</div></div>;
+
+  const isFranchisor = role === 'franchisor_admin' || role === 'platform_admin';
+  const isFranchiseeOwner = role === 'franchisee_owner';
+
+  // Franchisor or franchisee owner viewing a specific store → show history list
+  if ((isFranchisor || isFranchiseeOwner) && storeParam) {
+    return <CashUpHistoryView storeId={storeId} storeName={storeName} />;
+  }
+
+  // Store manager or normal view → show the wizard
+  return <CashUpWizard storeId={storeId} orgId={orgId} storeName={storeName} />;
+}
+
+export default function CashUpPage() {
+  return (
+    <Suspense fallback={
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f8faf8' }}>
+        <div style={{ color: '#666' }}>Loading...</div>
+      </div>
+    }>
+      <CashUpContent />
+    </Suspense>
   );
 }
