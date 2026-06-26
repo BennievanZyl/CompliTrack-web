@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 
@@ -69,6 +69,68 @@ function isExpiringSoon(date: string) {
   return days <= 30;
 }
 function isExpired(date: string) { return new Date(date) < new Date(); }
+function isImage(url: string) { return /\.(jpg|jpeg|png|gif|webp)$/i.test(url); }
+
+// ─── FILE UPLOAD COMPONENT ────────────────────────────────────────────────────
+function FileUploadBox({ file, onFileChange, accept = '.pdf,.jpg,.jpeg,.png,.doc,.docx', label = 'Upload File' }: {
+  file: File | null;
+  onFileChange: (f: File | null) => void;
+  accept?: string;
+  label?: string;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [preview, setPreview] = useState<string | null>(null);
+
+  function handleFile(f: File | null) {
+    onFileChange(f);
+    if (f && f.type.startsWith('image/')) {
+      const reader = new FileReader();
+      reader.onload = ev => setPreview(ev.target?.result as string);
+      reader.readAsDataURL(f);
+    } else {
+      setPreview(null);
+    }
+  }
+
+  return (
+    <div>
+      <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#555', marginBottom: 6 }}>{label}</label>
+      <div
+        onClick={() => inputRef.current?.click()}
+        onDragOver={e => e.preventDefault()}
+        onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) handleFile(f); }}
+        style={{ border: '2px dashed #c8e6c9', borderRadius: 12, padding: 20, textAlign: 'center' as const, cursor: 'pointer', background: file ? '#f0f7f4' : '#fafafa', transition: 'all 0.2s' }}
+      >
+        <input ref={inputRef} type="file" accept={accept} onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); }} style={{ display: 'none' }} />
+        {!file ? (
+          <div>
+            <div style={{ fontSize: 32, marginBottom: 8 }}>📎</div>
+            <div style={{ fontSize: 14, color: '#666', fontWeight: 600 }}>Click or drag to upload</div>
+            <div style={{ fontSize: 12, color: '#aaa', marginTop: 4 }}>PDF, JPG, PNG, DOC up to 10MB</div>
+          </div>
+        ) : (
+          <div>
+            {preview ? (
+              <img src={preview} alt="preview" style={{ maxHeight: 100, maxWidth: '100%', borderRadius: 8, objectFit: 'contain', marginBottom: 8 }} />
+            ) : (
+              <div style={{ fontSize: 36, marginBottom: 8 }}>📄</div>
+            )}
+            <div style={{ fontSize: 13, color: PRIMARY, fontWeight: 700 }}>{file.name}</div>
+            <div style={{ fontSize: 11, color: '#aaa', marginTop: 2 }}>{(file.size / 1024).toFixed(0)} KB · Click to change</div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── UPLOAD HELPER ────────────────────────────────────────────────────────────
+async function uploadToStorage(bucket: string, path: string, file: File): Promise<string> {
+  const { error } = await supabase.storage.from(bucket).upload(path, file, { upsert: true });
+  if (error) throw error;
+  const { data } = supabase.storage.from(bucket).getPublicUrl(path);
+  return data.publicUrl;
+}
 
 export default function PeoplePage() {
   const router = useRouter();
@@ -80,10 +142,10 @@ export default function PeoplePage() {
   const [showEmployeeModal, setShowEmployeeModal] = useState(false);
   const [editEmployee, setEditEmployee] = useState<Employee | null>(null);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
   const [profileTab, setProfileTab] = useState<ProfileTab>('overview');
 
-  // Employee data
   const [documents, setDocuments] = useState<EmployeeDocument[]>([]);
   const [leave, setLeave] = useState<EmployeeLeave[]>([]);
   const [warnings, setWarnings] = useState<EmployeeWarning[]>([]);
@@ -91,7 +153,6 @@ export default function PeoplePage() {
   const [attendance, setAttendance] = useState<Attendance[]>([]);
   const [profileLoading, setProfileLoading] = useState(false);
 
-  // Sub-modals
   const [showDocModal, setShowDocModal] = useState(false);
   const [showLeaveModal, setShowLeaveModal] = useState(false);
   const [showWarningModal, setShowWarningModal] = useState(false);
@@ -99,9 +160,11 @@ export default function PeoplePage() {
   const [showAttendanceModal, setShowAttendanceModal] = useState(false);
 
   const [empForm, setEmpForm] = useState({ full_name: '', role: 'Cashier', phone: '', id_number: '', start_date: '', employment_type: 'full_time', notes: '', is_active: true });
-  const [docForm, setDocForm] = useState({ document_type: 'Employment Contract', document_name: '', file_url: '', expiry_date: '', notes: '' });
+  const [docForm, setDocForm] = useState({ document_type: 'Employment Contract', document_name: '', expiry_date: '', notes: '' });
+  const [docFile, setDocFile] = useState<File | null>(null);
   const [leaveForm, setLeaveForm] = useState({ leave_type: 'Annual', start_date: '', end_date: '', days_taken: '', status: 'approved', reason: '', notes: '' });
-  const [warningForm, setWarningForm] = useState({ warning_type: 'Written Warning', reason: '', incident_date: '', issued_by: '', document_url: '', notes: '' });
+  const [warningForm, setWarningForm] = useState({ warning_type: 'Written Warning', reason: '', incident_date: '', issued_by: '', notes: '' });
+  const [warningFile, setWarningFile] = useState<File | null>(null);
   const [advanceForm, setAdvanceForm] = useState({ amount: '', reason: '', advance_date: new Date().toISOString().split('T')[0], repayment_status: 'outstanding', deduct_from_wages: false, notes: '' });
   const [attendanceForm, setAttendanceForm] = useState({ work_date: new Date().toISOString().split('T')[0], clock_in: '', clock_out: '', is_late: false, notes: '' });
 
@@ -146,77 +209,101 @@ export default function PeoplePage() {
   function openAdd() {
     setEditEmployee(null);
     setEmpForm({ full_name: '', role: 'Cashier', phone: '', id_number: '', start_date: '', employment_type: 'full_time', notes: '', is_active: true });
+    setSaveError(null);
     setShowEmployeeModal(true);
   }
 
   function openEdit(emp: Employee) {
     setEditEmployee(emp);
     setEmpForm({ full_name: emp.full_name, role: emp.role, phone: emp.phone || '', id_number: emp.id_number || '', start_date: emp.start_date || '', employment_type: emp.employment_type || 'full_time', notes: emp.notes || '', is_active: emp.is_active });
+    setSaveError(null);
     setShowEmployeeModal(true);
   }
 
   async function saveEmployee() {
     if (!empForm.full_name.trim()) return;
-    setSaving(true);
-    const payload = { store_id: STORE_ID, organisation_id: ORG_ID, full_name: empForm.full_name.trim(), role: empForm.role, phone: empForm.phone || null, id_number: empForm.id_number || null, start_date: empForm.start_date || null, employment_type: empForm.employment_type, notes: empForm.notes || null, is_active: empForm.is_active };
-    if (editEmployee) { await supabase.from('employees').update(payload).eq('id', editEmployee.id); }
-    else { await supabase.from('employees').insert(payload); }
-    await loadEmployees();
-    setShowEmployeeModal(false);
+    setSaving(true); setSaveError(null);
+    try {
+      const payload = { store_id: STORE_ID, organisation_id: ORG_ID, full_name: empForm.full_name.trim(), role: empForm.role, phone: empForm.phone || null, id_number: empForm.id_number || null, start_date: empForm.start_date || null, employment_type: empForm.employment_type, notes: empForm.notes || null, is_active: empForm.is_active };
+      if (editEmployee) { await supabase.from('employees').update(payload).eq('id', editEmployee.id); }
+      else { await supabase.from('employees').insert(payload); }
+      await loadEmployees();
+      setShowEmployeeModal(false);
+    } catch (e: unknown) { setSaveError(e instanceof Error ? e.message : 'Failed to save'); }
     setSaving(false);
   }
 
   async function saveDocument() {
-    if (!selectedEmployee || !docForm.document_name.trim() || !docForm.file_url.trim()) return;
-    setSaving(true);
-    await supabase.from('employee_documents').insert({ employee_id: selectedEmployee.id, store_id: STORE_ID, document_type: docForm.document_type, document_name: docForm.document_name, file_url: docForm.file_url, expiry_date: docForm.expiry_date || null, notes: docForm.notes || null });
-    await loadEmployeeProfile(selectedEmployee);
-    setShowDocModal(false);
-    setDocForm({ document_type: 'Employment Contract', document_name: '', file_url: '', expiry_date: '', notes: '' });
+    if (!selectedEmployee || !docForm.document_name.trim() || !docFile) return;
+    setSaving(true); setSaveError(null);
+    try {
+      const ext = docFile.name.split('.').pop();
+      const path = `${selectedEmployee.id}/${Date.now()}_${docForm.document_name.replace(/\s+/g, '_')}.${ext}`;
+      const fileUrl = await uploadToStorage('employee-documents', path, docFile);
+      await supabase.from('employee_documents').insert({ employee_id: selectedEmployee.id, store_id: STORE_ID, document_type: docForm.document_type, document_name: docForm.document_name, file_url: fileUrl, expiry_date: docForm.expiry_date || null, notes: docForm.notes || null });
+      await loadEmployeeProfile(selectedEmployee);
+      setShowDocModal(false);
+      setDocForm({ document_type: 'Employment Contract', document_name: '', expiry_date: '', notes: '' });
+      setDocFile(null);
+    } catch (e: unknown) { setSaveError(e instanceof Error ? e.message : 'Upload failed'); }
     setSaving(false);
   }
 
   async function saveLeave() {
     if (!selectedEmployee || !leaveForm.start_date || !leaveForm.end_date) return;
-    setSaving(true);
-    await supabase.from('employee_leave').insert({ employee_id: selectedEmployee.id, store_id: STORE_ID, leave_type: leaveForm.leave_type, start_date: leaveForm.start_date, end_date: leaveForm.end_date, days_taken: parseFloat(leaveForm.days_taken) || 1, status: leaveForm.status, reason: leaveForm.reason || null, notes: leaveForm.notes || null });
-    await loadEmployeeProfile(selectedEmployee);
-    setShowLeaveModal(false);
-    setLeaveForm({ leave_type: 'Annual', start_date: '', end_date: '', days_taken: '', status: 'approved', reason: '', notes: '' });
+    setSaving(true); setSaveError(null);
+    try {
+      await supabase.from('employee_leave').insert({ employee_id: selectedEmployee.id, store_id: STORE_ID, leave_type: leaveForm.leave_type, start_date: leaveForm.start_date, end_date: leaveForm.end_date, days_taken: parseFloat(leaveForm.days_taken) || 1, status: leaveForm.status, reason: leaveForm.reason || null, notes: leaveForm.notes || null });
+      await loadEmployeeProfile(selectedEmployee);
+      setShowLeaveModal(false);
+      setLeaveForm({ leave_type: 'Annual', start_date: '', end_date: '', days_taken: '', status: 'approved', reason: '', notes: '' });
+    } catch (e: unknown) { setSaveError(e instanceof Error ? e.message : 'Failed to save'); }
     setSaving(false);
   }
 
   async function saveWarning() {
     if (!selectedEmployee || !warningForm.reason.trim() || !warningForm.incident_date || !warningForm.issued_by.trim()) return;
-    setSaving(true);
-    await supabase.from('employee_warnings').insert({ employee_id: selectedEmployee.id, store_id: STORE_ID, warning_type: warningForm.warning_type, reason: warningForm.reason, incident_date: warningForm.incident_date, issued_by: warningForm.issued_by, document_url: warningForm.document_url || null, notes: warningForm.notes || null });
-    await loadEmployeeProfile(selectedEmployee);
-    setShowWarningModal(false);
-    setWarningForm({ warning_type: 'Written Warning', reason: '', incident_date: '', issued_by: '', document_url: '', notes: '' });
+    setSaving(true); setSaveError(null);
+    try {
+      let documentUrl: string | null = null;
+      if (warningFile) {
+        const ext = warningFile.name.split('.').pop();
+        const path = `${selectedEmployee.id}/warnings/${Date.now()}.${ext}`;
+        documentUrl = await uploadToStorage('employee-documents', path, warningFile);
+      }
+      await supabase.from('employee_warnings').insert({ employee_id: selectedEmployee.id, store_id: STORE_ID, warning_type: warningForm.warning_type, reason: warningForm.reason, incident_date: warningForm.incident_date, issued_by: warningForm.issued_by, document_url: documentUrl, notes: warningForm.notes || null });
+      await loadEmployeeProfile(selectedEmployee);
+      setShowWarningModal(false);
+      setWarningForm({ warning_type: 'Written Warning', reason: '', incident_date: '', issued_by: '', notes: '' });
+      setWarningFile(null);
+    } catch (e: unknown) { setSaveError(e instanceof Error ? e.message : 'Failed to save'); }
     setSaving(false);
   }
 
   async function saveAdvance() {
     if (!selectedEmployee || !advanceForm.amount || !advanceForm.advance_date) return;
-    setSaving(true);
-    await supabase.from('employee_advances').insert({ employee_id: selectedEmployee.id, store_id: STORE_ID, amount: parseFloat(advanceForm.amount), reason: advanceForm.reason || null, advance_date: advanceForm.advance_date, repayment_status: advanceForm.repayment_status, deduct_from_wages: advanceForm.deduct_from_wages, notes: advanceForm.notes || null });
-    await loadEmployeeProfile(selectedEmployee);
-    setShowAdvanceModal(false);
-    setAdvanceForm({ amount: '', reason: '', advance_date: new Date().toISOString().split('T')[0], repayment_status: 'outstanding', deduct_from_wages: false, notes: '' });
+    setSaving(true); setSaveError(null);
+    try {
+      await supabase.from('employee_advances').insert({ employee_id: selectedEmployee.id, store_id: STORE_ID, amount: parseFloat(advanceForm.amount), reason: advanceForm.reason || null, advance_date: advanceForm.advance_date, repayment_status: advanceForm.repayment_status, deduct_from_wages: advanceForm.deduct_from_wages, notes: advanceForm.notes || null });
+      await loadEmployeeProfile(selectedEmployee);
+      setShowAdvanceModal(false);
+      setAdvanceForm({ amount: '', reason: '', advance_date: new Date().toISOString().split('T')[0], repayment_status: 'outstanding', deduct_from_wages: false, notes: '' });
+    } catch (e: unknown) { setSaveError(e instanceof Error ? e.message : 'Failed to save'); }
     setSaving(false);
   }
 
   async function saveAttendance() {
     if (!selectedEmployee || !attendanceForm.work_date) return;
-    setSaving(true);
-    const clockIn = attendanceForm.clock_in ? `${attendanceForm.work_date}T${attendanceForm.clock_in}:00` : null;
-    const clockOut = attendanceForm.clock_out ? `${attendanceForm.work_date}T${attendanceForm.clock_out}:00` : null;
-    let hours = null;
-    if (clockIn && clockOut) { hours = (new Date(clockOut).getTime() - new Date(clockIn).getTime()) / (1000 * 60 * 60); }
-    await supabase.from('attendance').insert({ employee_id: selectedEmployee.id, store_id: STORE_ID, work_date: attendanceForm.work_date, clock_in: clockIn, clock_out: clockOut, hours_worked: hours, is_late: attendanceForm.is_late, notes: attendanceForm.notes || null });
-    await loadEmployeeProfile(selectedEmployee);
-    setShowAttendanceModal(false);
-    setAttendanceForm({ work_date: new Date().toISOString().split('T')[0], clock_in: '', clock_out: '', is_late: false, notes: '' });
+    setSaving(true); setSaveError(null);
+    try {
+      const clockIn = attendanceForm.clock_in ? `${attendanceForm.work_date}T${attendanceForm.clock_in}:00` : null;
+      const clockOut = attendanceForm.clock_out ? `${attendanceForm.work_date}T${attendanceForm.clock_out}:00` : null;
+      const hours = clockIn && clockOut ? (new Date(clockOut).getTime() - new Date(clockIn).getTime()) / (1000 * 60 * 60) : null;
+      await supabase.from('attendance').insert({ employee_id: selectedEmployee.id, store_id: STORE_ID, work_date: attendanceForm.work_date, clock_in: clockIn, clock_out: clockOut, hours_worked: hours, is_late: attendanceForm.is_late, notes: attendanceForm.notes || null });
+      await loadEmployeeProfile(selectedEmployee);
+      setShowAttendanceModal(false);
+      setAttendanceForm({ work_date: new Date().toISOString().split('T')[0], clock_in: '', clock_out: '', is_late: false, notes: '' });
+    } catch (e: unknown) { setSaveError(e instanceof Error ? e.message : 'Failed to save'); }
     setSaving(false);
   }
 
@@ -240,9 +327,9 @@ export default function PeoplePage() {
   const totalLeaveDays = leave.filter(l => l.status === 'approved').reduce((sum, l) => sum + l.days_taken, 0);
   const outstandingAdvances = advances.filter(a => a.repayment_status === 'outstanding').reduce((sum, a) => sum + a.amount, 0);
 
-  const inputStyle = { width: '100%', padding: '10px 14px', borderRadius: 10, border: '1.5px solid #eef2ee', fontSize: 14, outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box' as const };
-  const labelStyle = { display: 'block' as const, fontSize: 13, fontWeight: 600 as const, color: '#555', marginBottom: 6 };
-  const cardStyle = { background: '#fff', borderRadius: 20, padding: 24, border: '1px solid #eef2ee', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' };
+  const inp = { width: '100%', padding: '10px 14px', borderRadius: 10, border: '1.5px solid #eef2ee', fontSize: 14, outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box' as const };
+  const lbl = { display: 'block' as const, fontSize: 13, fontWeight: 600 as const, color: '#555', marginBottom: 6 };
+  const card = { background: '#fff', borderRadius: 20, padding: 24, border: '1px solid #eef2ee', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' };
 
   const PROFILE_TABS: { key: ProfileTab; label: string; emoji: string }[] = [
     { key: 'overview', label: 'Overview', emoji: '👤' },
@@ -253,160 +340,157 @@ export default function PeoplePage() {
     { key: 'attendance', label: 'Attendance', emoji: '⏰' },
   ];
 
+  function ErrorBanner({ msg }: { msg: string | null }) {
+    if (!msg) return null;
+    return <div style={{ marginTop: 12, padding: '10px 14px', background: '#fdecea', borderRadius: 8, fontSize: 13, color: '#ef4444', fontWeight: 600 }}>{msg}</div>;
+  }
+
+  function ModalWrap({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
+    return (
+      <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+        <div style={{ background: '#fff', borderRadius: 20, padding: 32, width: '100%', maxWidth: 500, maxHeight: '90vh', overflowY: 'auto' }}>
+          {children}
+        </div>
+      </div>
+    );
+  }
+
+  function ModalHeader({ title, onClose }: { title: string; onClose: () => void }) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+        <div style={{ fontSize: 18, fontWeight: 700, color: '#333' }}>{title}</div>
+        <button onClick={onClose} style={{ background: '#f0f4f0', border: 'none', borderRadius: 8, padding: '6px 14px', cursor: 'pointer', fontSize: 14 }}>Cancel</button>
+      </div>
+    );
+  }
+
+  function Toggle({ value, onChange, label, color = PRIMARY }: { value: boolean; onChange: () => void; label: string; color?: string }) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#f8faf8', borderRadius: 10, padding: '12px 16px' }}>
+        <label style={{ fontSize: 14, fontWeight: 600, color: '#333' }}>{label}</label>
+        <div onClick={onChange} style={{ width: 48, height: 26, borderRadius: 13, background: value ? color : '#ddd', cursor: 'pointer', position: 'relative' as const, transition: 'background 0.2s', flexShrink: 0 }}>
+          <div style={{ position: 'absolute' as const, top: 3, left: value ? 25 : 3, width: 20, height: 20, borderRadius: '50%', background: '#fff', transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.2)' }} />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={{ minHeight: '100vh', background: '#f8faf8', fontFamily: 'system-ui, sans-serif' }}>
 
       {/* ─── ADD/EDIT EMPLOYEE MODAL ─── */}
       {showEmployeeModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-          <div style={{ background: '#fff', borderRadius: 20, padding: 32, width: '100%', maxWidth: 520, maxHeight: '90vh', overflowY: 'auto' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-              <div style={{ fontSize: 20, fontWeight: 700, color: '#333' }}>{editEmployee ? 'Edit Employee' : 'Add Employee'}</div>
-              <button onClick={() => setShowEmployeeModal(false)} style={{ background: '#f0f4f0', border: 'none', borderRadius: 8, padding: '6px 14px', cursor: 'pointer', fontSize: 14 }}>Cancel</button>
+        <ModalWrap onClose={() => setShowEmployeeModal(false)}>
+          <ModalHeader title={editEmployee ? 'Edit Employee' : 'Add Employee'} onClose={() => setShowEmployeeModal(false)} />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div><label style={lbl}>Full Name *</label><input value={empForm.full_name} onChange={e => setEmpForm(p => ({ ...p, full_name: e.target.value }))} placeholder="e.g. Thabo Nkosi" style={inp} /></div>
+            <div><label style={lbl}>Role *</label><select value={empForm.role} onChange={e => setEmpForm(p => ({ ...p, role: e.target.value }))} style={inp}>{ROLES.map(r => <option key={r}>{r}</option>)}</select></div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div><label style={lbl}>Employment Type</label><select value={empForm.employment_type} onChange={e => setEmpForm(p => ({ ...p, employment_type: e.target.value }))} style={inp}>{EMPLOYMENT_TYPES.map(t => <option key={t} value={t}>{EMPLOYMENT_LABELS[t]}</option>)}</select></div>
+              <div><label style={lbl}>Start Date</label><input type="date" value={empForm.start_date} onChange={e => setEmpForm(p => ({ ...p, start_date: e.target.value }))} style={inp} /></div>
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              <div><label style={labelStyle}>Full Name *</label><input value={empForm.full_name} onChange={e => setEmpForm(p => ({ ...p, full_name: e.target.value }))} placeholder="e.g. Thabo Nkosi" style={inputStyle} /></div>
-              <div><label style={labelStyle}>Role *</label><select value={empForm.role} onChange={e => setEmpForm(p => ({ ...p, role: e.target.value }))} style={inputStyle}>{ROLES.map(r => <option key={r} value={r}>{r}</option>)}</select></div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                <div><label style={labelStyle}>Employment Type</label><select value={empForm.employment_type} onChange={e => setEmpForm(p => ({ ...p, employment_type: e.target.value }))} style={inputStyle}>{EMPLOYMENT_TYPES.map(t => <option key={t} value={t}>{EMPLOYMENT_LABELS[t]}</option>)}</select></div>
-                <div><label style={labelStyle}>Start Date</label><input type="date" value={empForm.start_date} onChange={e => setEmpForm(p => ({ ...p, start_date: e.target.value }))} style={inputStyle} /></div>
-              </div>
-              <div><label style={labelStyle}>Phone Number</label><input value={empForm.phone} onChange={e => setEmpForm(p => ({ ...p, phone: e.target.value }))} placeholder="072 123 4567" style={inputStyle} /></div>
-              <div><label style={labelStyle}>ID Number</label><input value={empForm.id_number} onChange={e => setEmpForm(p => ({ ...p, id_number: e.target.value }))} placeholder="13-digit SA ID" style={inputStyle} /></div>
-              <div><label style={labelStyle}>Notes</label><textarea value={empForm.notes} onChange={e => setEmpForm(p => ({ ...p, notes: e.target.value }))} rows={3} style={{ ...inputStyle, resize: 'vertical' as const }} /></div>
-              {editEmployee && (
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#f8faf8', borderRadius: 10, padding: '12px 16px' }}>
-                  <label style={{ fontSize: 14, fontWeight: 600, color: '#333' }}>Active Employee</label>
-                  <div onClick={() => setEmpForm(p => ({ ...p, is_active: !p.is_active }))} style={{ width: 48, height: 26, borderRadius: 13, background: empForm.is_active ? PRIMARY : '#ddd', cursor: 'pointer', position: 'relative' as const, transition: 'background 0.2s', flexShrink: 0 }}>
-                    <div style={{ position: 'absolute' as const, top: 3, left: empForm.is_active ? 25 : 3, width: 20, height: 20, borderRadius: '50%', background: '#fff', transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.2)' }} />
-                  </div>
-                </div>
-              )}
-            </div>
-            <button onClick={saveEmployee} disabled={saving || !empForm.full_name.trim()} style={{ width: '100%', marginTop: 24, padding: '14px', background: empForm.full_name.trim() ? PRIMARY : '#eee', color: empForm.full_name.trim() ? '#fff' : '#aaa', border: 'none', borderRadius: 12, fontWeight: 700, cursor: 'pointer', fontSize: 15 }}>
-              {saving ? 'Saving...' : editEmployee ? 'Save Changes' : 'Add Employee'}
-            </button>
+            <div><label style={lbl}>Phone Number</label><input value={empForm.phone} onChange={e => setEmpForm(p => ({ ...p, phone: e.target.value }))} placeholder="072 123 4567" style={inp} /></div>
+            <div><label style={lbl}>ID Number</label><input value={empForm.id_number} onChange={e => setEmpForm(p => ({ ...p, id_number: e.target.value }))} placeholder="13-digit SA ID" style={inp} /></div>
+            <div><label style={lbl}>Notes</label><textarea value={empForm.notes} onChange={e => setEmpForm(p => ({ ...p, notes: e.target.value }))} rows={3} style={{ ...inp, resize: 'vertical' as const }} /></div>
+            {editEmployee && <Toggle value={empForm.is_active} onChange={() => setEmpForm(p => ({ ...p, is_active: !p.is_active }))} label="Active Employee" />}
           </div>
-        </div>
+          <ErrorBanner msg={saveError} />
+          <button onClick={saveEmployee} disabled={saving || !empForm.full_name.trim()} style={{ width: '100%', marginTop: 24, padding: '14px', background: empForm.full_name.trim() ? PRIMARY : '#eee', color: empForm.full_name.trim() ? '#fff' : '#aaa', border: 'none', borderRadius: 12, fontWeight: 700, cursor: 'pointer', fontSize: 15 }}>
+            {saving ? 'Saving...' : editEmployee ? 'Save Changes' : 'Add Employee'}
+          </button>
+        </ModalWrap>
       )}
 
       {/* ─── DOCUMENT MODAL ─── */}
       {showDocModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-          <div style={{ background: '#fff', borderRadius: 20, padding: 32, width: '100%', maxWidth: 480 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 24 }}>
-              <div style={{ fontSize: 18, fontWeight: 700 }}>Add Document</div>
-              <button onClick={() => setShowDocModal(false)} style={{ background: '#f0f4f0', border: 'none', borderRadius: 8, padding: '6px 14px', cursor: 'pointer' }}>Cancel</button>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              <div><label style={labelStyle}>Document Type</label><select value={docForm.document_type} onChange={e => setDocForm(p => ({ ...p, document_type: e.target.value }))} style={inputStyle}>{DOCUMENT_TYPES.map(t => <option key={t}>{t}</option>)}</select></div>
-              <div><label style={labelStyle}>Document Name *</label><input value={docForm.document_name} onChange={e => setDocForm(p => ({ ...p, document_name: e.target.value }))} placeholder="e.g. Employment Contract 2024" style={inputStyle} /></div>
-              <div><label style={labelStyle}>File URL *</label><input value={docForm.file_url} onChange={e => setDocForm(p => ({ ...p, file_url: e.target.value }))} placeholder="https://..." style={inputStyle} /></div>
-              <div><label style={labelStyle}>Expiry Date (optional)</label><input type="date" value={docForm.expiry_date} onChange={e => setDocForm(p => ({ ...p, expiry_date: e.target.value }))} style={inputStyle} /></div>
-              <div><label style={labelStyle}>Notes</label><textarea value={docForm.notes} onChange={e => setDocForm(p => ({ ...p, notes: e.target.value }))} rows={2} style={{ ...inputStyle, resize: 'vertical' as const }} /></div>
-            </div>
-            <button onClick={saveDocument} disabled={saving} style={{ width: '100%', marginTop: 20, padding: '12px', background: PRIMARY, color: '#fff', border: 'none', borderRadius: 12, fontWeight: 700, cursor: 'pointer' }}>{saving ? 'Saving...' : 'Save Document'}</button>
+        <ModalWrap onClose={() => { setShowDocModal(false); setDocFile(null); setSaveError(null); }}>
+          <ModalHeader title="Add Document" onClose={() => { setShowDocModal(false); setDocFile(null); setSaveError(null); }} />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div><label style={lbl}>Document Type</label><select value={docForm.document_type} onChange={e => setDocForm(p => ({ ...p, document_type: e.target.value }))} style={inp}>{DOCUMENT_TYPES.map(t => <option key={t}>{t}</option>)}</select></div>
+            <div><label style={lbl}>Document Name *</label><input value={docForm.document_name} onChange={e => setDocForm(p => ({ ...p, document_name: e.target.value }))} placeholder="e.g. Employment Contract 2024" style={inp} /></div>
+            <FileUploadBox file={docFile} onFileChange={setDocFile} label="Upload Document or Photo *" />
+            <div><label style={lbl}>Expiry Date (optional)</label><input type="date" value={docForm.expiry_date} onChange={e => setDocForm(p => ({ ...p, expiry_date: e.target.value }))} style={inp} /></div>
+            <div><label style={lbl}>Notes</label><textarea value={docForm.notes} onChange={e => setDocForm(p => ({ ...p, notes: e.target.value }))} rows={2} style={{ ...inp, resize: 'vertical' as const }} /></div>
           </div>
-        </div>
+          <ErrorBanner msg={saveError} />
+          <button onClick={saveDocument} disabled={saving || !docForm.document_name.trim() || !docFile} style={{ width: '100%', marginTop: 20, padding: '12px', background: docForm.document_name.trim() && docFile ? PRIMARY : '#eee', color: docForm.document_name.trim() && docFile ? '#fff' : '#aaa', border: 'none', borderRadius: 12, fontWeight: 700, cursor: 'pointer' }}>
+            {saving ? 'Uploading...' : 'Upload & Save Document'}
+          </button>
+        </ModalWrap>
       )}
 
       {/* ─── LEAVE MODAL ─── */}
       {showLeaveModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-          <div style={{ background: '#fff', borderRadius: 20, padding: 32, width: '100%', maxWidth: 480 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 24 }}>
-              <div style={{ fontSize: 18, fontWeight: 700 }}>Record Leave</div>
-              <button onClick={() => setShowLeaveModal(false)} style={{ background: '#f0f4f0', border: 'none', borderRadius: 8, padding: '6px 14px', cursor: 'pointer' }}>Cancel</button>
+        <ModalWrap onClose={() => { setShowLeaveModal(false); setSaveError(null); }}>
+          <ModalHeader title="Record Leave" onClose={() => { setShowLeaveModal(false); setSaveError(null); }} />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div><label style={lbl}>Leave Type</label><select value={leaveForm.leave_type} onChange={e => setLeaveForm(p => ({ ...p, leave_type: e.target.value }))} style={inp}>{LEAVE_TYPES.map(t => <option key={t}>{t}</option>)}</select></div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div><label style={lbl}>Start Date *</label><input type="date" value={leaveForm.start_date} onChange={e => setLeaveForm(p => ({ ...p, start_date: e.target.value }))} style={inp} /></div>
+              <div><label style={lbl}>End Date *</label><input type="date" value={leaveForm.end_date} onChange={e => setLeaveForm(p => ({ ...p, end_date: e.target.value }))} style={inp} /></div>
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              <div><label style={labelStyle}>Leave Type</label><select value={leaveForm.leave_type} onChange={e => setLeaveForm(p => ({ ...p, leave_type: e.target.value }))} style={inputStyle}>{LEAVE_TYPES.map(t => <option key={t}>{t}</option>)}</select></div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                <div><label style={labelStyle}>Start Date *</label><input type="date" value={leaveForm.start_date} onChange={e => setLeaveForm(p => ({ ...p, start_date: e.target.value }))} style={inputStyle} /></div>
-                <div><label style={labelStyle}>End Date *</label><input type="date" value={leaveForm.end_date} onChange={e => setLeaveForm(p => ({ ...p, end_date: e.target.value }))} style={inputStyle} /></div>
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                <div><label style={labelStyle}>Days Taken</label><input type="number" min="0.5" step="0.5" value={leaveForm.days_taken} onChange={e => setLeaveForm(p => ({ ...p, days_taken: e.target.value }))} placeholder="1" style={inputStyle} /></div>
-                <div><label style={labelStyle}>Status</label><select value={leaveForm.status} onChange={e => setLeaveForm(p => ({ ...p, status: e.target.value }))} style={inputStyle}><option value="pending">Pending</option><option value="approved">Approved</option><option value="rejected">Rejected</option></select></div>
-              </div>
-              <div><label style={labelStyle}>Reason</label><textarea value={leaveForm.reason} onChange={e => setLeaveForm(p => ({ ...p, reason: e.target.value }))} rows={2} style={{ ...inputStyle, resize: 'vertical' as const }} /></div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div><label style={lbl}>Days Taken</label><input type="number" min="0.5" step="0.5" value={leaveForm.days_taken} onChange={e => setLeaveForm(p => ({ ...p, days_taken: e.target.value }))} placeholder="1" style={inp} /></div>
+              <div><label style={lbl}>Status</label><select value={leaveForm.status} onChange={e => setLeaveForm(p => ({ ...p, status: e.target.value }))} style={inp}><option value="pending">Pending</option><option value="approved">Approved</option><option value="rejected">Rejected</option></select></div>
             </div>
-            <button onClick={saveLeave} disabled={saving} style={{ width: '100%', marginTop: 20, padding: '12px', background: PRIMARY, color: '#fff', border: 'none', borderRadius: 12, fontWeight: 700, cursor: 'pointer' }}>{saving ? 'Saving...' : 'Record Leave'}</button>
+            <div><label style={lbl}>Reason</label><textarea value={leaveForm.reason} onChange={e => setLeaveForm(p => ({ ...p, reason: e.target.value }))} rows={2} style={{ ...inp, resize: 'vertical' as const }} /></div>
           </div>
-        </div>
+          <ErrorBanner msg={saveError} />
+          <button onClick={saveLeave} disabled={saving} style={{ width: '100%', marginTop: 20, padding: '12px', background: PRIMARY, color: '#fff', border: 'none', borderRadius: 12, fontWeight: 700, cursor: 'pointer' }}>{saving ? 'Saving...' : 'Record Leave'}</button>
+        </ModalWrap>
       )}
 
       {/* ─── WARNING MODAL ─── */}
       {showWarningModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-          <div style={{ background: '#fff', borderRadius: 20, padding: 32, width: '100%', maxWidth: 480 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 24 }}>
-              <div style={{ fontSize: 18, fontWeight: 700 }}>Issue Warning</div>
-              <button onClick={() => setShowWarningModal(false)} style={{ background: '#f0f4f0', border: 'none', borderRadius: 8, padding: '6px 14px', cursor: 'pointer' }}>Cancel</button>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              <div><label style={labelStyle}>Warning Type</label><select value={warningForm.warning_type} onChange={e => setWarningForm(p => ({ ...p, warning_type: e.target.value }))} style={inputStyle}>{WARNING_TYPES.map(t => <option key={t}>{t}</option>)}</select></div>
-              <div><label style={labelStyle}>Incident Date *</label><input type="date" value={warningForm.incident_date} onChange={e => setWarningForm(p => ({ ...p, incident_date: e.target.value }))} style={inputStyle} /></div>
-              <div><label style={labelStyle}>Reason *</label><textarea value={warningForm.reason} onChange={e => setWarningForm(p => ({ ...p, reason: e.target.value }))} rows={3} placeholder="Describe the reason for this warning..." style={{ ...inputStyle, resize: 'vertical' as const }} /></div>
-              <div><label style={labelStyle}>Issued By *</label><input value={warningForm.issued_by} onChange={e => setWarningForm(p => ({ ...p, issued_by: e.target.value }))} placeholder="Manager name" style={inputStyle} /></div>
-              <div><label style={labelStyle}>Document URL (optional)</label><input value={warningForm.document_url} onChange={e => setWarningForm(p => ({ ...p, document_url: e.target.value }))} placeholder="https://..." style={inputStyle} /></div>
-            </div>
-            <button onClick={saveWarning} disabled={saving} style={{ width: '100%', marginTop: 20, padding: '12px', background: '#ef4444', color: '#fff', border: 'none', borderRadius: 12, fontWeight: 700, cursor: 'pointer' }}>{saving ? 'Saving...' : 'Issue Warning'}</button>
+        <ModalWrap onClose={() => { setShowWarningModal(false); setWarningFile(null); setSaveError(null); }}>
+          <ModalHeader title="Issue Warning" onClose={() => { setShowWarningModal(false); setWarningFile(null); setSaveError(null); }} />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div><label style={lbl}>Warning Type</label><select value={warningForm.warning_type} onChange={e => setWarningForm(p => ({ ...p, warning_type: e.target.value }))} style={inp}>{WARNING_TYPES.map(t => <option key={t}>{t}</option>)}</select></div>
+            <div><label style={lbl}>Incident Date *</label><input type="date" value={warningForm.incident_date} onChange={e => setWarningForm(p => ({ ...p, incident_date: e.target.value }))} style={inp} /></div>
+            <div><label style={lbl}>Reason *</label><textarea value={warningForm.reason} onChange={e => setWarningForm(p => ({ ...p, reason: e.target.value }))} rows={3} placeholder="Describe the reason for this warning..." style={{ ...inp, resize: 'vertical' as const }} /></div>
+            <div><label style={lbl}>Issued By *</label><input value={warningForm.issued_by} onChange={e => setWarningForm(p => ({ ...p, issued_by: e.target.value }))} placeholder="Manager name" style={inp} /></div>
+            <FileUploadBox file={warningFile} onFileChange={setWarningFile} label="Attach Warning Document (optional)" />
+            <div><label style={lbl}>Notes</label><textarea value={warningForm.notes} onChange={e => setWarningForm(p => ({ ...p, notes: e.target.value }))} rows={2} style={{ ...inp, resize: 'vertical' as const }} /></div>
           </div>
-        </div>
+          <ErrorBanner msg={saveError} />
+          <button onClick={saveWarning} disabled={saving || !warningForm.reason.trim() || !warningForm.incident_date || !warningForm.issued_by.trim()} style={{ width: '100%', marginTop: 20, padding: '12px', background: '#ef4444', color: '#fff', border: 'none', borderRadius: 12, fontWeight: 700, cursor: 'pointer' }}>{saving ? 'Saving...' : 'Issue Warning'}</button>
+        </ModalWrap>
       )}
 
       {/* ─── ADVANCE MODAL ─── */}
       {showAdvanceModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-          <div style={{ background: '#fff', borderRadius: 20, padding: 32, width: '100%', maxWidth: 480 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 24 }}>
-              <div style={{ fontSize: 18, fontWeight: 700 }}>Record Advance</div>
-              <button onClick={() => setShowAdvanceModal(false)} style={{ background: '#f0f4f0', border: 'none', borderRadius: 8, padding: '6px 14px', cursor: 'pointer' }}>Cancel</button>
+        <ModalWrap onClose={() => { setShowAdvanceModal(false); setSaveError(null); }}>
+          <ModalHeader title="Record Advance" onClose={() => { setShowAdvanceModal(false); setSaveError(null); }} />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div><label style={lbl}>Amount (R) *</label><input type="number" min="0" step="0.01" value={advanceForm.amount} onChange={e => setAdvanceForm(p => ({ ...p, amount: e.target.value }))} placeholder="0.00" style={inp} /></div>
+              <div><label style={lbl}>Date *</label><input type="date" value={advanceForm.advance_date} onChange={e => setAdvanceForm(p => ({ ...p, advance_date: e.target.value }))} style={inp} /></div>
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                <div><label style={labelStyle}>Amount (R) *</label><input type="number" min="0" step="0.01" value={advanceForm.amount} onChange={e => setAdvanceForm(p => ({ ...p, amount: e.target.value }))} placeholder="0.00" style={inputStyle} /></div>
-                <div><label style={labelStyle}>Date *</label><input type="date" value={advanceForm.advance_date} onChange={e => setAdvanceForm(p => ({ ...p, advance_date: e.target.value }))} style={inputStyle} /></div>
-              </div>
-              <div><label style={labelStyle}>Reason</label><input value={advanceForm.reason} onChange={e => setAdvanceForm(p => ({ ...p, reason: e.target.value }))} placeholder="Reason for advance..." style={inputStyle} /></div>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#f8faf8', borderRadius: 10, padding: '12px 16px' }}>
-                <label style={{ fontSize: 14, fontWeight: 600, color: '#333' }}>Deduct from wages</label>
-                <div onClick={() => setAdvanceForm(p => ({ ...p, deduct_from_wages: !p.deduct_from_wages }))} style={{ width: 48, height: 26, borderRadius: 13, background: advanceForm.deduct_from_wages ? PRIMARY : '#ddd', cursor: 'pointer', position: 'relative' as const }}>
-                  <div style={{ position: 'absolute' as const, top: 3, left: advanceForm.deduct_from_wages ? 25 : 3, width: 20, height: 20, borderRadius: '50%', background: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,0.2)' }} />
-                </div>
-              </div>
-              <div><label style={labelStyle}>Notes</label><textarea value={advanceForm.notes} onChange={e => setAdvanceForm(p => ({ ...p, notes: e.target.value }))} rows={2} style={{ ...inputStyle, resize: 'vertical' as const }} /></div>
-            </div>
-            <button onClick={saveAdvance} disabled={saving} style={{ width: '100%', marginTop: 20, padding: '12px', background: PRIMARY, color: '#fff', border: 'none', borderRadius: 12, fontWeight: 700, cursor: 'pointer' }}>{saving ? 'Saving...' : 'Record Advance'}</button>
+            <div><label style={lbl}>Reason</label><input value={advanceForm.reason} onChange={e => setAdvanceForm(p => ({ ...p, reason: e.target.value }))} placeholder="Reason for advance..." style={inp} /></div>
+            <Toggle value={advanceForm.deduct_from_wages} onChange={() => setAdvanceForm(p => ({ ...p, deduct_from_wages: !p.deduct_from_wages }))} label="Deduct from wages" />
+            <div><label style={lbl}>Notes</label><textarea value={advanceForm.notes} onChange={e => setAdvanceForm(p => ({ ...p, notes: e.target.value }))} rows={2} style={{ ...inp, resize: 'vertical' as const }} /></div>
           </div>
-        </div>
+          <ErrorBanner msg={saveError} />
+          <button onClick={saveAdvance} disabled={saving} style={{ width: '100%', marginTop: 20, padding: '12px', background: PRIMARY, color: '#fff', border: 'none', borderRadius: 12, fontWeight: 700, cursor: 'pointer' }}>{saving ? 'Saving...' : 'Record Advance'}</button>
+        </ModalWrap>
       )}
 
       {/* ─── ATTENDANCE MODAL ─── */}
       {showAttendanceModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-          <div style={{ background: '#fff', borderRadius: 20, padding: 32, width: '100%', maxWidth: 480 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 24 }}>
-              <div style={{ fontSize: 18, fontWeight: 700 }}>Log Attendance</div>
-              <button onClick={() => setShowAttendanceModal(false)} style={{ background: '#f0f4f0', border: 'none', borderRadius: 8, padding: '6px 14px', cursor: 'pointer' }}>Cancel</button>
+        <ModalWrap onClose={() => { setShowAttendanceModal(false); setSaveError(null); }}>
+          <ModalHeader title="Log Attendance" onClose={() => { setShowAttendanceModal(false); setSaveError(null); }} />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div><label style={lbl}>Date *</label><input type="date" value={attendanceForm.work_date} onChange={e => setAttendanceForm(p => ({ ...p, work_date: e.target.value }))} style={inp} /></div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div><label style={lbl}>Clock In</label><input type="time" value={attendanceForm.clock_in} onChange={e => setAttendanceForm(p => ({ ...p, clock_in: e.target.value }))} style={inp} /></div>
+              <div><label style={lbl}>Clock Out</label><input type="time" value={attendanceForm.clock_out} onChange={e => setAttendanceForm(p => ({ ...p, clock_out: e.target.value }))} style={inp} /></div>
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              <div><label style={labelStyle}>Date *</label><input type="date" value={attendanceForm.work_date} onChange={e => setAttendanceForm(p => ({ ...p, work_date: e.target.value }))} style={inputStyle} /></div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                <div><label style={labelStyle}>Clock In</label><input type="time" value={attendanceForm.clock_in} onChange={e => setAttendanceForm(p => ({ ...p, clock_in: e.target.value }))} style={inputStyle} /></div>
-                <div><label style={labelStyle}>Clock Out</label><input type="time" value={attendanceForm.clock_out} onChange={e => setAttendanceForm(p => ({ ...p, clock_out: e.target.value }))} style={inputStyle} /></div>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#fff8e1', borderRadius: 10, padding: '12px 16px', border: '1px solid #fde68a' }}>
-                <label style={{ fontSize: 14, fontWeight: 600, color: '#92400e' }}>Mark as Late</label>
-                <div onClick={() => setAttendanceForm(p => ({ ...p, is_late: !p.is_late }))} style={{ width: 48, height: 26, borderRadius: 13, background: attendanceForm.is_late ? '#f59e0b' : '#ddd', cursor: 'pointer', position: 'relative' as const }}>
-                  <div style={{ position: 'absolute' as const, top: 3, left: attendanceForm.is_late ? 25 : 3, width: 20, height: 20, borderRadius: '50%', background: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,0.2)' }} />
-                </div>
-              </div>
-              <div><label style={labelStyle}>Notes</label><textarea value={attendanceForm.notes} onChange={e => setAttendanceForm(p => ({ ...p, notes: e.target.value }))} rows={2} style={{ ...inputStyle, resize: 'vertical' as const }} /></div>
-            </div>
-            <button onClick={saveAttendance} disabled={saving} style={{ width: '100%', marginTop: 20, padding: '12px', background: PRIMARY, color: '#fff', border: 'none', borderRadius: 12, fontWeight: 700, cursor: 'pointer' }}>{saving ? 'Saving...' : 'Log Attendance'}</button>
+            <Toggle value={attendanceForm.is_late} onChange={() => setAttendanceForm(p => ({ ...p, is_late: !p.is_late }))} label="Mark as Late" color="#f59e0b" />
+            <div><label style={lbl}>Notes</label><textarea value={attendanceForm.notes} onChange={e => setAttendanceForm(p => ({ ...p, notes: e.target.value }))} rows={2} style={{ ...inp, resize: 'vertical' as const }} /></div>
           </div>
-        </div>
+          <ErrorBanner msg={saveError} />
+          <button onClick={saveAttendance} disabled={saving} style={{ width: '100%', marginTop: 20, padding: '12px', background: PRIMARY, color: '#fff', border: 'none', borderRadius: 12, fontWeight: 700, cursor: 'pointer' }}>{saving ? 'Saving...' : 'Log Attendance'}</button>
+        </ModalWrap>
       )}
 
       {/* ─── EMPLOYEE PROFILE PANEL ─── */}
@@ -415,7 +499,6 @@ export default function PeoplePage() {
           <div onClick={() => setSelectedEmployee(null)} style={{ flex: 1, background: 'rgba(0,0,0,0.4)', cursor: 'pointer' }} />
           <div style={{ width: 560, background: '#fff', height: '100vh', overflowY: 'auto', display: 'flex', flexDirection: 'column', boxShadow: '-4px 0 32px rgba(0,0,0,0.15)' }}>
 
-            {/* Profile Header */}
             <div style={{ background: `linear-gradient(135deg, ${DARK}, ${PRIMARY})`, padding: '20px 24px', flexShrink: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
                 <button onClick={() => setSelectedEmployee(null)} style={{ background: 'rgba(255,255,255,0.2)', border: 'none', color: '#fff', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', fontSize: 13 }}>Close</button>
@@ -440,7 +523,6 @@ export default function PeoplePage() {
                   </div>
                 </div>
               </div>
-              {/* Quick stats */}
               {!profileLoading && (
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, marginTop: 16 }}>
                   {[
@@ -458,10 +540,9 @@ export default function PeoplePage() {
               )}
             </div>
 
-            {/* Profile Tab Nav */}
             <div style={{ display: 'flex', borderBottom: '1px solid #eef2ee', background: '#fff', flexShrink: 0, overflowX: 'auto' }}>
               {PROFILE_TABS.map(tab => (
-                <button key={tab.key} onClick={() => setProfileTab(tab.key)} style={{ padding: '12px 16px', border: 'none', borderBottom: `2px solid ${profileTab === tab.key ? PRIMARY : 'transparent'}`, background: 'transparent', color: profileTab === tab.key ? PRIMARY : '#888', fontWeight: profileTab === tab.key ? 700 : 400, cursor: 'pointer', fontSize: 13, whiteSpace: 'nowrap' as const, display: 'flex', alignItems: 'center', gap: 4 }}>
+                <button key={tab.key} onClick={() => setProfileTab(tab.key)} style={{ padding: '12px 14px', border: 'none', borderBottom: `2px solid ${profileTab === tab.key ? PRIMARY : 'transparent'}`, background: 'transparent', color: profileTab === tab.key ? PRIMARY : '#888', fontWeight: profileTab === tab.key ? 700 : 400, cursor: 'pointer', fontSize: 12, whiteSpace: 'nowrap' as const }}>
                   {tab.emoji} {tab.label}
                 </button>
               ))}
@@ -472,7 +553,6 @@ export default function PeoplePage() {
             {!profileLoading && (
               <div style={{ flex: 1, padding: 24, overflowY: 'auto' }}>
 
-                {/* ── OVERVIEW TAB ── */}
                 {profileTab === 'overview' && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
                     {[
@@ -488,16 +568,14 @@ export default function PeoplePage() {
                         <div style={{ fontSize: 14, color: '#333', fontWeight: 500 }}>{f.value}</div>
                       </div>
                     ))}
-                    {/* Expiring documents alert */}
                     {documents.filter(d => d.expiry_date && isExpiringSoon(d.expiry_date) && !isExpired(d.expiry_date)).length > 0 && (
                       <div style={{ background: '#fff8e1', borderRadius: 12, padding: '12px 16px', border: '1px solid #fde68a' }}>
                         <div style={{ fontSize: 12, fontWeight: 700, color: '#92400e', marginBottom: 6 }}>⚠️ Documents Expiring Soon</div>
-                        {documents.filter(d => d.expiry_date && isExpiringSoon(d.expiry_date)).map(d => (
+                        {documents.filter(d => d.expiry_date && isExpiringSoon(d.expiry_date) && !isExpired(d.expiry_date)).map(d => (
                           <div key={d.id} style={{ fontSize: 13, color: '#92400e' }}>{d.document_name} — expires {new Date(d.expiry_date!).toLocaleDateString('en-ZA')}</div>
                         ))}
                       </div>
                     )}
-                    {/* Expired documents alert */}
                     {documents.filter(d => d.expiry_date && isExpired(d.expiry_date)).length > 0 && (
                       <div style={{ background: '#fdecea', borderRadius: 12, padding: '12px 16px', border: '1px solid #fca5a5' }}>
                         <div style={{ fontSize: 12, fontWeight: 700, color: '#ef4444', marginBottom: 6 }}>🚨 Expired Documents</div>
@@ -512,10 +590,9 @@ export default function PeoplePage() {
                   </div>
                 )}
 
-                {/* ── DOCUMENTS TAB ── */}
                 {profileTab === 'documents' && (
                   <div>
-                    <button onClick={() => setShowDocModal(true)} style={{ width: '100%', padding: '12px', background: PRIMARY, color: '#fff', border: 'none', borderRadius: 12, fontWeight: 700, cursor: 'pointer', marginBottom: 16 }}>+ Add Document</button>
+                    <button onClick={() => { setSaveError(null); setShowDocModal(true); }} style={{ width: '100%', padding: '12px', background: PRIMARY, color: '#fff', border: 'none', borderRadius: 12, fontWeight: 700, cursor: 'pointer', marginBottom: 16 }}>+ Add Document</button>
                     {documents.length === 0 && <div style={{ textAlign: 'center' as const, padding: 40, color: '#aaa' }}>No documents yet</div>}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                       {documents.map(doc => {
@@ -523,19 +600,24 @@ export default function PeoplePage() {
                         const expiring = doc.expiry_date && isExpiringSoon(doc.expiry_date) && !expired;
                         return (
                           <div key={doc.id} style={{ background: expired ? '#fdecea' : expiring ? '#fff8e1' : '#f8faf8', borderRadius: 12, padding: '14px 16px', border: `1px solid ${expired ? '#fca5a5' : expiring ? '#fde68a' : '#eef2ee'}` }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                              <div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+                              <div style={{ flex: 1 }}>
+                                {isImage(doc.file_url) && (
+                                  <img src={doc.file_url} alt={doc.document_name} style={{ width: '100%', maxHeight: 120, objectFit: 'cover', borderRadius: 8, marginBottom: 8 }} />
+                                )}
                                 <div style={{ fontWeight: 700, color: '#333', fontSize: 14 }}>{doc.document_name}</div>
                                 <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>{doc.document_type}</div>
-                               {doc.expiry_date && (
-                                <div style={{ fontSize: 11, color: expired ? '#ef4444' : expiring ? '#f59e0b' : '#aaa', marginTop: 4, fontWeight: expired || expiring ? 700 : 400 }}>
-                                {expired ? '🚨 EXPIRED' : expiring ? '⚠️ Expiring' : ''} {new Date(doc.expiry_date).toLocaleDateString('en-ZA')}
-                                </div>
+                                {doc.expiry_date && (
+                                  <div style={{ fontSize: 11, color: expired ? '#ef4444' : expiring ? '#f59e0b' : '#aaa', marginTop: 4, fontWeight: expired || expiring ? 700 : 400 }}>
+                                    {expired ? '🚨 EXPIRED' : expiring ? '⚠️ Expiring' : ''} {new Date(doc.expiry_date).toLocaleDateString('en-ZA')}
+                                  </div>
                                 )}
+                                {doc.notes && <div style={{ fontSize: 12, color: '#888', marginTop: 4, fontStyle: 'italic' }}>{doc.notes}</div>}
                               </div>
-                              <a href={doc.file_url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: PRIMARY, fontWeight: 700, textDecoration: 'none', padding: '4px 10px', background: '#e8f5e9', borderRadius: 8 }}>View</a>
+                              <a href={doc.file_url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: PRIMARY, fontWeight: 700, textDecoration: 'none', padding: '6px 12px', background: '#e8f5e9', borderRadius: 8, whiteSpace: 'nowrap' as const, flexShrink: 0 }}>
+                                {isImage(doc.file_url) ? '🖼️ View' : '📄 Open'}
+                              </a>
                             </div>
-                            {doc.notes && <div style={{ fontSize: 12, color: '#888', marginTop: 8, fontStyle: 'italic' }}>{doc.notes}</div>}
                           </div>
                         );
                       })}
@@ -543,10 +625,9 @@ export default function PeoplePage() {
                   </div>
                 )}
 
-                {/* ── LEAVE TAB ── */}
                 {profileTab === 'leave' && (
                   <div>
-                    <button onClick={() => setShowLeaveModal(true)} style={{ width: '100%', padding: '12px', background: PRIMARY, color: '#fff', border: 'none', borderRadius: 12, fontWeight: 700, cursor: 'pointer', marginBottom: 16 }}>+ Record Leave</button>
+                    <button onClick={() => { setSaveError(null); setShowLeaveModal(true); }} style={{ width: '100%', padding: '12px', background: PRIMARY, color: '#fff', border: 'none', borderRadius: 12, fontWeight: 700, cursor: 'pointer', marginBottom: 16 }}>+ Record Leave</button>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 20 }}>
                       {[
                         { label: 'Annual', count: leave.filter(l => l.leave_type === 'Annual' && l.status === 'approved').reduce((s, l) => s + l.days_taken, 0) },
@@ -555,7 +636,7 @@ export default function PeoplePage() {
                       ].map(item => (
                         <div key={item.label} style={{ background: '#f8faf8', borderRadius: 10, padding: '12px', textAlign: 'center' as const, border: '1px solid #eef2ee' }}>
                           <div style={{ fontSize: 22, fontWeight: 800, color: PRIMARY }}>{item.count}</div>
-                          <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>{item.label} days taken</div>
+                          <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>{item.label} days</div>
                         </div>
                       ))}
                     </div>
@@ -569,7 +650,7 @@ export default function PeoplePage() {
                               <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>{new Date(l.start_date).toLocaleDateString('en-ZA')} — {new Date(l.end_date).toLocaleDateString('en-ZA')} ({l.days_taken} day{l.days_taken !== 1 ? 's' : ''})</div>
                               {l.reason && <div style={{ fontSize: 12, color: '#888', marginTop: 4, fontStyle: 'italic' }}>{l.reason}</div>}
                             </div>
-                            <span style={{ fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 20, background: l.status === 'approved' ? '#e8f5e9' : l.status === 'rejected' ? '#fdecea' : '#fff8e1', color: l.status === 'approved' ? PRIMARY : l.status === 'rejected' ? '#ef4444' : '#f59e0b' }}>
+                            <span style={{ fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 20, background: l.status === 'approved' ? '#e8f5e9' : l.status === 'rejected' ? '#fdecea' : '#fff8e1', color: l.status === 'approved' ? PRIMARY : l.status === 'rejected' ? '#ef4444' : '#f59e0b', whiteSpace: 'nowrap' as const }}>
                               {l.status.toUpperCase()}
                             </span>
                           </div>
@@ -579,10 +660,9 @@ export default function PeoplePage() {
                   </div>
                 )}
 
-                {/* ── WARNINGS TAB ── */}
                 {profileTab === 'warnings' && (
                   <div>
-                    <button onClick={() => setShowWarningModal(true)} style={{ width: '100%', padding: '12px', background: '#ef4444', color: '#fff', border: 'none', borderRadius: 12, fontWeight: 700, cursor: 'pointer', marginBottom: 16 }}>+ Issue Warning</button>
+                    <button onClick={() => { setSaveError(null); setWarningFile(null); setShowWarningModal(true); }} style={{ width: '100%', padding: '12px', background: '#ef4444', color: '#fff', border: 'none', borderRadius: 12, fontWeight: 700, cursor: 'pointer', marginBottom: 16 }}>+ Issue Warning</button>
                     {warnings.length === 0 && <div style={{ textAlign: 'center' as const, padding: 40, color: '#aaa' }}>No warnings on record</div>}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                       {warnings.map(w => {
@@ -595,7 +675,16 @@ export default function PeoplePage() {
                             </div>
                             <div style={{ fontSize: 14, color: '#333', fontWeight: 500, marginBottom: 6 }}>{w.reason}</div>
                             <div style={{ fontSize: 12, color: '#888' }}>Issued by: {w.issued_by}</div>
-                            {w.document_url && <a href={w.document_url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: PRIMARY, fontWeight: 600, display: 'block', marginTop: 6 }}>View Document →</a>}
+                            {w.document_url && (
+                              <div style={{ marginTop: 8 }}>
+                                {isImage(w.document_url) ? (
+                                  <img src={w.document_url} alt="warning doc" style={{ width: '100%', maxHeight: 100, objectFit: 'cover', borderRadius: 8, marginBottom: 4 }} />
+                                ) : null}
+                                <a href={w.document_url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: PRIMARY, fontWeight: 600 }}>
+                                  {isImage(w.document_url) ? '🖼️ View Document' : '📄 Open Document'} →
+                                </a>
+                              </div>
+                            )}
                           </div>
                         );
                       })}
@@ -603,10 +692,9 @@ export default function PeoplePage() {
                   </div>
                 )}
 
-                {/* ── ADVANCES TAB ── */}
                 {profileTab === 'advances' && (
                   <div>
-                    <button onClick={() => setShowAdvanceModal(true)} style={{ width: '100%', padding: '12px', background: PRIMARY, color: '#fff', border: 'none', borderRadius: 12, fontWeight: 700, cursor: 'pointer', marginBottom: 16 }}>+ Record Advance</button>
+                    <button onClick={() => { setSaveError(null); setShowAdvanceModal(true); }} style={{ width: '100%', padding: '12px', background: PRIMARY, color: '#fff', border: 'none', borderRadius: 12, fontWeight: 700, cursor: 'pointer', marginBottom: 16 }}>+ Record Advance</button>
                     {outstandingAdvances > 0 && (
                       <div style={{ background: '#fff8e1', borderRadius: 12, padding: '14px 16px', marginBottom: 16, border: '1px solid #fde68a', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <span style={{ fontSize: 14, fontWeight: 600, color: '#92400e' }}>Outstanding Balance</span>
@@ -617,7 +705,7 @@ export default function PeoplePage() {
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                       {advances.map(a => (
                         <div key={a.id} style={{ background: '#f8faf8', borderRadius: 12, padding: '14px 16px', border: '1px solid #eef2ee' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                             <div>
                               <div style={{ fontWeight: 800, color: '#333', fontSize: 18 }}>{fmt(a.amount)}</div>
                               <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>{new Date(a.advance_date).toLocaleDateString('en-ZA')}</div>
@@ -629,7 +717,7 @@ export default function PeoplePage() {
                                 {a.repayment_status === 'paid' ? 'PAID' : 'OUTSTANDING'}
                               </span>
                               {a.repayment_status === 'outstanding' && (
-                                <button onClick={() => markAdvancePaid(a)} style={{ display: 'block', marginTop: 8, fontSize: 11, color: PRIMARY, background: '#e8f5e9', border: 'none', borderRadius: 6, padding: '3px 8px', cursor: 'pointer', fontWeight: 600 }}>Mark Paid</button>
+                                <button onClick={() => markAdvancePaid(a)} style={{ display: 'block', marginTop: 8, fontSize: 11, color: PRIMARY, background: '#e8f5e9', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontWeight: 600 }}>Mark Paid</button>
                               )}
                             </div>
                           </div>
@@ -639,10 +727,9 @@ export default function PeoplePage() {
                   </div>
                 )}
 
-                {/* ── ATTENDANCE TAB ── */}
                 {profileTab === 'attendance' && (
                   <div>
-                    <button onClick={() => setShowAttendanceModal(true)} style={{ width: '100%', padding: '12px', background: PRIMARY, color: '#fff', border: 'none', borderRadius: 12, fontWeight: 700, cursor: 'pointer', marginBottom: 16 }}>+ Log Attendance</button>
+                    <button onClick={() => { setSaveError(null); setShowAttendanceModal(true); }} style={{ width: '100%', padding: '12px', background: PRIMARY, color: '#fff', border: 'none', borderRadius: 12, fontWeight: 700, cursor: 'pointer', marginBottom: 16 }}>+ Log Attendance</button>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 20 }}>
                       {[
                         { label: 'Days Logged', value: attendance.length },
@@ -699,7 +786,6 @@ export default function PeoplePage() {
 
         {!loading && (
           <div>
-            {/* KPI row */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 16, marginBottom: 32 }}>
               {[
                 { label: 'TOTAL STAFF', value: employees.length, sub: 'all employees', color: PRIMARY },
@@ -707,7 +793,7 @@ export default function PeoplePage() {
                 { label: 'FULL TIME', value: employees.filter(e => e.employment_type === 'full_time' && e.is_active).length, sub: 'permanent staff', color: PRIMARY },
                 { label: 'PART TIME / CASUAL', value: employees.filter(e => (e.employment_type === 'part_time' || e.employment_type === 'casual') && e.is_active).length, sub: 'flexible staff', color: '#f59e0b' },
               ].map(item => (
-                <div key={item.label} style={cardStyle}>
+                <div key={item.label} style={card}>
                   <div style={{ fontSize: 12, color: '#888', fontWeight: 600, marginBottom: 8 }}>{item.label}</div>
                   <div style={{ fontSize: 36, fontWeight: 800, color: item.color }}>{item.value}</div>
                   <div style={{ fontSize: 12, color: '#aaa', marginTop: 4 }}>{item.sub}</div>
@@ -715,7 +801,6 @@ export default function PeoplePage() {
               ))}
             </div>
 
-            {/* Filters */}
             <div style={{ display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap' as const, alignItems: 'center' }}>
               <input placeholder="Search by name or role..." value={search} onChange={e => setSearch(e.target.value)} style={{ padding: '10px 16px', borderRadius: 10, border: '1.5px solid #eef2ee', fontSize: 14, outline: 'none', fontFamily: 'inherit', minWidth: 220, background: '#fff' }} />
               <div style={{ display: 'flex', gap: 4, background: '#fff', padding: 4, borderRadius: 12, border: '1px solid #eef2ee' }}>
@@ -730,7 +815,6 @@ export default function PeoplePage() {
               <span style={{ fontSize: 13, color: '#aaa', marginLeft: 'auto' }}>{filtered.length} employee{filtered.length !== 1 ? 's' : ''}</span>
             </div>
 
-            {/* Employee grid */}
             {filtered.length === 0 && (
               <div style={{ textAlign: 'center' as const, padding: 80, background: '#fff', borderRadius: 20, border: '1px solid #eef2ee' }}>
                 <div style={{ fontSize: 40, marginBottom: 12 }}>👥</div>
