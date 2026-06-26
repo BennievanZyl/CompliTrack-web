@@ -34,7 +34,6 @@ type Attendance = {
   id: string; work_date: string; clock_in: string | null; clock_out: string | null;
   hours_worked: number | null; is_late: boolean; notes: string | null;
 };
-
 type ProfileTab = 'overview' | 'documents' | 'leave' | 'warnings' | 'advances' | 'attendance';
 
 const ROLES = ['Store Manager', 'Assistant Manager', 'Cashier', 'Kitchen Staff', 'Driver', 'Cleaner', 'Security', 'Other'];
@@ -43,7 +42,6 @@ const EMPLOYMENT_LABELS: Record<string, string> = { full_time: 'Full Time', part
 const LEAVE_TYPES = ['Annual', 'Sick', 'Family Responsibility', 'Unpaid', 'Maternity', 'Paternity', 'Study'];
 const WARNING_TYPES = ['Verbal Warning', 'Written Warning', 'Final Written Warning', 'Suspension', 'Disciplinary Hearing'];
 const DOCUMENT_TYPES = ['Employment Contract', 'ID Document', 'Food Safety Certificate', 'Medical Certificate', 'Bank Details', 'Tax Certificate', 'Other'];
-
 const ROLE_COLORS: Record<string, { bg: string; color: string }> = {
   'Store Manager': { bg: '#e8f5e9', color: PRIMARY },
   'Assistant Manager': { bg: '#e3f2fd', color: '#1565c0' },
@@ -54,7 +52,16 @@ const ROLE_COLORS: Record<string, { bg: string; color: string }> = {
   'Security': { bg: '#fbe9e7', color: '#bf360c' },
   'Other': { bg: '#f5f5f5', color: '#424242' },
 };
+const PROFILE_TABS: { key: ProfileTab; label: string; emoji: string }[] = [
+  { key: 'overview', label: 'Overview', emoji: '👤' },
+  { key: 'documents', label: 'Documents', emoji: '📁' },
+  { key: 'leave', label: 'Leave', emoji: '🏖️' },
+  { key: 'warnings', label: 'Warnings', emoji: '⚠️' },
+  { key: 'advances', label: 'Advances', emoji: '💵' },
+  { key: 'attendance', label: 'Attendance', emoji: '⏰' },
+];
 
+// ─── PURE FUNCTIONS ───────────────────────────────────────────────────────────
 function initials(name: string) { return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2); }
 function fmt(n: number) { return `R ${n.toFixed(2)}`; }
 function tenure(startDate: string) {
@@ -64,65 +71,9 @@ function tenure(startDate: string) {
   const years = Math.floor(months / 12); const rem = months % 12;
   return `${years} year${years > 1 ? 's' : ''}${rem > 0 ? ` ${rem} month${rem > 1 ? 's' : ''}` : ''}`;
 }
-function isExpiringSoon(date: string) {
-  const days = Math.floor((new Date(date).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
-  return days <= 30;
-}
+function isExpiringSoon(date: string) { return Math.floor((new Date(date).getTime() - Date.now()) / (1000 * 60 * 60 * 24)) <= 30; }
 function isExpired(date: string) { return new Date(date) < new Date(); }
 function isImage(url: string) { return /\.(jpg|jpeg|png|gif|webp)$/i.test(url); }
-
-// ─── FILE UPLOAD COMPONENT ────────────────────────────────────────────────────
-function FileUploadBox({ file, onFileChange, accept = '.pdf,.jpg,.jpeg,.png,.doc,.docx', label = 'Upload File' }: {
-  file: File | null;
-  onFileChange: (f: File | null) => void;
-  accept?: string;
-  label?: string;
-}) {
-  const inputRef = useRef<HTMLInputElement>(null);
-  const [preview, setPreview] = useState<string | null>(null);
-
-  function handleFile(f: File | null) {
-    onFileChange(f);
-    if (f && f.type.startsWith('image/')) {
-      const reader = new FileReader();
-      reader.onload = ev => setPreview(ev.target?.result as string);
-      reader.readAsDataURL(f);
-    } else {
-      setPreview(null);
-    }
-  }
-
-  return (
-    <div>
-      <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#555', marginBottom: 6 }}>{label}</label>
-      <div
-        onClick={() => inputRef.current?.click()}
-        onDragOver={e => e.preventDefault()}
-        onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) handleFile(f); }}
-        style={{ border: '2px dashed #c8e6c9', borderRadius: 12, padding: 20, textAlign: 'center' as const, cursor: 'pointer', background: file ? '#f0f7f4' : '#fafafa', transition: 'all 0.2s' }}
-      >
-        <input ref={inputRef} type="file" accept={accept} onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); }} style={{ display: 'none' }} />
-        {!file ? (
-          <div>
-            <div style={{ fontSize: 32, marginBottom: 8 }}>📎</div>
-            <div style={{ fontSize: 14, color: '#666', fontWeight: 600 }}>Click or drag to upload</div>
-            <div style={{ fontSize: 12, color: '#aaa', marginTop: 4 }}>PDF, JPG, PNG, DOC up to 10MB</div>
-          </div>
-        ) : (
-          <div>
-            {preview ? (
-              <img src={preview} alt="preview" style={{ maxHeight: 100, maxWidth: '100%', borderRadius: 8, objectFit: 'contain', marginBottom: 8 }} />
-            ) : (
-              <div style={{ fontSize: 36, marginBottom: 8 }}>📄</div>
-            )}
-            <div style={{ fontSize: 13, color: PRIMARY, fontWeight: 700 }}>{file.name}</div>
-            <div style={{ fontSize: 11, color: '#aaa', marginTop: 2 }}>{(file.size / 1024).toFixed(0)} KB · Click to change</div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
 
 // ─── UPLOAD HELPER ────────────────────────────────────────────────────────────
 async function uploadToStorage(bucket: string, path: string, file: File): Promise<string> {
@@ -132,6 +83,77 @@ async function uploadToStorage(bucket: string, path: string, file: File): Promis
   return data.publicUrl;
 }
 
+// ─── SHARED COMPONENTS — ALL OUTSIDE PeoplePage so they never remount ─────────
+
+function FileUploadBox({ file, onFileChange, accept = '.pdf,.jpg,.jpeg,.png,.doc,.docx', label = 'Upload File' }: {
+  file: File | null; onFileChange: (f: File | null) => void; accept?: string; label?: string;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [preview, setPreview] = useState<string | null>(null);
+  function handleFile(f: File | null) {
+    onFileChange(f);
+    if (f && f.type.startsWith('image/')) {
+      const reader = new FileReader();
+      reader.onload = ev => setPreview(ev.target?.result as string);
+      reader.readAsDataURL(f);
+    } else { setPreview(null); }
+  }
+  return (
+    <div>
+      <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#555', marginBottom: 6 }}>{label}</label>
+      <div onClick={() => inputRef.current?.click()} onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) handleFile(f); }}
+        style={{ border: '2px dashed #c8e6c9', borderRadius: 12, padding: 20, textAlign: 'center' as const, cursor: 'pointer', background: file ? '#f0f7f4' : '#fafafa' }}>
+        <input ref={inputRef} type="file" accept={accept} onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); }} style={{ display: 'none' }} />
+        {!file ? (
+          <div><div style={{ fontSize: 32, marginBottom: 8 }}>📎</div><div style={{ fontSize: 14, color: '#666', fontWeight: 600 }}>Click or drag to upload</div><div style={{ fontSize: 12, color: '#aaa', marginTop: 4 }}>PDF, JPG, PNG, DOC up to 10MB</div></div>
+        ) : (
+          <div>
+            {preview ? <img src={preview} alt="preview" style={{ maxHeight: 100, maxWidth: '100%', borderRadius: 8, objectFit: 'contain', marginBottom: 8 }} /> : <div style={{ fontSize: 36, marginBottom: 8 }}>📄</div>}
+            <div style={{ fontSize: 13, color: PRIMARY, fontWeight: 700 }}>{file.name}</div>
+            <div style={{ fontSize: 11, color: '#aaa', marginTop: 2 }}>{(file.size / 1024).toFixed(0)} KB · Click to change</div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ErrorBanner({ msg }: { msg: string | null }) {
+  if (!msg) return null;
+  return <div style={{ marginTop: 12, padding: '10px 14px', background: '#fdecea', borderRadius: 8, fontSize: 13, color: '#ef4444', fontWeight: 600 }}>{msg}</div>;
+}
+
+function ModalWrap({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+      <div style={{ background: '#fff', borderRadius: 20, padding: 32, width: '100%', maxWidth: 500, maxHeight: '90vh', overflowY: 'auto' }}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function ModalHeader({ title, onClose }: { title: string; onClose: () => void }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+      <div style={{ fontSize: 18, fontWeight: 700, color: '#333' }}>{title}</div>
+      <button onClick={onClose} style={{ background: '#f0f4f0', border: 'none', borderRadius: 8, padding: '6px 14px', cursor: 'pointer', fontSize: 14 }}>Cancel</button>
+    </div>
+  );
+}
+
+function Toggle({ value, onChange, label, color = PRIMARY }: { value: boolean; onChange: () => void; label: string; color?: string }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#f8faf8', borderRadius: 10, padding: '12px 16px' }}>
+      <label style={{ fontSize: 14, fontWeight: 600, color: '#333' }}>{label}</label>
+      <div onClick={onChange} style={{ width: 48, height: 26, borderRadius: 13, background: value ? color : '#ddd', cursor: 'pointer', position: 'relative' as const, transition: 'background 0.2s', flexShrink: 0 }}>
+        <div style={{ position: 'absolute' as const, top: 3, left: value ? 25 : 3, width: 20, height: 20, borderRadius: '50%', background: '#fff', transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.2)' }} />
+      </div>
+    </div>
+  );
+}
+
+// ─── MAIN PAGE ────────────────────────────────────────────────────────────────
 export default function PeoplePage() {
   const router = useRouter();
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -145,20 +167,17 @@ export default function PeoplePage() {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
   const [profileTab, setProfileTab] = useState<ProfileTab>('overview');
-
   const [documents, setDocuments] = useState<EmployeeDocument[]>([]);
   const [leave, setLeave] = useState<EmployeeLeave[]>([]);
   const [warnings, setWarnings] = useState<EmployeeWarning[]>([]);
   const [advances, setAdvances] = useState<EmployeeAdvance[]>([]);
   const [attendance, setAttendance] = useState<Attendance[]>([]);
   const [profileLoading, setProfileLoading] = useState(false);
-
   const [showDocModal, setShowDocModal] = useState(false);
   const [showLeaveModal, setShowLeaveModal] = useState(false);
   const [showWarningModal, setShowWarningModal] = useState(false);
   const [showAdvanceModal, setShowAdvanceModal] = useState(false);
   const [showAttendanceModal, setShowAttendanceModal] = useState(false);
-
   const [empForm, setEmpForm] = useState({ full_name: '', role: 'Cashier', phone: '', id_number: '', start_date: '', employment_type: 'full_time', notes: '', is_active: true });
   const [docForm, setDocForm] = useState({ document_type: 'Employment Contract', document_name: '', expiry_date: '', notes: '' });
   const [docFile, setDocFile] = useState<File | null>(null);
@@ -167,6 +186,10 @@ export default function PeoplePage() {
   const [warningFile, setWarningFile] = useState<File | null>(null);
   const [advanceForm, setAdvanceForm] = useState({ amount: '', reason: '', advance_date: new Date().toISOString().split('T')[0], repayment_status: 'outstanding', deduct_from_wages: false, notes: '' });
   const [attendanceForm, setAttendanceForm] = useState({ work_date: new Date().toISOString().split('T')[0], clock_in: '', clock_out: '', is_late: false, notes: '' });
+
+  const inp = { width: '100%', padding: '10px 14px', borderRadius: 10, border: '1.5px solid #eef2ee', fontSize: 14, outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box' as const };
+  const lbl = { display: 'block' as const, fontSize: 13, fontWeight: 600 as const, color: '#555', marginBottom: 6 };
+  const card = { background: '#fff', borderRadius: 20, padding: 24, border: '1px solid #eef2ee', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' };
 
   useEffect(() => { checkAuthAndLoad(); }, []);
 
@@ -200,25 +223,9 @@ export default function PeoplePage() {
     setProfileLoading(false);
   }
 
-  function openProfile(emp: Employee) {
-    setSelectedEmployee(emp);
-    setProfileTab('overview');
-    loadEmployeeProfile(emp);
-  }
-
-  function openAdd() {
-    setEditEmployee(null);
-    setEmpForm({ full_name: '', role: 'Cashier', phone: '', id_number: '', start_date: '', employment_type: 'full_time', notes: '', is_active: true });
-    setSaveError(null);
-    setShowEmployeeModal(true);
-  }
-
-  function openEdit(emp: Employee) {
-    setEditEmployee(emp);
-    setEmpForm({ full_name: emp.full_name, role: emp.role, phone: emp.phone || '', id_number: emp.id_number || '', start_date: emp.start_date || '', employment_type: emp.employment_type || 'full_time', notes: emp.notes || '', is_active: emp.is_active });
-    setSaveError(null);
-    setShowEmployeeModal(true);
-  }
+  function openProfile(emp: Employee) { setSelectedEmployee(emp); setProfileTab('overview'); loadEmployeeProfile(emp); }
+  function openAdd() { setEditEmployee(null); setEmpForm({ full_name: '', role: 'Cashier', phone: '', id_number: '', start_date: '', employment_type: 'full_time', notes: '', is_active: true }); setSaveError(null); setShowEmployeeModal(true); }
+  function openEdit(emp: Employee) { setEditEmployee(emp); setEmpForm({ full_name: emp.full_name, role: emp.role, phone: emp.phone || '', id_number: emp.id_number || '', start_date: emp.start_date || '', employment_type: emp.employment_type || 'full_time', notes: emp.notes || '', is_active: emp.is_active }); setSaveError(null); setShowEmployeeModal(true); }
 
   async function saveEmployee() {
     if (!empForm.full_name.trim()) return;
@@ -227,8 +234,7 @@ export default function PeoplePage() {
       const payload = { store_id: STORE_ID, organisation_id: ORG_ID, full_name: empForm.full_name.trim(), role: empForm.role, phone: empForm.phone || null, id_number: empForm.id_number || null, start_date: empForm.start_date || null, employment_type: empForm.employment_type, notes: empForm.notes || null, is_active: empForm.is_active };
       if (editEmployee) { await supabase.from('employees').update(payload).eq('id', editEmployee.id); }
       else { await supabase.from('employees').insert(payload); }
-      await loadEmployees();
-      setShowEmployeeModal(false);
+      await loadEmployees(); setShowEmployeeModal(false);
     } catch (e: unknown) { setSaveError(e instanceof Error ? e.message : 'Failed to save'); }
     setSaving(false);
   }
@@ -242,9 +248,7 @@ export default function PeoplePage() {
       const fileUrl = await uploadToStorage('employee-documents', path, docFile);
       await supabase.from('employee_documents').insert({ employee_id: selectedEmployee.id, store_id: STORE_ID, document_type: docForm.document_type, document_name: docForm.document_name, file_url: fileUrl, expiry_date: docForm.expiry_date || null, notes: docForm.notes || null });
       await loadEmployeeProfile(selectedEmployee);
-      setShowDocModal(false);
-      setDocForm({ document_type: 'Employment Contract', document_name: '', expiry_date: '', notes: '' });
-      setDocFile(null);
+      setShowDocModal(false); setDocForm({ document_type: 'Employment Contract', document_name: '', expiry_date: '', notes: '' }); setDocFile(null);
     } catch (e: unknown) { setSaveError(e instanceof Error ? e.message : 'Upload failed'); }
     setSaving(false);
   }
@@ -254,9 +258,7 @@ export default function PeoplePage() {
     setSaving(true); setSaveError(null);
     try {
       await supabase.from('employee_leave').insert({ employee_id: selectedEmployee.id, store_id: STORE_ID, leave_type: leaveForm.leave_type, start_date: leaveForm.start_date, end_date: leaveForm.end_date, days_taken: parseFloat(leaveForm.days_taken) || 1, status: leaveForm.status, reason: leaveForm.reason || null, notes: leaveForm.notes || null });
-      await loadEmployeeProfile(selectedEmployee);
-      setShowLeaveModal(false);
-      setLeaveForm({ leave_type: 'Annual', start_date: '', end_date: '', days_taken: '', status: 'approved', reason: '', notes: '' });
+      await loadEmployeeProfile(selectedEmployee); setShowLeaveModal(false); setLeaveForm({ leave_type: 'Annual', start_date: '', end_date: '', days_taken: '', status: 'approved', reason: '', notes: '' });
     } catch (e: unknown) { setSaveError(e instanceof Error ? e.message : 'Failed to save'); }
     setSaving(false);
   }
@@ -272,10 +274,7 @@ export default function PeoplePage() {
         documentUrl = await uploadToStorage('employee-documents', path, warningFile);
       }
       await supabase.from('employee_warnings').insert({ employee_id: selectedEmployee.id, store_id: STORE_ID, warning_type: warningForm.warning_type, reason: warningForm.reason, incident_date: warningForm.incident_date, issued_by: warningForm.issued_by, document_url: documentUrl, notes: warningForm.notes || null });
-      await loadEmployeeProfile(selectedEmployee);
-      setShowWarningModal(false);
-      setWarningForm({ warning_type: 'Written Warning', reason: '', incident_date: '', issued_by: '', notes: '' });
-      setWarningFile(null);
+      await loadEmployeeProfile(selectedEmployee); setShowWarningModal(false); setWarningForm({ warning_type: 'Written Warning', reason: '', incident_date: '', issued_by: '', notes: '' }); setWarningFile(null);
     } catch (e: unknown) { setSaveError(e instanceof Error ? e.message : 'Failed to save'); }
     setSaving(false);
   }
@@ -285,9 +284,7 @@ export default function PeoplePage() {
     setSaving(true); setSaveError(null);
     try {
       await supabase.from('employee_advances').insert({ employee_id: selectedEmployee.id, store_id: STORE_ID, amount: parseFloat(advanceForm.amount), reason: advanceForm.reason || null, advance_date: advanceForm.advance_date, repayment_status: advanceForm.repayment_status, deduct_from_wages: advanceForm.deduct_from_wages, notes: advanceForm.notes || null });
-      await loadEmployeeProfile(selectedEmployee);
-      setShowAdvanceModal(false);
-      setAdvanceForm({ amount: '', reason: '', advance_date: new Date().toISOString().split('T')[0], repayment_status: 'outstanding', deduct_from_wages: false, notes: '' });
+      await loadEmployeeProfile(selectedEmployee); setShowAdvanceModal(false); setAdvanceForm({ amount: '', reason: '', advance_date: new Date().toISOString().split('T')[0], repayment_status: 'outstanding', deduct_from_wages: false, notes: '' });
     } catch (e: unknown) { setSaveError(e instanceof Error ? e.message : 'Failed to save'); }
     setSaving(false);
   }
@@ -300,17 +297,14 @@ export default function PeoplePage() {
       const clockOut = attendanceForm.clock_out ? `${attendanceForm.work_date}T${attendanceForm.clock_out}:00` : null;
       const hours = clockIn && clockOut ? (new Date(clockOut).getTime() - new Date(clockIn).getTime()) / (1000 * 60 * 60) : null;
       await supabase.from('attendance').insert({ employee_id: selectedEmployee.id, store_id: STORE_ID, work_date: attendanceForm.work_date, clock_in: clockIn, clock_out: clockOut, hours_worked: hours, is_late: attendanceForm.is_late, notes: attendanceForm.notes || null });
-      await loadEmployeeProfile(selectedEmployee);
-      setShowAttendanceModal(false);
-      setAttendanceForm({ work_date: new Date().toISOString().split('T')[0], clock_in: '', clock_out: '', is_late: false, notes: '' });
+      await loadEmployeeProfile(selectedEmployee); setShowAttendanceModal(false); setAttendanceForm({ work_date: new Date().toISOString().split('T')[0], clock_in: '', clock_out: '', is_late: false, notes: '' });
     } catch (e: unknown) { setSaveError(e instanceof Error ? e.message : 'Failed to save'); }
     setSaving(false);
   }
 
   async function toggleActive(emp: Employee) {
     await supabase.from('employees').update({ is_active: !emp.is_active }).eq('id', emp.id);
-    await loadEmployees();
-    setSelectedEmployee(null);
+    await loadEmployees(); setSelectedEmployee(null);
   }
 
   async function markAdvancePaid(advance: EmployeeAdvance) {
@@ -327,58 +321,9 @@ export default function PeoplePage() {
   const totalLeaveDays = leave.filter(l => l.status === 'approved').reduce((sum, l) => sum + l.days_taken, 0);
   const outstandingAdvances = advances.filter(a => a.repayment_status === 'outstanding').reduce((sum, a) => sum + a.amount, 0);
 
-  const inp = { width: '100%', padding: '10px 14px', borderRadius: 10, border: '1.5px solid #eef2ee', fontSize: 14, outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box' as const };
-  const lbl = { display: 'block' as const, fontSize: 13, fontWeight: 600 as const, color: '#555', marginBottom: 6 };
-  const card = { background: '#fff', borderRadius: 20, padding: 24, border: '1px solid #eef2ee', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' };
-
-  const PROFILE_TABS: { key: ProfileTab; label: string; emoji: string }[] = [
-    { key: 'overview', label: 'Overview', emoji: '👤' },
-    { key: 'documents', label: 'Documents', emoji: '📁' },
-    { key: 'leave', label: 'Leave', emoji: '🏖️' },
-    { key: 'warnings', label: 'Warnings', emoji: '⚠️' },
-    { key: 'advances', label: 'Advances', emoji: '💵' },
-    { key: 'attendance', label: 'Attendance', emoji: '⏰' },
-  ];
-
-  function ErrorBanner({ msg }: { msg: string | null }) {
-    if (!msg) return null;
-    return <div style={{ marginTop: 12, padding: '10px 14px', background: '#fdecea', borderRadius: 8, fontSize: 13, color: '#ef4444', fontWeight: 600 }}>{msg}</div>;
-  }
-
-  function ModalWrap({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
-    return (
-      <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-        <div style={{ background: '#fff', borderRadius: 20, padding: 32, width: '100%', maxWidth: 500, maxHeight: '90vh', overflowY: 'auto' }}>
-          {children}
-        </div>
-      </div>
-    );
-  }
-
-  function ModalHeader({ title, onClose }: { title: string; onClose: () => void }) {
-    return (
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-        <div style={{ fontSize: 18, fontWeight: 700, color: '#333' }}>{title}</div>
-        <button onClick={onClose} style={{ background: '#f0f4f0', border: 'none', borderRadius: 8, padding: '6px 14px', cursor: 'pointer', fontSize: 14 }}>Cancel</button>
-      </div>
-    );
-  }
-
-  function Toggle({ value, onChange, label, color = PRIMARY }: { value: boolean; onChange: () => void; label: string; color?: string }) {
-    return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#f8faf8', borderRadius: 10, padding: '12px 16px' }}>
-        <label style={{ fontSize: 14, fontWeight: 600, color: '#333' }}>{label}</label>
-        <div onClick={onChange} style={{ width: 48, height: 26, borderRadius: 13, background: value ? color : '#ddd', cursor: 'pointer', position: 'relative' as const, transition: 'background 0.2s', flexShrink: 0 }}>
-          <div style={{ position: 'absolute' as const, top: 3, left: value ? 25 : 3, width: 20, height: 20, borderRadius: '50%', background: '#fff', transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.2)' }} />
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div style={{ minHeight: '100vh', background: '#f8faf8', fontFamily: 'system-ui, sans-serif' }}>
 
-      {/* ─── ADD/EDIT EMPLOYEE MODAL ─── */}
       {showEmployeeModal && (
         <ModalWrap onClose={() => setShowEmployeeModal(false)}>
           <ModalHeader title={editEmployee ? 'Edit Employee' : 'Add Employee'} onClose={() => setShowEmployeeModal(false)} />
@@ -401,7 +346,6 @@ export default function PeoplePage() {
         </ModalWrap>
       )}
 
-      {/* ─── DOCUMENT MODAL ─── */}
       {showDocModal && (
         <ModalWrap onClose={() => { setShowDocModal(false); setDocFile(null); setSaveError(null); }}>
           <ModalHeader title="Add Document" onClose={() => { setShowDocModal(false); setDocFile(null); setSaveError(null); }} />
@@ -419,7 +363,6 @@ export default function PeoplePage() {
         </ModalWrap>
       )}
 
-      {/* ─── LEAVE MODAL ─── */}
       {showLeaveModal && (
         <ModalWrap onClose={() => { setShowLeaveModal(false); setSaveError(null); }}>
           <ModalHeader title="Record Leave" onClose={() => { setShowLeaveModal(false); setSaveError(null); }} />
@@ -440,7 +383,6 @@ export default function PeoplePage() {
         </ModalWrap>
       )}
 
-      {/* ─── WARNING MODAL ─── */}
       {showWarningModal && (
         <ModalWrap onClose={() => { setShowWarningModal(false); setWarningFile(null); setSaveError(null); }}>
           <ModalHeader title="Issue Warning" onClose={() => { setShowWarningModal(false); setWarningFile(null); setSaveError(null); }} />
@@ -457,7 +399,6 @@ export default function PeoplePage() {
         </ModalWrap>
       )}
 
-      {/* ─── ADVANCE MODAL ─── */}
       {showAdvanceModal && (
         <ModalWrap onClose={() => { setShowAdvanceModal(false); setSaveError(null); }}>
           <ModalHeader title="Record Advance" onClose={() => { setShowAdvanceModal(false); setSaveError(null); }} />
@@ -475,7 +416,6 @@ export default function PeoplePage() {
         </ModalWrap>
       )}
 
-      {/* ─── ATTENDANCE MODAL ─── */}
       {showAttendanceModal && (
         <ModalWrap onClose={() => { setShowAttendanceModal(false); setSaveError(null); }}>
           <ModalHeader title="Log Attendance" onClose={() => { setShowAttendanceModal(false); setSaveError(null); }} />
@@ -493,44 +433,29 @@ export default function PeoplePage() {
         </ModalWrap>
       )}
 
-      {/* ─── EMPLOYEE PROFILE PANEL ─── */}
       {selectedEmployee && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex' }}>
           <div onClick={() => setSelectedEmployee(null)} style={{ flex: 1, background: 'rgba(0,0,0,0.4)', cursor: 'pointer' }} />
           <div style={{ width: 560, background: '#fff', height: '100vh', overflowY: 'auto', display: 'flex', flexDirection: 'column', boxShadow: '-4px 0 32px rgba(0,0,0,0.15)' }}>
-
             <div style={{ background: `linear-gradient(135deg, ${DARK}, ${PRIMARY})`, padding: '20px 24px', flexShrink: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
                 <button onClick={() => setSelectedEmployee(null)} style={{ background: 'rgba(255,255,255,0.2)', border: 'none', color: '#fff', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', fontSize: 13 }}>Close</button>
                 <button onClick={() => openEdit(selectedEmployee)} style={{ background: '#fff', color: PRIMARY, border: 'none', borderRadius: 8, padding: '6px 14px', cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>Edit</button>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                <div style={{ width: 64, height: 64, borderRadius: '50%', background: 'rgba(255,255,255,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, fontWeight: 800, color: '#fff', flexShrink: 0 }}>
-                  {initials(selectedEmployee.full_name)}
-                </div>
+                <div style={{ width: 64, height: 64, borderRadius: '50%', background: 'rgba(255,255,255,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, fontWeight: 800, color: '#fff', flexShrink: 0 }}>{initials(selectedEmployee.full_name)}</div>
                 <div>
                   <div style={{ color: '#fff', fontWeight: 800, fontSize: 20 }}>{selectedEmployee.full_name}</div>
                   <div style={{ color: 'rgba(255,255,255,0.7)', fontSize: 14, marginTop: 2 }}>{selectedEmployee.role}</div>
                   <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
-                    <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: selectedEmployee.is_active ? '#e8f5e9' : '#fdecea', color: selectedEmployee.is_active ? PRIMARY : '#ef4444' }}>
-                      {selectedEmployee.is_active ? 'ACTIVE' : 'INACTIVE'}
-                    </span>
-                    {selectedEmployee.employment_type && (
-                      <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 20, background: 'rgba(255,255,255,0.2)', color: '#fff' }}>
-                        {EMPLOYMENT_LABELS[selectedEmployee.employment_type]}
-                      </span>
-                    )}
+                    <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: selectedEmployee.is_active ? '#e8f5e9' : '#fdecea', color: selectedEmployee.is_active ? PRIMARY : '#ef4444' }}>{selectedEmployee.is_active ? 'ACTIVE' : 'INACTIVE'}</span>
+                    {selectedEmployee.employment_type && <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 20, background: 'rgba(255,255,255,0.2)', color: '#fff' }}>{EMPLOYMENT_LABELS[selectedEmployee.employment_type]}</span>}
                   </div>
                 </div>
               </div>
               {!profileLoading && (
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, marginTop: 16 }}>
-                  {[
-                    { label: 'Documents', value: documents.length },
-                    { label: 'Leave Days', value: totalLeaveDays },
-                    { label: 'Warnings', value: warnings.length },
-                    { label: 'Advances', value: fmt(outstandingAdvances) },
-                  ].map(item => (
+                  {[{ label: 'Documents', value: documents.length }, { label: 'Leave Days', value: totalLeaveDays }, { label: 'Warnings', value: warnings.length }, { label: 'Advances', value: fmt(outstandingAdvances) }].map(item => (
                     <div key={item.label} style={{ background: 'rgba(255,255,255,0.15)', borderRadius: 10, padding: '8px', textAlign: 'center' as const }}>
                       <div style={{ color: '#fff', fontWeight: 800, fontSize: 15 }}>{item.value}</div>
                       <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: 10, marginTop: 2 }}>{item.label}</div>
@@ -602,9 +527,7 @@ export default function PeoplePage() {
                           <div key={doc.id} style={{ background: expired ? '#fdecea' : expiring ? '#fff8e1' : '#f8faf8', borderRadius: 12, padding: '14px 16px', border: `1px solid ${expired ? '#fca5a5' : expiring ? '#fde68a' : '#eef2ee'}` }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
                               <div style={{ flex: 1 }}>
-                                {isImage(doc.file_url) && (
-                                  <img src={doc.file_url} alt={doc.document_name} style={{ width: '100%', maxHeight: 120, objectFit: 'cover', borderRadius: 8, marginBottom: 8 }} />
-                                )}
+                                {isImage(doc.file_url) && <img src={doc.file_url} alt={doc.document_name} style={{ width: '100%', maxHeight: 120, objectFit: 'cover', borderRadius: 8, marginBottom: 8 }} />}
                                 <div style={{ fontWeight: 700, color: '#333', fontSize: 14 }}>{doc.document_name}</div>
                                 <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>{doc.document_type}</div>
                                 {doc.expiry_date && (
@@ -650,9 +573,7 @@ export default function PeoplePage() {
                               <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>{new Date(l.start_date).toLocaleDateString('en-ZA')} — {new Date(l.end_date).toLocaleDateString('en-ZA')} ({l.days_taken} day{l.days_taken !== 1 ? 's' : ''})</div>
                               {l.reason && <div style={{ fontSize: 12, color: '#888', marginTop: 4, fontStyle: 'italic' }}>{l.reason}</div>}
                             </div>
-                            <span style={{ fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 20, background: l.status === 'approved' ? '#e8f5e9' : l.status === 'rejected' ? '#fdecea' : '#fff8e1', color: l.status === 'approved' ? PRIMARY : l.status === 'rejected' ? '#ef4444' : '#f59e0b', whiteSpace: 'nowrap' as const }}>
-                              {l.status.toUpperCase()}
-                            </span>
+                            <span style={{ fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 20, background: l.status === 'approved' ? '#e8f5e9' : l.status === 'rejected' ? '#fdecea' : '#fff8e1', color: l.status === 'approved' ? PRIMARY : l.status === 'rejected' ? '#ef4444' : '#f59e0b', whiteSpace: 'nowrap' as const }}>{l.status.toUpperCase()}</span>
                           </div>
                         </div>
                       ))}
@@ -677,12 +598,8 @@ export default function PeoplePage() {
                             <div style={{ fontSize: 12, color: '#888' }}>Issued by: {w.issued_by}</div>
                             {w.document_url && (
                               <div style={{ marginTop: 8 }}>
-                                {isImage(w.document_url) ? (
-                                  <img src={w.document_url} alt="warning doc" style={{ width: '100%', maxHeight: 100, objectFit: 'cover', borderRadius: 8, marginBottom: 4 }} />
-                                ) : null}
-                                <a href={w.document_url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: PRIMARY, fontWeight: 600 }}>
-                                  {isImage(w.document_url) ? '🖼️ View Document' : '📄 Open Document'} →
-                                </a>
+                                {isImage(w.document_url) && <img src={w.document_url} alt="warning doc" style={{ width: '100%', maxHeight: 100, objectFit: 'cover', borderRadius: 8, marginBottom: 4 }} />}
+                                <a href={w.document_url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: PRIMARY, fontWeight: 600 }}>{isImage(w.document_url) ? '🖼️ View Document' : '📄 Open Document'} →</a>
                               </div>
                             )}
                           </div>
@@ -713,9 +630,7 @@ export default function PeoplePage() {
                               {a.deduct_from_wages && <div style={{ fontSize: 11, color: PRIMARY, marginTop: 4, fontWeight: 600 }}>Deduct from wages</div>}
                             </div>
                             <div style={{ textAlign: 'right' as const }}>
-                              <span style={{ fontSize: 11, fontWeight: 700, padding: '3px 8px', borderRadius: 20, background: a.repayment_status === 'paid' ? '#e8f5e9' : '#fdecea', color: a.repayment_status === 'paid' ? PRIMARY : '#ef4444' }}>
-                                {a.repayment_status === 'paid' ? 'PAID' : 'OUTSTANDING'}
-                              </span>
+                              <span style={{ fontSize: 11, fontWeight: 700, padding: '3px 8px', borderRadius: 20, background: a.repayment_status === 'paid' ? '#e8f5e9' : '#fdecea', color: a.repayment_status === 'paid' ? PRIMARY : '#ef4444' }}>{a.repayment_status === 'paid' ? 'PAID' : 'OUTSTANDING'}</span>
                               {a.repayment_status === 'outstanding' && (
                                 <button onClick={() => markAdvancePaid(a)} style={{ display: 'block', marginTop: 8, fontSize: 11, color: PRIMARY, background: '#e8f5e9', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontWeight: 600 }}>Mark Paid</button>
                               )}
@@ -749,9 +664,7 @@ export default function PeoplePage() {
                           <div>
                             <div style={{ fontWeight: 600, color: '#333', fontSize: 14 }}>{new Date(a.work_date).toLocaleDateString('en-ZA', { weekday: 'short', day: 'numeric', month: 'short' })}</div>
                             <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>
-                              {a.clock_in ? new Date(a.clock_in).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : '—'}
-                              {' → '}
-                              {a.clock_out ? new Date(a.clock_out).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : '—'}
+                              {a.clock_in ? new Date(a.clock_in).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : '—'}{' → '}{a.clock_out ? new Date(a.clock_out).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : '—'}
                             </div>
                           </div>
                           <div style={{ textAlign: 'right' as const }}>
@@ -770,7 +683,6 @@ export default function PeoplePage() {
         </div>
       )}
 
-      {/* ─── HEADER ─── */}
       <div style={{ background: `linear-gradient(135deg, ${DARK}, ${PRIMARY})`, padding: '0 32px' }}>
         <div style={{ maxWidth: 1100, margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 64 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -783,7 +695,6 @@ export default function PeoplePage() {
 
       <div style={{ maxWidth: 1100, margin: '0 auto', padding: '32px 24px' }}>
         {loading && <div style={{ textAlign: 'center', padding: 80, color: '#666' }}>Loading...</div>}
-
         {!loading && (
           <div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 16, marginBottom: 32 }}>
@@ -800,7 +711,6 @@ export default function PeoplePage() {
                 </div>
               ))}
             </div>
-
             <div style={{ display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap' as const, alignItems: 'center' }}>
               <input placeholder="Search by name or role..." value={search} onChange={e => setSearch(e.target.value)} style={{ padding: '10px 16px', borderRadius: 10, border: '1.5px solid #eef2ee', fontSize: 14, outline: 'none', fontFamily: 'inherit', minWidth: 220, background: '#fff' }} />
               <div style={{ display: 'flex', gap: 4, background: '#fff', padding: 4, borderRadius: 12, border: '1px solid #eef2ee' }}>
@@ -814,7 +724,6 @@ export default function PeoplePage() {
               </select>
               <span style={{ fontSize: 13, color: '#aaa', marginLeft: 'auto' }}>{filtered.length} employee{filtered.length !== 1 ? 's' : ''}</span>
             </div>
-
             {filtered.length === 0 && (
               <div style={{ textAlign: 'center' as const, padding: 80, background: '#fff', borderRadius: 20, border: '1px solid #eef2ee' }}>
                 <div style={{ fontSize: 40, marginBottom: 12 }}>👥</div>
@@ -823,7 +732,6 @@ export default function PeoplePage() {
                 {employees.length === 0 && <button onClick={openAdd} style={{ padding: '12px 24px', background: PRIMARY, color: '#fff', border: 'none', borderRadius: 12, fontWeight: 700, cursor: 'pointer', fontSize: 14 }}>+ Add First Employee</button>}
               </div>
             )}
-
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 16 }}>
               {filtered.map(emp => {
                 const rc = ROLE_COLORS[emp.role] || { bg: '#f5f5f5', color: '#424242' };
@@ -833,9 +741,7 @@ export default function PeoplePage() {
                     onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 2px 6px rgba(0,0,0,0.04)'; }}
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 14 }}>
-                      <div style={{ width: 52, height: 52, borderRadius: '50%', background: rc.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, fontWeight: 800, color: rc.color, flexShrink: 0 }}>
-                        {initials(emp.full_name)}
-                      </div>
+                      <div style={{ width: 52, height: 52, borderRadius: '50%', background: rc.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, fontWeight: 800, color: rc.color, flexShrink: 0 }}>{initials(emp.full_name)}</div>
                       <div style={{ flex: 1 }}>
                         <div style={{ fontWeight: 700, color: '#333', fontSize: 15 }}>{emp.full_name}</div>
                         <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: rc.bg, color: rc.color }}>{emp.role}</span>
