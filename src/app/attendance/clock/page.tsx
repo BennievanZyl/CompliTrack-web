@@ -106,15 +106,24 @@ export default function ClockKioskPage() {
     const script = document.createElement('script');
     script.src = 'https://cdnjs.cloudflare.com/ajax/libs/face-api.js/0.22.2/face-api.min.js';
 
-    script.onload = async () => {
-      // Wait for script to fully initialise
-      await new Promise(resolve => setTimeout(resolve, 800));
-      const faceapi = (window as unknown as { faceapi: FaceApi }).faceapi;
-      if (!faceapi) {
-        console.error('face-api.js loaded but not available on window');
-        setLoadingModels(false);
-        return;
-      }
+ async function loadFaceApi() {
+    setLoadingModels(true);
+    try {
+      // Use npm import instead of CDN script tag
+      const faceapi = await import('face-api.js' as string);
+      await Promise.all([
+        faceapi.nets.tinyFaceDetector.loadFromUri('/models'),
+        faceapi.nets.faceLandmark68Net.loadFromUri('/models'),
+        faceapi.nets.faceRecognitionNet.loadFromUri('/models'),
+      ]);
+      (window as unknown as { faceapi: typeof faceapi }).faceapi = faceapi;
+      setFaceApiLoaded(true);
+      console.log('✅ Face API loaded');
+    } catch (e) {
+      console.error('❌ Face API failed:', e);
+    }
+    setLoadingModels(false);
+  }
       try {
         await Promise.all([
           faceapi.nets.tinyFaceDetector.loadFromUri('/models'),
