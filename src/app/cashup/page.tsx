@@ -12,13 +12,10 @@ const PRIMARY = '#1a5c38';
 const DARK = '#0a1f12';
 
 type CashUp = {
-  id: string;
-  cash_up_date: string;
-  status: string;
+  id: string; cash_up_date: string; status: string;
   r200: number; r100: number; r50: number; r20: number; r10: number;
-  r5: number; r2: number; r1: number; r050: number; r020: number;
-  r010: number; r005: number; total_cash: number;
-  float_r200: number; float_r100: number; float_r50: number; float_r20: number;
+  r5: number; r2: number; r1: number; r050: number; r020: number; r010: number; r005: number;
+  total_cash: number; float_r200: number; float_r100: number; float_r50: number; float_r20: number;
   float_r10: number; float_r5: number; float_r2: number; float_r1: number;
   float_r050: number; float_r020: number; float_r010: number; float_r005: number;
   float_total: number; bank_total: number;
@@ -30,6 +27,12 @@ type CashUp = {
   signed_by_name: string | null; signed_off_at: string | null;
 };
 
+type Payout = {
+  id: string; amount: number; category: string; description: string | null;
+  employee_id: string | null; employee_name: string | null; linked_advance_id: string | null;
+};
+
+type Employee = { id: string; full_name: string; role: string; };
 type StaffMember = { id: string; full_name: string; role: string; };
 
 const DENOMS = [
@@ -47,27 +50,46 @@ const DENOMS = [
   { key: 'r005', label: 'R0.05', value: 0.05 },
 ];
 
+const PAYOUT_CATEGORIES = [
+  'Salary Advance',
+  'Petty Cash Purchase',
+  'Store Supplies',
+  'Maintenance / Repairs',
+  'Cleaning Supplies',
+  'Refund to Customer',
+  'Delivery / Transport',
+  'Utilities',
+  'Other',
+];
+
 function fmt(n: number) { return `R ${(n || 0).toFixed(2)}`; }
 
-// ─── FRANCHISOR READ-ONLY HISTORY VIEW ───────────────────────────────────────
-
+// ─── HISTORY VIEW (franchisor/franchisee owner) ───────────────────────────────
 function CashUpHistoryView({ storeId, storeName }: { storeId: string; storeName: string }) {
   const router = useRouter();
   const [history, setHistory] = useState<CashUp[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [payoutsMap, setPayoutsMap] = useState<Record<string, Payout[]>>({});
 
   useEffect(() => { loadHistory(); }, []);
 
   async function loadHistory() {
     setLoading(true);
-    const { data } = await supabase
-      .from('cash_ups').select('*')
-      .eq('store_id', storeId)
-      .order('cash_up_date', { ascending: false })
-      .limit(60);
+    const { data } = await supabase.from('cash_ups').select('*').eq('store_id', storeId).order('cash_up_date', { ascending: false }).limit(60);
     setHistory(data || []);
     setLoading(false);
+  }
+
+  async function loadPayouts(cashUpId: string) {
+    if (payoutsMap[cashUpId]) return;
+    const { data } = await supabase.from('cash_up_payouts').select('*').eq('cash_up_id', cashUpId).order('created_at');
+    setPayoutsMap(p => ({ ...p, [cashUpId]: data || [] }));
+  }
+
+  function toggleExpand(id: string) {
+    if (expandedId === id) { setExpandedId(null); }
+    else { setExpandedId(id); loadPayouts(id); }
   }
 
   const vColor = (v: number) => v === 0 ? PRIMARY : v > 0 ? '#f59e0b' : '#ef4444';
@@ -85,44 +107,30 @@ function CashUpHistoryView({ storeId, storeName }: { storeId: string; storeName:
           <span style={{ color: 'rgba(255,255,255,0.6)', fontSize: 13 }}>Read-only view</span>
         </div>
       </div>
-
       <div style={{ maxWidth: 900, margin: '0 auto', padding: '32px 24px' }}>
         {loading && <div style={{ textAlign: 'center', padding: 80, color: '#666' }}>Loading cash ups...</div>}
-
         {!loading && history.length === 0 && (
           <div style={{ textAlign: 'center', padding: 80, background: '#fff', borderRadius: 20, border: '1px solid #eef2ee' }}>
             <div style={{ fontSize: 40, marginBottom: 12 }}>💰</div>
             <div style={{ fontWeight: 600, color: '#333', fontSize: 18 }}>No cash ups yet</div>
-            <div style={{ color: '#aaa', fontSize: 14, marginTop: 4 }}>This store hasn&apos;t submitted any cash ups</div>
           </div>
         )}
-
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           {history.map(c => {
             const isExpanded = expandedId === c.id;
             const vc = vColor(c.variance || 0);
-            const vl = vLabel(c.variance || 0);
             const isToday = c.cash_up_date === new Date().toISOString().split('T')[0];
-
+            const payouts = payoutsMap[c.id] || [];
             return (
               <div key={c.id} style={{ background: '#fff', borderRadius: 16, border: '1px solid #eef2ee', overflow: 'hidden', boxShadow: '0 2px 6px rgba(0,0,0,0.04)' }}>
-
-                {/* Row header — always visible */}
-                <div
-                  onClick={() => setExpandedId(isExpanded ? null : c.id)}
-                  style={{ padding: '16px 24px', display: 'flex', alignItems: 'center', gap: 16, cursor: 'pointer' }}
-                >
+                <div onClick={() => toggleExpand(c.id)} style={{ padding: '16px 24px', display: 'flex', alignItems: 'center', gap: 16, cursor: 'pointer' }}>
                   <div style={{ width: 44, height: 44, borderRadius: 12, background: c.status === 'signed_off' ? '#e8f5e9' : '#fff8e1', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontWeight: 800, fontSize: 16, color: c.status === 'signed_off' ? PRIMARY : '#f59e0b' }}>
                     {new Date(c.cash_up_date).getDate()}
                   </div>
                   <div style={{ flex: 1 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                      <span style={{ fontWeight: 700, color: '#333', fontSize: 15 }}>
-                        {isToday ? 'Today' : new Date(c.cash_up_date).toLocaleDateString('en-ZA', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
-                      </span>
-                      <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: c.status === 'signed_off' ? '#e8f5e9' : '#fff8e1', color: c.status === 'signed_off' ? PRIMARY : '#f59e0b' }}>
-                        {c.status === 'signed_off' ? 'SIGNED OFF' : 'DRAFT'}
-                      </span>
+                      <span style={{ fontWeight: 700, color: '#333', fontSize: 15 }}>{isToday ? 'Today' : new Date(c.cash_up_date).toLocaleDateString('en-ZA', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</span>
+                      <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: c.status === 'signed_off' ? '#e8f5e9' : '#fff8e1', color: c.status === 'signed_off' ? PRIMARY : '#f59e0b' }}>{c.status === 'signed_off' ? 'SIGNED OFF' : 'DRAFT'}</span>
                     </div>
                     <div style={{ display: 'flex', gap: 20, fontSize: 13 }}>
                       <span style={{ color: '#666' }}>Cash Up Total: <strong style={{ color: '#333' }}>{fmt(c.cash_up_total || 0)}</strong></span>
@@ -131,120 +139,66 @@ function CashUpHistoryView({ storeId, storeName }: { storeId: string; storeName:
                     </div>
                   </div>
                   <div style={{ textAlign: 'right' as const, flexShrink: 0 }}>
-                    <div style={{ fontSize: 15, fontWeight: 800, color: vc }}>{vl}</div>
+                    <div style={{ fontSize: 15, fontWeight: 800, color: vc }}>{vLabel(c.variance || 0)}</div>
                     <div style={{ fontSize: 11, color: '#aaa', marginTop: 4 }}>{isExpanded ? '▲ collapse' : '▼ expand'}</div>
                   </div>
                 </div>
-
-                {/* Expanded detail */}
                 {isExpanded && (
                   <div style={{ borderTop: '1px solid #f0f4f0', padding: '24px', background: '#fafbfa' }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, marginBottom: 24 }}>
-
-                      {/* Cash Count */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, marginBottom: 16 }}>
                       <div>
-                        <div style={{ fontSize: 13, fontWeight: 700, color: '#333', marginBottom: 12, textTransform: 'uppercase' as const, letterSpacing: 0.5 }}>Cash Count</div>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>
-                          <div style={{ background: DARK, color: '#fff', borderRadius: 8, padding: '8px 12px', textAlign: 'center' as const }}>
-                            <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 2 }}>TILL FLOAT</div>
-                            <div style={{ fontWeight: 800, fontSize: 16 }}>{fmt(c.float_total || 0)}</div>
-                          </div>
-                          <div style={{ background: PRIMARY, color: '#fff', borderRadius: 8, padding: '8px 12px', textAlign: 'center' as const }}>
-                            <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 2 }}>TO BANK</div>
-                            <div style={{ fontWeight: 800, fontSize: 16 }}>{fmt(c.bank_total || 0)}</div>
-                          </div>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: PRIMARY, textTransform: 'uppercase' as const, letterSpacing: 0.5, marginBottom: 8 }}>Cash Count</div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
+                          {[{ label: 'Till Float', value: fmt(c.float_total || 0), bg: DARK }, { label: 'To Bank', value: fmt(c.bank_total || 0), bg: PRIMARY }].map(item => (
+                            <div key={item.label} style={{ background: item.bg, borderRadius: 8, padding: '8px 12px', textAlign: 'center' as const }}>
+                              <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.7)', marginBottom: 2 }}>{item.label}</div>
+                              <div style={{ fontWeight: 800, color: '#fff', fontSize: 15 }}>{item.value}</div>
+                            </div>
+                          ))}
                         </div>
-                        <div style={{ background: '#e8f5e9', borderRadius: 8, padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <span style={{ fontSize: 13, fontWeight: 600, color: '#333' }}>Total Cash</span>
-                          <span style={{ fontWeight: 800, color: PRIMARY, fontSize: 16 }}>{fmt(c.total_cash || 0)}</span>
-                        </div>
-
-                        {/* Denomination breakdown */}
-                        <div style={{ marginTop: 12 }}>
-                          <div style={{ fontSize: 11, color: '#aaa', marginBottom: 6, fontWeight: 600 }}>DENOMINATION BREAKDOWN</div>
-                          {DENOMS.filter(d => ((c[d.key as keyof CashUp] as number) || 0) + ((c[`float_${d.key}` as keyof CashUp] as number) || 0) > 0).map(d => {
-                            const bankQty = (c[d.key as keyof CashUp] as number) || 0;
-                            const floatQty = (c[`float_${d.key}` as keyof CashUp] as number) || 0;
-                            return (
-                              <div key={d.key} style={{ display: 'grid', gridTemplateColumns: '50px 1fr 1fr', gap: 6, alignItems: 'center', marginBottom: 4, fontSize: 12 }}>
-                                <span style={{ fontWeight: 600, color: '#333' }}>{d.label}</span>
-                                <span style={{ color: '#666', textAlign: 'center' as const }}>Float: {floatQty} = {fmt(floatQty * d.value)}</span>
-                                <span style={{ color: '#666', textAlign: 'center' as const }}>Bank: {bankQty} = {fmt(bankQty * d.value)}</span>
-                              </div>
-                            );
-                          })}
-                        </div>
+                        <div style={{ fontSize: 12, color: '#666', marginBottom: 4 }}>Total Cash: <strong>{fmt(c.total_cash || 0)}</strong></div>
                       </div>
-
-                      {/* Reconciliation */}
                       <div>
-                        <div style={{ fontSize: 13, fontWeight: 700, color: '#333', marginBottom: 12, textTransform: 'uppercase' as const, letterSpacing: 0.5 }}>Reconciliation</div>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: PRIMARY, textTransform: 'uppercase' as const, letterSpacing: 0.5, marginBottom: 8 }}>Reconciliation</div>
                         {[
-                          { label: 'Total Cash Counted', value: fmt(c.total_cash || 0), bold: false },
-                          { label: '− Previous Float', value: fmt(c.previous_float || 0), bold: false },
-                          { label: '+ EFT / Card', value: fmt(c.eft_total || 0), bold: false },
-                          { label: '+ Payouts', value: fmt(c.payouts || 0), bold: false },
+                          { label: 'Total Cash', value: fmt(c.total_cash || 0) },
+                          { label: '− Previous Float', value: fmt(c.previous_float || 0) },
+                          { label: '+ EFT / Card', value: fmt(c.eft_total || 0) },
+                          { label: '+ Payouts', value: fmt(c.payouts || 0) },
                           { label: 'A Total', value: fmt(c.a_total || 0), bold: true },
-                          { label: 'POS Slip Total', value: fmt(c.pos_slip_total || 0), bold: false },
-                          { label: '− Voids', value: fmt(c.voids || 0), bold: false },
+                          { label: 'POS Slip Total', value: fmt(c.pos_slip_total || 0) },
+                          { label: '− Voids', value: fmt(c.voids || 0) },
                           { label: 'Cash Up Total', value: fmt(c.cash_up_total || 0), bold: true },
                         ].map(row => (
-                          <div key={row.label} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 8, padding: row.bold ? '6px 8px' : '0 0', background: row.bold ? '#f0f4f0' : 'transparent', borderRadius: row.bold ? 6 : 0 }}>
+                          <div key={row.label} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4, padding: row.bold ? '4px 6px' : '0', background: row.bold ? '#f0f4f0' : 'transparent', borderRadius: row.bold ? 4 : 0 }}>
                             <span style={{ color: row.bold ? '#333' : '#666', fontWeight: row.bold ? 700 : 400 }}>{row.label}</span>
                             <span style={{ fontWeight: row.bold ? 800 : 500, color: row.bold ? PRIMARY : '#333' }}>{row.value}</span>
                           </div>
                         ))}
-                        {c.banked && (
-                          <div style={{ marginTop: 8, padding: '8px', background: '#eff6ff', borderRadius: 8, fontSize: 12 }}>
-                            <div style={{ fontWeight: 700, color: '#1e40af', marginBottom: 4 }}>Banked</div>
-                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                              <span style={{ color: '#666' }}>Deposit Amount</span>
-                              <span style={{ fontWeight: 600 }}>{fmt(c.bank_deposit_amount || 0)}</span>
-                            </div>
-                            {c.bank_reference && (
-                              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
-                                <span style={{ color: '#666' }}>Reference</span>
-                                <span style={{ fontWeight: 600 }}>{c.bank_reference}</span>
+                      </div>
+                    </div>
+                    {payouts.length > 0 && (
+                      <div style={{ marginBottom: 16 }}>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: PRIMARY, textTransform: 'uppercase' as const, letterSpacing: 0.5, marginBottom: 8 }}>Payout Breakdown</div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          {payouts.map(p => (
+                            <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#fff', borderRadius: 8, padding: '8px 12px', border: '1px solid #eef2ee' }}>
+                              <div>
+                                <div style={{ fontSize: 13, fontWeight: 600, color: '#333' }}>{p.category}</div>
+                                {p.description && <div style={{ fontSize: 11, color: '#888' }}>{p.description}</div>}
+                                {p.employee_name && <div style={{ fontSize: 11, color: PRIMARY, fontWeight: 600 }}>→ {p.employee_name}</div>}
                               </div>
-                            )}
-                          </div>
-                        )}
+                              <div style={{ fontWeight: 700, color: '#333', fontSize: 14 }}>{fmt(p.amount)}</div>
+                            </div>
+                          ))}
+                        </div>
                       </div>
-                    </div>
-
-                    {/* Variance */}
-                    <div style={{ background: (c.variance || 0) === 0 ? '#e8f5e9' : (c.variance || 0) > 0 ? '#fff8e1' : '#fdecea', borderRadius: 12, padding: '16px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, border: `2px solid ${vc}` }}>
-                      <span style={{ fontWeight: 700, color: vc, fontSize: 15 }}>VARIANCE</span>
+                    )}
+                    <div style={{ background: (c.variance || 0) === 0 ? '#e8f5e9' : (c.variance || 0) > 0 ? '#fff8e1' : '#fdecea', borderRadius: 12, padding: '14px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', border: `2px solid ${vc}` }}>
+                      <span style={{ fontWeight: 700, color: vc, fontSize: 14 }}>VARIANCE</span>
                       <div style={{ textAlign: 'right' as const }}>
-                        <div style={{ fontWeight: 900, color: vc, fontSize: 28 }}>{(c.variance || 0) === 0 ? 'R 0.00' : fmt(Math.abs(c.variance || 0))}</div>
-                        <div style={{ fontWeight: 700, color: vc, fontSize: 14 }}>{vl}</div>
-                      </div>
-                    </div>
-
-                    {/* Performance + Notes + Sign off */}
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
-                      <div style={{ background: '#fff', borderRadius: 12, padding: 16, border: '1px solid #eef2ee' }}>
-                        <div style={{ fontSize: 12, color: '#aaa', fontWeight: 600, marginBottom: 10, textTransform: 'uppercase' as const }}>Performance</div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 6 }}>
-                          <span style={{ color: '#666' }}>Customers</span>
-                          <span style={{ fontWeight: 700 }}>{c.customer_count}</span>
-                        </div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
-                          <span style={{ color: '#666' }}>Avg Spend</span>
-                          <span style={{ fontWeight: 700 }}>{c.customer_count > 0 ? fmt(c.average_spend || 0) : '—'}</span>
-                        </div>
-                      </div>
-                      <div style={{ background: '#fff', borderRadius: 12, padding: 16, border: '1px solid #eef2ee' }}>
-                        <div style={{ fontSize: 12, color: '#aaa', fontWeight: 600, marginBottom: 10, textTransform: 'uppercase' as const }}>Notes</div>
-                        <div style={{ fontSize: 13, color: c.notes ? '#333' : '#ccc', fontStyle: c.notes ? 'normal' : 'italic', lineHeight: 1.5 }}>{c.notes || 'No notes'}</div>
-                      </div>
-                      <div style={{ background: c.status === 'signed_off' ? '#e8f5e9' : '#fff8e1', borderRadius: 12, padding: 16, border: `1px solid ${c.status === 'signed_off' ? '#c8e6c9' : '#fde68a'}` }}>
-                        <div style={{ fontSize: 12, color: '#aaa', fontWeight: 600, marginBottom: 10, textTransform: 'uppercase' as const }}>Sign Off</div>
-                        <div style={{ fontSize: 13, fontWeight: 700, color: c.status === 'signed_off' ? PRIMARY : '#f59e0b', marginBottom: 4 }}>
-                          {c.status === 'signed_off' ? '✅ Signed Off' : '⏳ Draft'}
-                        </div>
-                        {c.signed_by_name && <div style={{ fontSize: 12, color: '#666' }}>by {c.signed_by_name}</div>}
-                        {c.signed_off_at && <div style={{ fontSize: 11, color: '#aaa', marginTop: 4 }}>{new Date(c.signed_off_at).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })}</div>}
+                        <div style={{ fontWeight: 900, color: vc, fontSize: 24 }}>{(c.variance || 0) === 0 ? 'R 0.00' : fmt(Math.abs(c.variance || 0))}</div>
+                        <div style={{ fontWeight: 700, color: vc, fontSize: 13 }}>{vLabel(c.variance || 0)}</div>
                       </div>
                     </div>
                   </div>
@@ -258,20 +212,24 @@ function CashUpHistoryView({ storeId, storeName }: { storeId: string; storeName:
   );
 }
 
-// ─── STORE MANAGER CASH UP WIZARD ────────────────────────────────────────────
-
+// ─── WIZARD (store manager) ───────────────────────────────────────────────────
 function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: string; storeName: string }) {
   const router = useRouter();
   const [cashUp, setCashUp] = useState<CashUp | null>(null);
   const [history, setHistory] = useState<CashUp[]>([]);
   const [staff, setStaff] = useState<StaffMember[]>([]);
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [payouts, setPayouts] = useState<Payout[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [activeStep, setActiveStep] = useState(1);
+  const [showPayoutForm, setShowPayoutForm] = useState(false);
+  const [payoutForm, setPayoutForm] = useState({ amount: '', category: 'Salary Advance', description: '', employee_id: '', employee_name: '' });
+  const [payoutSaving, setPayoutSaving] = useState(false);
 
   const [bankDenoms, setBankDenoms] = useState<Record<string, number>>({ r200: 0, r100: 0, r50: 0, r20: 0, r10: 0, r5: 0, r2: 0, r1: 0, r050: 0, r020: 0, r010: 0, r005: 0 });
   const [floatDenoms, setFloatDenoms] = useState<Record<string, number>>({ r200: 0, r100: 0, r50: 0, r20: 0, r10: 0, r5: 0, r2: 0, r1: 0, r050: 0, r020: 0, r010: 0, r005: 0 });
-  const [recon, setRecon] = useState({ previous_float: '', eft_total: '', payouts: '', pos_slip_total: '', voids: '', banked: false, bank_deposit_amount: '', bank_reference: '' });
+  const [recon, setRecon] = useState({ previous_float: '', eft_total: '', pos_slip_total: '', voids: '', banked: false, bank_deposit_amount: '', bank_reference: '' });
   const [perf, setPerf] = useState({ customer_count: '' });
   const [notes, setNotes] = useState('');
   const [signedByName, setSignedByName] = useState('');
@@ -281,7 +239,7 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
   async function checkAuthAndLoad() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { router.push('/login'); return; }
-    await Promise.all([loadCashUp(), loadStaff()]);
+    await Promise.all([loadCashUp(), loadStaff(), loadEmployees()]);
   }
 
   async function loadStaff() {
@@ -289,12 +247,20 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
     setStaff(data || []);
   }
 
+  async function loadEmployees() {
+    const { data } = await supabase.from('employees').select('id, full_name, role').eq('store_id', storeId).eq('is_active', true).order('full_name');
+    setEmployees(data || []);
+  }
+
   async function loadCashUp() {
     setLoading(true);
     const today = new Date().toISOString().split('T')[0];
     const { data: todayCashUp } = await supabase.from('cash_ups').select('*').eq('store_id', storeId).eq('cash_up_date', today).maybeSingle();
-    if (todayCashUp) { setCashUp(todayCashUp); populateForm(todayCashUp); }
-    else {
+    if (todayCashUp) {
+      setCashUp(todayCashUp);
+      populateForm(todayCashUp);
+      await loadPayouts(todayCashUp.id);
+    } else {
       const yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1);
       const { data: yCashUp } = await supabase.from('cash_ups').select('float_total').eq('store_id', storeId).eq('cash_up_date', yesterday.toISOString().split('T')[0]).maybeSingle();
       if (yCashUp?.float_total) setRecon(p => ({ ...p, previous_float: yCashUp.float_total.toString() }));
@@ -304,10 +270,15 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
     setLoading(false);
   }
 
+  async function loadPayouts(cashUpId: string) {
+    const { data } = await supabase.from('cash_up_payouts').select('*').eq('cash_up_id', cashUpId).order('created_at');
+    setPayouts(data || []);
+  }
+
   function populateForm(c: CashUp) {
     setBankDenoms({ r200: c.r200, r100: c.r100, r50: c.r50, r20: c.r20, r10: c.r10, r5: c.r5, r2: c.r2, r1: c.r1, r050: c.r050, r020: c.r020, r010: c.r010, r005: c.r005 });
     setFloatDenoms({ r200: c.float_r200, r100: c.float_r100, r50: c.float_r50, r20: c.float_r20, r10: c.float_r10, r5: c.float_r5, r2: c.float_r2, r1: c.float_r1, r050: c.float_r050, r020: c.float_r020, r010: c.float_r010, r005: c.float_r005 });
-    setRecon({ previous_float: c.previous_float.toString(), eft_total: c.eft_total.toString(), payouts: c.payouts.toString(), pos_slip_total: c.pos_slip_total.toString(), voids: c.voids.toString(), banked: c.banked, bank_deposit_amount: c.bank_deposit_amount?.toString() || '', bank_reference: c.bank_reference || '' });
+    setRecon({ previous_float: c.previous_float.toString(), eft_total: c.eft_total.toString(), pos_slip_total: c.pos_slip_total.toString(), voids: c.voids.toString(), banked: c.banked, bank_deposit_amount: c.bank_deposit_amount?.toString() || '', bank_reference: c.bank_reference || '' });
     setPerf({ customer_count: c.customer_count.toString() });
     setNotes(c.notes || '');
     setSignedByName(c.signed_by_name || '');
@@ -318,8 +289,8 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
   const totalCash = bankTotal + floatTotal;
   const prevFloat = parseFloat(recon.previous_float) || 0;
   const eft = parseFloat(recon.eft_total) || 0;
-  const payouts = parseFloat(recon.payouts) || 0;
-  const aTotal = totalCash - prevFloat + eft + payouts;
+  const payoutsTotal = payouts.reduce((sum, p) => sum + p.amount, 0);
+  const aTotal = totalCash - prevFloat + eft + payoutsTotal;
   const posSlip = parseFloat(recon.pos_slip_total) || 0;
   const voids = parseFloat(recon.voids) || 0;
   const cashUpTotal = posSlip - voids;
@@ -337,8 +308,8 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
       r200: bankDenoms.r200, r100: bankDenoms.r100, r50: bankDenoms.r50, r20: bankDenoms.r20, r10: bankDenoms.r10, r5: bankDenoms.r5, r2: bankDenoms.r2, r1: bankDenoms.r1, r050: bankDenoms.r050, r020: bankDenoms.r020, r010: bankDenoms.r010, r005: bankDenoms.r005,
       float_r200: floatDenoms.r200, float_r100: floatDenoms.r100, float_r50: floatDenoms.r50, float_r20: floatDenoms.r20, float_r10: floatDenoms.r10, float_r5: floatDenoms.r5, float_r2: floatDenoms.r2, float_r1: floatDenoms.r1, float_r050: floatDenoms.r050, float_r020: floatDenoms.r020, float_r010: floatDenoms.r010, float_r005: floatDenoms.r005,
       float_total: floatTotal, bank_total: bankTotal, total_cash: totalCash,
-      previous_float: prevFloat, eft_total: eft, payouts, a_total: aTotal,
-      pos_slip_total: posSlip, voids, cash_up_total: cashUpTotal, variance,
+      previous_float: prevFloat, eft_total: eft, payouts: payoutsTotal,
+      a_total: aTotal, pos_slip_total: posSlip, voids, cash_up_total: cashUpTotal, variance,
       banked: recon.banked,
       bank_deposit_amount: recon.bank_deposit_amount ? parseFloat(recon.bank_deposit_amount) : null,
       bank_reference: recon.bank_reference || null,
@@ -369,39 +340,95 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
     setSaving(false);
   }
 
+  async function addPayout() {
+    if (!payoutForm.amount || parseFloat(payoutForm.amount) <= 0) return;
+    setPayoutSaving(true);
+    try {
+      let cashUpId = cashUp?.id;
+      if (!cashUpId) {
+        const payload = buildPayload('draft');
+        const { data } = await supabase.from('cash_ups').insert(payload).select().single();
+        if (data) { setCashUp(data); cashUpId = data.id; }
+      }
+      const selectedEmployee = employees.find(e => e.id === payoutForm.employee_id);
+      let linkedAdvanceId: string | null = null;
+      if (payoutForm.category === 'Salary Advance' && selectedEmployee) {
+        const today = new Date().toISOString().split('T')[0];
+        const { data: advance } = await supabase.from('employee_advances').insert({
+          employee_id: selectedEmployee.id, store_id: storeId,
+          amount: parseFloat(payoutForm.amount),
+          reason: payoutForm.description || `Cash advance on ${today}`,
+          advance_date: today, repayment_status: 'outstanding',
+          deduct_from_wages: true,
+        }).select().single();
+        linkedAdvanceId = advance?.id || null;
+      }
+      await supabase.from('cash_up_payouts').insert({
+        cash_up_id: cashUpId, store_id: storeId,
+        amount: parseFloat(payoutForm.amount),
+        category: payoutForm.category,
+        description: payoutForm.description || null,
+        employee_id: selectedEmployee?.id || null,
+        employee_name: selectedEmployee?.full_name || null,
+        linked_advance_id: linkedAdvanceId,
+      });
+      if (cashUpId) await loadPayouts(cashUpId);
+      const updatedPayoutsTotal = payouts.reduce((s, p) => s + p.amount, 0) + parseFloat(payoutForm.amount);
+      if (cashUpId) {
+        await supabase.from('cash_ups').update({ payouts: updatedPayoutsTotal, a_total: totalCash - prevFloat + eft + updatedPayoutsTotal, variance: (totalCash - prevFloat + eft + updatedPayoutsTotal) - cashUpTotal }).eq('id', cashUpId);
+      }
+      setPayoutForm({ amount: '', category: 'Salary Advance', description: '', employee_id: '', employee_name: '' });
+      setShowPayoutForm(false);
+      await loadCashUp();
+    } catch (e) { console.error('Payout error:', e); }
+    setPayoutSaving(false);
+  }
+
+  async function removePayout(payoutId: string) {
+    await supabase.from('cash_up_payouts').delete().eq('id', payoutId);
+    if (cashUp?.id) await loadPayouts(cashUp.id);
+    await saveDraft();
+  }
+
   function printCashUp() {
     const c = cashUp; if (!c) return;
     const vColor = (c.variance || 0) === 0 ? '#1a5c38' : (c.variance || 0) > 0 ? '#f59e0b' : '#ef4444';
-    const vLabel = (c.variance || 0) === 0 ? 'BALANCED' : (c.variance || 0) > 0 ? `OVER by R ${Math.abs(c.variance || 0).toFixed(2)}` : `SHORT by R ${Math.abs(c.variance || 0).toFixed(2)}`;
+    const vLabel2 = (c.variance || 0) === 0 ? 'BALANCED' : (c.variance || 0) > 0 ? `OVER by R ${Math.abs(c.variance || 0).toFixed(2)}` : `SHORT by R ${Math.abs(c.variance || 0).toFixed(2)}`;
     const denomRows = DENOMS.map(d => {
       const bankQty = (c[d.key as keyof CashUp] as number) || 0;
       const floatQty = (c[`float_${d.key}` as keyof CashUp] as number) || 0;
       if (!bankQty && !floatQty) return '';
       return `<tr><td>${d.label}</td><td class="right">${floatQty}</td><td class="right">R ${(floatQty * d.value).toFixed(2)}</td><td class="divider"></td><td class="right">${bankQty}</td><td class="right">R ${(bankQty * d.value).toFixed(2)}</td></tr>`;
     }).join('');
+    const payoutRows = payouts.map(p => `<tr><td>${p.category}</td><td>${p.description || '—'}</td><td>${p.employee_name || '—'}</td><td class="right">R ${p.amount.toFixed(2)}</td></tr>`).join('');
     const win = window.open('', '_blank'); if (!win) return;
     win.document.write(`<!DOCTYPE html><html><head><title>Cash Up - ${c.cash_up_date}</title><style>
-      @page{size:A4;margin:18mm 20mm}*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,sans-serif;font-size:11px;color:#111}
-      .header{text-align:center;padding-bottom:12px;margin-bottom:16px;border-bottom:3px solid #1a5c38}.header h1{font-size:22px;color:#1a5c38;font-weight:900}
-      .header h2{font-size:13px;color:#444;margin-top:2px;font-weight:600;letter-spacing:1px;text-transform:uppercase}.header p{font-size:11px;color:#888;margin-top:4px}
-      .meta{display:flex;justify-content:space-between;background:#f0f7f2;padding:10px 14px;border-radius:6px;margin-bottom:16px;font-size:11px}.meta strong{color:#1a5c38}
-      .section-title{font-size:11px;font-weight:800;color:#1a5c38;text-transform:uppercase;letter-spacing:.8px;border-bottom:2px solid #1a5c38;padding-bottom:3px;margin-bottom:8px}
-      table{width:100%;border-collapse:collapse;font-size:11px;margin-bottom:16px}td,th{padding:5px 6px}th{background:#1a5c38;color:#fff;font-weight:700;text-align:left}
+      @page{size:A4;margin:10mm 14mm}*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,sans-serif;font-size:10px;color:#111}
+      .header{text-align:center;padding-bottom:10px;margin-bottom:12px;border-bottom:3px solid #1a5c38}.header h1{font-size:20px;color:#1a5c38;font-weight:900}
+      .header h2{font-size:12px;color:#444;margin-top:2px;font-weight:600;text-transform:uppercase}.header p{font-size:10px;color:#888;margin-top:3px}
+      .meta{display:flex;justify-content:space-between;background:#f0f7f2;padding:8px 12px;border-radius:6px;margin-bottom:12px;font-size:10px}.meta strong{color:#1a5c38}
+      .section-title{font-size:10px;font-weight:800;color:#1a5c38;text-transform:uppercase;letter-spacing:.8px;border-bottom:2px solid #1a5c38;padding-bottom:3px;margin-bottom:6px}
+      table{width:100%;border-collapse:collapse;font-size:10px;margin-bottom:12px}td,th{padding:4px 5px}th{background:#1a5c38;color:#fff;font-weight:700;text-align:left}
       th.right,td.right{text-align:right}tr:nth-child(even) td{background:#f8f8f8}.total-row td{font-weight:800;background:#e8f5e9;border-top:2px solid #1a5c38}
-      td.divider{width:12px;background:#fff;border-left:2px dashed #ccc;border-right:2px dashed #ccc}th.divider{background:#fff;border-left:2px dashed #ccc;border-right:2px dashed #ccc}
-      .col-header{background:#0a1f12;color:#fff;text-align:center;font-weight:800;font-size:11px;padding:6px}
-      .two-col{display:flex;gap:16px;margin-bottom:16px}.two-col>div{flex:1}
-      .recon-row{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #eee;font-size:11px}
-      .recon-row.subtotal{font-weight:800;background:#e8f5e9;padding:6px 4px;margin-top:2px;border-top:2px solid #1a5c38;border-bottom:none}
-      .variance-box{border:3px solid ${vColor};background:${(c.variance||0)===0?'#e8f5e9':(c.variance||0)>0?'#fff8e1':'#fdecea'};padding:14px 20px;border-radius:8px;text-align:center;margin:14px 0}
-      .variance-label{font-size:10px;font-weight:800;color:${vColor};text-transform:uppercase;letter-spacing:1px}.variance-amount{font-size:30px;font-weight:900;color:${vColor};margin:4px 0}
-      .variance-status{font-size:14px;font-weight:800;color:${vColor}}.notes-box{border:1px solid #ddd;padding:8px 10px;border-radius:4px;min-height:50px;font-size:11px;color:#333;line-height:1.5}
-      .sign-section{display:flex;justify-content:space-between;margin-top:24px;padding-top:16px;border-top:2px solid #1a5c38}
-      .sign-block{text-align:center}.sign-line{border-bottom:1px solid #333;width:160px;margin:35px auto 6px}.sign-label{font-size:10px;color:#666}
-      .sign-name{font-size:11px;font-weight:700;color:#333;margin-top:3px}.footer{margin-top:20px;text-align:center;font-size:9px;color:#aaa;border-top:1px solid #eee;padding-top:8px}
-      .badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:800}.badge-green{background:#e8f5e9;color:#1a5c38}.badge-amber{background:#fff8e1;color:#f59e0b}
-      .totals-summary{display:flex;gap:12px;margin-bottom:16px}.total-pill{flex:1;background:#f0f7f2;border:2px solid #1a5c38;border-radius:8px;padding:10px;text-align:center}
-      .total-pill .label{font-size:9px;color:#666;text-transform:uppercase;font-weight:700;letter-spacing:.5px}.total-pill .amount{font-size:16px;font-weight:900;color:#1a5c38;margin-top:2px}
+      td.divider{width:10px;background:#fff;border-left:2px dashed #ccc;border-right:2px dashed #ccc}th.divider{background:#fff;border-left:2px dashed #ccc;border-right:2px dashed #ccc}
+      .col-header{background:#0a1f12;color:#fff;text-align:center;font-weight:800;padding:5px}
+      .two-col{display:flex;gap:14px;margin-bottom:12px}.two-col>div{flex:1}
+      .recon-row{display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #eee;font-size:10px}
+      .recon-row.subtotal{font-weight:800;background:#e8f5e9;padding:5px 4px;margin-top:2px;border-top:2px solid #1a5c38;border-bottom:none}
+      .variance-box{border:3px solid ${vColor};background:${(c.variance||0)===0?'#e8f5e9':(c.variance||0)>0?'#fff8e1':'#fdecea'};padding:10px 16px;border-radius:8px;text-align:center;margin:10px 0}
+      .variance-label{font-size:9px;font-weight:800;color:${vColor};text-transform:uppercase;letter-spacing:1px}
+      .variance-amount{font-size:26px;font-weight:900;color:${vColor};margin:3px 0}.variance-status{font-size:12px;font-weight:800;color:${vColor}}
+      .notes-box{border:1px solid #ddd;padding:6px 8px;border-radius:4px;min-height:40px;font-size:10px}
+      .sign-section{display:flex;justify-content:space-between;margin-top:16px;padding-top:12px;border-top:2px solid #1a5c38}
+      .sign-block{text-align:center}.sign-line{border-bottom:1px solid #333;width:140px;margin:28px auto 5px}
+      .sign-label{font-size:9px;color:#666}.sign-name{font-size:10px;font-weight:700;color:#333;margin-top:2px}
+      .footer{margin-top:12px;text-align:center;font-size:8px;color:#aaa;border-top:1px solid #eee;padding-top:6px}
+      .badge{display:inline-block;padding:2px 7px;border-radius:10px;font-size:9px;font-weight:800}
+      .badge-green{background:#e8f5e9;color:#1a5c38}.badge-amber{background:#fff8e1;color:#f59e0b}
+      .totals-summary{display:flex;gap:10px;margin-bottom:12px}
+      .total-pill{flex:1;background:#f0f7f2;border:2px solid #1a5c38;border-radius:7px;padding:8px;text-align:center}
+      .total-pill .label{font-size:8px;color:#666;text-transform:uppercase;font-weight:700}
+      .total-pill .amount{font-size:14px;font-weight:900;color:#1a5c38;margin-top:1px}
     </style></head><body>
     <div class="header"><h1>CompliTrack</h1><h2>Daily Cash Up Report</h2><p>${storeName}</p></div>
     <div class="meta">
@@ -437,19 +464,27 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
         ${c.banked?`<br/><div class="recon-row"><span>Bank Deposit</span><span>R ${(c.bank_deposit_amount||0).toFixed(2)}</span></div><div class="recon-row"><span>Bank Ref</span><span>${c.bank_reference||'—'}</span></div>`:''}
       </div>
       <div>
+        ${payouts.length > 0 ? `
+        <div class="section-title">Payout Breakdown</div>
+        <table>
+          <tr><th>Category</th><th>Description</th><th>Employee</th><th class="right">Amount</th></tr>
+          ${payoutRows}
+          <tr class="total-row"><td colspan="3"><strong>Total Payouts</strong></td><td class="right"><strong>R ${payouts.reduce((s,p)=>s+p.amount,0).toFixed(2)}</strong></td></tr>
+        </table>
+        ` : ''}
         <div class="section-title">Sales Performance</div>
         <div class="recon-row"><span>Customers</span><span>${c.customer_count}</span></div>
         <div class="recon-row"><span>Cash Up Total</span><span>R ${(c.cash_up_total||0).toFixed(2)}</span></div>
         <div class="recon-row subtotal"><span><strong>Avg per Customer</strong></span><span><strong>${c.customer_count>0?`R ${(c.average_spend||0).toFixed(2)}`:'—'}</strong></span></div>
         <br/>
-        <div class="section-title">Notes & Problems</div>
+        <div class="section-title">Notes</div>
         <div class="notes-box">${c.notes||'No notes recorded.'}</div>
       </div>
     </div>
     <div class="variance-box">
       <div class="variance-label">Variance</div>
       <div class="variance-amount">${(c.variance||0)===0?'R 0.00':`R ${Math.abs(c.variance||0).toFixed(2)}`}</div>
-      <div class="variance-status">${vLabel}</div>
+      <div class="variance-status">${vLabel2}</div>
     </div>
     <div class="sign-section">
       <div class="sign-block"><div class="sign-line"></div><div class="sign-label">Manager Signature</div><div class="sign-name">${c.signed_by_name||'________________________'}</div></div>
@@ -465,11 +500,60 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
   const denomInputStyle = (disabled: boolean) => ({ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1.5px solid #eef2ee', fontSize: 13, outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box' as const, background: disabled ? '#f8faf8' : '#fff', textAlign: 'center' as const });
   const reconInputStyle = { width: '100%', padding: '10px 14px', borderRadius: 10, border: '1.5px solid #eef2ee', fontSize: 14, outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box' as const, background: readOnly ? '#f8faf8' : '#fff' };
   const cardStyle = { background: '#fff', borderRadius: 20, padding: 24, border: '1px solid #eef2ee', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' };
-  const labelStyle = { display: 'block' as const, fontSize: 13, fontWeight: 600 as const, color: '#555', marginBottom: 6 };
+  const lbl = { display: 'block' as const, fontSize: 13, fontWeight: 600 as const, color: '#555', marginBottom: 6 };
+  const inp = { width: '100%', padding: '10px 14px', borderRadius: 10, border: '1.5px solid #eef2ee', fontSize: 14, outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box' as const };
   const steps = ['Cash Count', 'Reconciliation', 'Performance', 'Notes', 'Sign Off'];
 
   return (
     <div style={{ minHeight: '100vh', background: '#f8faf8', fontFamily: 'system-ui, sans-serif' }}>
+
+      {/* Payout Form Modal */}
+      {showPayoutForm && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+          <div style={{ background: '#fff', borderRadius: 20, padding: 32, width: '100%', maxWidth: 480 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+              <div style={{ fontSize: 18, fontWeight: 700, color: '#333' }}>Add Payout</div>
+              <button onClick={() => setShowPayoutForm(false)} style={{ background: '#f0f4f0', border: 'none', borderRadius: 8, padding: '6px 14px', cursor: 'pointer' }}>Cancel</button>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div>
+                <label style={lbl}>Category *</label>
+                <select value={payoutForm.category} onChange={e => setPayoutForm(p => ({ ...p, category: e.target.value, employee_id: '', employee_name: '' }))} style={inp}>
+                  {PAYOUT_CATEGORIES.map(c => <option key={c}>{c}</option>)}
+                </select>
+              </div>
+              {payoutForm.category === 'Salary Advance' && (
+                <div>
+                  <label style={lbl}>Employee *</label>
+                  <select value={payoutForm.employee_id} onChange={e => { const emp = employees.find(em => em.id === e.target.value); setPayoutForm(p => ({ ...p, employee_id: e.target.value, employee_name: emp?.full_name || '' })); }} style={inp}>
+                    <option value="">— Select employee —</option>
+                    {employees.map(e => <option key={e.id} value={e.id}>{e.full_name} ({e.role})</option>)}
+                  </select>
+                  {payoutForm.employee_id && (
+                    <div style={{ marginTop: 6, padding: '8px 12px', background: '#e8f5e9', borderRadius: 8, fontSize: 12, color: PRIMARY, fontWeight: 600 }}>
+                      ✅ This advance will be automatically recorded on {employees.find(e => e.id === payoutForm.employee_id)?.full_name}&apos;s profile and deducted from their salary
+                    </div>
+                  )}
+                </div>
+              )}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div>
+                  <label style={lbl}>Amount (R) *</label>
+                  <input type="number" min="0" step="0.01" value={payoutForm.amount} onChange={e => setPayoutForm(p => ({ ...p, amount: e.target.value }))} placeholder="0.00" style={inp} />
+                </div>
+                <div>
+                  <label style={lbl}>Description</label>
+                  <input value={payoutForm.description} onChange={e => setPayoutForm(p => ({ ...p, description: e.target.value }))} placeholder={payoutForm.category === 'Salary Advance' ? 'e.g. Wage advance' : 'e.g. Bought bread'} style={inp} />
+                </div>
+              </div>
+            </div>
+            <button onClick={addPayout} disabled={payoutSaving || !payoutForm.amount || (payoutForm.category === 'Salary Advance' && !payoutForm.employee_id)} style={{ width: '100%', marginTop: 20, padding: '13px', background: payoutForm.amount ? PRIMARY : '#eee', color: payoutForm.amount ? '#fff' : '#aaa', border: 'none', borderRadius: 12, fontWeight: 700, cursor: 'pointer', fontSize: 15 }}>
+              {payoutSaving ? 'Saving...' : 'Add Payout'}
+            </button>
+          </div>
+        </div>
+      )}
+
       <div style={{ background: `linear-gradient(135deg, ${DARK}, ${PRIMARY})`, padding: '0 32px' }}>
         <div style={{ maxWidth: 1100, margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 64 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -491,6 +575,7 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
 
       <div style={{ maxWidth: 1100, margin: '0 auto', padding: '32px 24px' }}>
         {loading && <div style={{ textAlign: 'center', padding: 80, color: '#666' }}>Loading...</div>}
+
         {!loading && (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 24 }}>
             <div>
@@ -502,6 +587,7 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
                 ))}
               </div>
 
+              {/* STEP 1 — CASH COUNT */}
               {activeStep === 1 && (
                 <div style={cardStyle}>
                   <div style={{ fontSize: 18, fontWeight: 700, color: '#333', marginBottom: 4 }}>Count Your Cash</div>
@@ -556,10 +642,12 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
                 </div>
               )}
 
+              {/* STEP 2 — RECONCILIATION + PAYOUTS */}
               {activeStep === 2 && (
                 <div style={cardStyle}>
                   <div style={{ fontSize: 18, fontWeight: 700, color: '#333', marginBottom: 4 }}>Reconciliation</div>
-                  <div style={{ fontSize: 13, color: '#888', marginBottom: 24 }}>Enter your POS and payment totals</div>
+                  <div style={{ fontSize: 13, color: '#888', marginBottom: 24 }}>Enter totals and itemise any payouts</div>
+
                   <div style={{ background: '#f8faf8', borderRadius: 14, padding: 16, marginBottom: 16 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, paddingBottom: 12, borderBottom: '1px solid #eee' }}>
                       <span style={{ fontSize: 14, color: '#666' }}>Total Cash Counted</span>
@@ -568,7 +656,6 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
                     {[
                       { label: 'Previous Float', key: 'previous_float', sign: '−', hint: 'Auto-filled from yesterday', color: '#ef4444' },
                       { label: 'EFT / Card', key: 'eft_total', sign: '+', hint: 'Total card payments', color: PRIMARY },
-                      { label: 'Payouts', key: 'payouts', sign: '+', hint: 'Cash paid out', color: PRIMARY },
                     ].map(f => (
                       <div key={f.key} style={{ marginBottom: 14 }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
@@ -578,11 +665,51 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
                         <input type="number" min="0" step="0.01" value={recon[f.key as keyof typeof recon] as string} onChange={e => setRecon(p => ({ ...p, [f.key]: e.target.value }))} disabled={readOnly} placeholder="0.00" style={reconInputStyle} />
                       </div>
                     ))}
+
+                    {/* PAYOUTS SECTION */}
+                    <div style={{ marginBottom: 14 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                        <label style={{ fontSize: 13, color: '#666' }}><span style={{ fontWeight: 800, color: PRIMARY, marginRight: 6, fontSize: 15 }}>+</span>Payouts</label>
+                        {!readOnly && (
+                          <button onClick={() => setShowPayoutForm(true)} style={{ fontSize: 12, color: PRIMARY, background: '#e8f5e9', border: 'none', borderRadius: 8, padding: '4px 12px', cursor: 'pointer', fontWeight: 700 }}>+ Add Payout</button>
+                        )}
+                      </div>
+                      {payouts.length === 0 ? (
+                        <div style={{ textAlign: 'center' as const, padding: '16px', background: '#f8faf8', borderRadius: 10, color: '#ccc', fontSize: 13, border: '1px dashed #eef2ee' }}>
+                          No payouts yet — click &quot;+ Add Payout&quot; to add one
+                        </div>
+                      ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                          {payouts.map(p => (
+                            <div key={p.id} style={{ background: '#fff', borderRadius: 10, padding: '10px 14px', border: '1px solid #eef2ee', display: 'flex', alignItems: 'center', gap: 12 }}>
+                              <div style={{ flex: 1 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                  <span style={{ fontSize: 12, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: p.category === 'Salary Advance' ? '#e8f5e9' : '#f0f4f0', color: p.category === 'Salary Advance' ? PRIMARY : '#666' }}>{p.category}</span>
+                                  {p.employee_name && <span style={{ fontSize: 11, color: PRIMARY, fontWeight: 600 }}>→ {p.employee_name}</span>}
+                                </div>
+                                {p.description && <div style={{ fontSize: 12, color: '#888', marginTop: 3 }}>{p.description}</div>}
+                                {p.linked_advance_id && <div style={{ fontSize: 11, color: '#4ade80', marginTop: 2 }}>✅ Advance recorded on employee profile</div>}
+                              </div>
+                              <div style={{ fontWeight: 800, color: '#333', fontSize: 16, flexShrink: 0 }}>{fmt(p.amount)}</div>
+                              {!readOnly && (
+                                <button onClick={() => removePayout(p.id)} style={{ background: '#fdecea', border: 'none', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', color: '#ef4444', fontSize: 13, fontWeight: 700, flexShrink: 0 }}>✕</button>
+                              )}
+                            </div>
+                          ))}
+                          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 14px', background: '#f0f7f0', borderRadius: 10, fontWeight: 700, fontSize: 14 }}>
+                            <span style={{ color: '#333' }}>Total Payouts</span>
+                            <span style={{ color: PRIMARY }}>{fmt(payoutsTotal)}</span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
                     <div style={{ paddingTop: 14, borderTop: '2px solid #1a5c38', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <span style={{ fontWeight: 700, color: '#333', fontSize: 15 }}>A Total</span>
                       <span style={{ fontWeight: 800, color: PRIMARY, fontSize: 22 }}>{fmt(aTotal)}</span>
                     </div>
                   </div>
+
                   <div style={{ background: '#f8faf8', borderRadius: 14, padding: 16, marginBottom: 16 }}>
                     {[
                       { label: 'POS Slip Total', key: 'pos_slip_total', sign: '', hint: 'Total from POS system', color: '#333' },
@@ -601,25 +728,28 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
                       <span style={{ fontWeight: 800, color: PRIMARY, fontSize: 22 }}>{fmt(cashUpTotal)}</span>
                     </div>
                   </div>
+
                   <div style={{ background: variance === 0 ? '#e8f5e9' : variance > 0 ? '#fff8e1' : '#fdecea', borderRadius: 16, padding: 24, marginBottom: 16, textAlign: 'center' as const, border: `2px solid ${varianceColor}` }}>
                     <div style={{ fontSize: 12, color: varianceColor, fontWeight: 700, marginBottom: 8, letterSpacing: 1, textTransform: 'uppercase' as const }}>Variance</div>
                     <div style={{ fontSize: 40, fontWeight: 900, color: varianceColor }}>{variance === 0 ? 'R 0.00' : fmt(Math.abs(variance))}</div>
                     <div style={{ fontSize: 18, fontWeight: 700, color: varianceColor, marginTop: 8 }}>{varianceLabel}</div>
                   </div>
+
                   <div style={{ background: '#f8faf8', borderRadius: 14, padding: 16, marginBottom: 16 }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                       <label style={{ fontSize: 14, fontWeight: 600, color: '#333' }}>Did you bank the cash?</label>
-                      <div onClick={() => !readOnly && setRecon(p => ({ ...p, banked: !p.banked }))} style={{ width: 48, height: 26, borderRadius: 13, background: recon.banked ? PRIMARY : '#ddd', cursor: readOnly ? 'default' : 'pointer', position: 'relative' as const, transition: 'background 0.2s', flexShrink: 0 }}>
-                        <div style={{ position: 'absolute' as const, top: 3, left: recon.banked ? 25 : 3, width: 20, height: 20, borderRadius: '50%', background: '#fff', transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.2)' }} />
+                      <div onClick={() => !readOnly && setRecon(p => ({ ...p, banked: !p.banked }))} style={{ width: 48, height: 26, borderRadius: 13, background: recon.banked ? PRIMARY : '#ddd', cursor: readOnly ? 'default' : 'pointer', position: 'relative' as const, flexShrink: 0 }}>
+                        <div style={{ position: 'absolute' as const, top: 3, left: recon.banked ? 25 : 3, width: 20, height: 20, borderRadius: '50%', background: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,0.2)' }} />
                       </div>
                     </div>
                     {recon.banked && (
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 16 }}>
-                        <div><label style={labelStyle}>Deposit Amount</label><input type="number" value={recon.bank_deposit_amount} onChange={e => setRecon(p => ({ ...p, bank_deposit_amount: e.target.value }))} disabled={readOnly} placeholder="0.00" style={reconInputStyle} /></div>
-                        <div><label style={labelStyle}>Reference</label><input value={recon.bank_reference} onChange={e => setRecon(p => ({ ...p, bank_reference: e.target.value }))} disabled={readOnly} placeholder="DEP-001" style={reconInputStyle} /></div>
+                        <div><label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#555', marginBottom: 6 }}>Deposit Amount</label><input type="number" value={recon.bank_deposit_amount} onChange={e => setRecon(p => ({ ...p, bank_deposit_amount: e.target.value }))} disabled={readOnly} placeholder="0.00" style={reconInputStyle} /></div>
+                        <div><label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#555', marginBottom: 6 }}>Reference</label><input value={recon.bank_reference} onChange={e => setRecon(p => ({ ...p, bank_reference: e.target.value }))} disabled={readOnly} placeholder="DEP-001" style={reconInputStyle} /></div>
                       </div>
                     )}
                   </div>
+
                   {!readOnly && (
                     <div style={{ display: 'flex', gap: 10 }}>
                       <button onClick={() => setActiveStep(1)} style={{ flex: 1, padding: '12px', background: '#f0f4f0', color: '#333', border: 'none', borderRadius: 12, fontWeight: 600, cursor: 'pointer', fontSize: 14 }}>← Back</button>
@@ -629,18 +759,19 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
                 </div>
               )}
 
+              {/* STEP 3 — PERFORMANCE */}
               {activeStep === 3 && (
                 <div style={cardStyle}>
                   <div style={{ fontSize: 18, fontWeight: 700, color: '#333', marginBottom: 4 }}>Sales Performance</div>
                   <div style={{ fontSize: 13, color: '#888', marginBottom: 24 }}>How many customers did you serve today?</div>
                   <div style={{ marginBottom: 24 }}>
-                    <label style={labelStyle}>Number of Customers</label>
+                    <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#555', marginBottom: 6 }}>Number of Customers</label>
                     <input type="number" min="0" value={perf.customer_count} onChange={e => setPerf({ customer_count: e.target.value })} disabled={readOnly} placeholder="0" style={{ width: '100%', padding: '16px', borderRadius: 12, border: '1.5px solid #eef2ee', fontSize: 32, textAlign: 'center' as const, fontWeight: 800, outline: 'none', fontFamily: 'inherit', background: readOnly ? '#f8faf8' : '#fff', boxSizing: 'border-box' as const }} />
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 24 }}>
                     {[['CASH UP TOTAL', fmt(cashUpTotal)], ['AVG PER CUSTOMER', customers > 0 ? fmt(avgSpend) : '—']].map(([label, value]) => (
                       <div key={label} style={{ background: '#f8faf8', borderRadius: 14, padding: 20, textAlign: 'center' as const }}>
-                        <div style={{ fontSize: 11, color: '#888', marginBottom: 8, fontWeight: 600, letterSpacing: 0.5 }}>{label}</div>
+                        <div style={{ fontSize: 11, color: '#888', marginBottom: 8, fontWeight: 600 }}>{label}</div>
                         <div style={{ fontSize: 22, fontWeight: 800, color: PRIMARY }}>{value}</div>
                       </div>
                     ))}
@@ -654,6 +785,7 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
                 </div>
               )}
 
+              {/* STEP 4 — NOTES */}
               {activeStep === 4 && (
                 <div style={cardStyle}>
                   <div style={{ fontSize: 18, fontWeight: 700, color: '#333', marginBottom: 4 }}>Notes & Problems</div>
@@ -668,6 +800,7 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
                 </div>
               )}
 
+              {/* STEP 5 — SIGN OFF */}
               {activeStep === 5 && (
                 <div style={cardStyle}>
                   <div style={{ fontSize: 18, fontWeight: 700, color: '#333', marginBottom: 4 }}>{isSignedOff ? 'Signed Off' : 'Sign Off'}</div>
@@ -682,12 +815,23 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
                         </div>
                       ))}
                     </div>
-                    {[['Previous Float', fmt(prevFloat)], ['Payouts', fmt(payouts)], ['A Total', fmt(aTotal)], ['POS Slip Total', fmt(posSlip)], ['Voids', fmt(voids)], ['Cash Up Total', fmt(cashUpTotal)], ['Customers', customers.toString()], ['Avg Spend', customers > 0 ? fmt(avgSpend) : '—']].map(([label, value]) => (
+                    {[['Previous Float', fmt(prevFloat)], ['Payouts', fmt(payoutsTotal)], ['A Total', fmt(aTotal)], ['POS Slip Total', fmt(posSlip)], ['Voids', fmt(voids)], ['Cash Up Total', fmt(cashUpTotal)], ['Customers', customers.toString()], ['Avg Spend', customers > 0 ? fmt(avgSpend) : '—']].map(([label, value]) => (
                       <div key={label} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 8, paddingBottom: 8, borderBottom: '1px solid #f0f0f0' }}>
                         <span style={{ color: '#666' }}>{label}</span>
                         <span style={{ fontWeight: 600, color: '#333' }}>{value}</span>
                       </div>
                     ))}
+                    {payouts.length > 0 && (
+                      <div style={{ marginBottom: 8, paddingBottom: 8, borderBottom: '1px solid #f0f0f0' }}>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: '#666', marginBottom: 6 }}>Payout Breakdown:</div>
+                        {payouts.map(p => (
+                          <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}>
+                            <span style={{ color: '#888' }}>{p.category}{p.employee_name ? ` — ${p.employee_name}` : ''}{p.description ? ` (${p.description})` : ''}</span>
+                            <span style={{ fontWeight: 600, color: '#333' }}>{fmt(p.amount)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 4 }}>
                       <span style={{ fontWeight: 700, color: '#333', fontSize: 15 }}>VARIANCE</span>
                       <span style={{ fontWeight: 800, fontSize: 20, color: varianceColor }}>{varianceLabel}</span>
@@ -696,9 +840,9 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
                   {!isSignedOff ? (
                     <div>
                       <div style={{ marginBottom: 16 }}>
-                        <label style={labelStyle}>Signed by</label>
+                        <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#555', marginBottom: 6 }}>Signed by</label>
                         {staff.length > 0 ? (
-                          <select value={signedByName} onChange={e => setSignedByName(e.target.value)} style={{ ...reconInputStyle }}>
+                          <select value={signedByName} onChange={e => setSignedByName(e.target.value)} style={reconInputStyle}>
                             <option value="">— Select staff member —</option>
                             {staff.map(s => <option key={s.id} value={s.full_name}>{s.full_name} ({s.role})</option>)}
                             <option value="__other__">Other (type name)</option>
@@ -706,9 +850,7 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
                         ) : (
                           <input value={signedByName} onChange={e => setSignedByName(e.target.value)} placeholder="Full name of person signing off" style={reconInputStyle} />
                         )}
-                        {signedByName === '__other__' && (
-                          <input onChange={e => setSignedByName(e.target.value)} placeholder="Enter full name" style={{ ...reconInputStyle, marginTop: 8 }} />
-                        )}
+                        {signedByName === '__other__' && <input onChange={e => setSignedByName(e.target.value)} placeholder="Enter full name" style={{ ...reconInputStyle, marginTop: 8 }} />}
                       </div>
                       <button onClick={signOff} disabled={saving || !signedByName.trim() || signedByName === '__other__'} style={{ width: '100%', padding: '16px', background: signedByName.trim() && signedByName !== '__other__' ? PRIMARY : '#eee', color: signedByName.trim() && signedByName !== '__other__' ? '#fff' : '#aaa', border: 'none', borderRadius: 12, fontWeight: 700, cursor: 'pointer', fontSize: 16 }}>
                         {saving ? 'Signing off...' : 'Sign Off Cash Up'}
@@ -722,35 +864,32 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
                         <div style={{ fontWeight: 700, color: PRIMARY, fontSize: 18 }}>Signed off by {cashUp?.signed_by_name}</div>
                         <div style={{ fontSize: 13, color: '#888', marginTop: 6 }}>{cashUp?.signed_off_at ? new Date(cashUp.signed_off_at).toLocaleString('en-ZA') : ''}</div>
                       </div>
-                      <button onClick={printCashUp} style={{ width: '100%', padding: '14px', background: PRIMARY, color: '#fff', border: 'none', borderRadius: 12, fontWeight: 700, cursor: 'pointer', fontSize: 15 }}>
-                        Download / Print PDF Report
-                      </button>
+                      <button onClick={printCashUp} style={{ width: '100%', padding: '14px', background: PRIMARY, color: '#fff', border: 'none', borderRadius: 12, fontWeight: 700, cursor: 'pointer', fontSize: 15 }}>Download / Print PDF Report</button>
                     </div>
                   )}
                 </div>
               )}
             </div>
 
+            {/* SIDEBAR */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
               <div style={cardStyle}>
                 <div style={{ fontSize: 14, fontWeight: 700, color: '#333', marginBottom: 16 }}>Today&apos;s Summary</div>
-                {[['Till Float', fmt(floatTotal)], ['To Bank', fmt(bankTotal)], ['Total Cash', fmt(totalCash)], ['A Total', fmt(aTotal)], ['Cash Up Total', fmt(cashUpTotal)], ['Customers', customers.toString()], ['Avg Spend', customers > 0 ? fmt(avgSpend) : '—']].map(([label, value]) => (
+                {[['Till Float', fmt(floatTotal)], ['To Bank', fmt(bankTotal)], ['Total Cash', fmt(totalCash)], ['EFT / Card', fmt(eft)], ['Payouts', fmt(payoutsTotal)], ['A Total', fmt(aTotal)], ['Cash Up Total', fmt(cashUpTotal)], ['Customers', customers.toString()], ['Avg Spend', customers > 0 ? fmt(avgSpend) : '—']].map(([label, value]) => (
                   <div key={label} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 10 }}>
                     <span style={{ color: '#888' }}>{label}</span>
                     <span style={{ fontWeight: 600, color: '#333' }}>{value}</span>
                   </div>
                 ))}
                 <div style={{ marginTop: 14, padding: '16px', background: variance === 0 ? '#e8f5e9' : variance > 0 ? '#fff8e1' : '#fdecea', borderRadius: 12, textAlign: 'center' as const, border: `1.5px solid ${varianceColor}` }}>
-                  <div style={{ fontSize: 11, color: varianceColor, fontWeight: 700, marginBottom: 6, letterSpacing: 0.5 }}>VARIANCE</div>
+                  <div style={{ fontSize: 11, color: varianceColor, fontWeight: 700, marginBottom: 6 }}>VARIANCE</div>
                   <div style={{ fontSize: 26, fontWeight: 900, color: varianceColor }}>{variance === 0 ? 'R 0.00' : fmt(Math.abs(variance))}</div>
                   <div style={{ fontSize: 13, fontWeight: 700, color: varianceColor, marginTop: 6 }}>{varianceLabel}</div>
                 </div>
               </div>
               <div style={cardStyle}>
                 <div style={{ fontSize: 14, fontWeight: 700, color: '#333', marginBottom: 16 }}>Recent History</div>
-                {history.filter(h => h.cash_up_date !== new Date().toISOString().split('T')[0]).slice(0, 7).length === 0 && (
-                  <div style={{ textAlign: 'center' as const, padding: '20px 0', color: '#ccc', fontSize: 13 }}>No history yet</div>
-                )}
+                {history.filter(h => h.cash_up_date !== new Date().toISOString().split('T')[0]).slice(0, 7).length === 0 && <div style={{ textAlign: 'center' as const, padding: '20px 0', color: '#ccc', fontSize: 13 }}>No history yet</div>}
                 {history.filter(h => h.cash_up_date !== new Date().toISOString().split('T')[0]).slice(0, 7).map(h => {
                   const hColor = h.variance === 0 ? PRIMARY : h.variance > 0 ? '#f59e0b' : '#ef4444';
                   return (
@@ -775,8 +914,7 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
   );
 }
 
-// ─── ROOT PAGE — DETECTS ROLE AND RENDERS CORRECT VIEW ───────────────────────
-
+// ─── ROOT — detects role and renders correct view ─────────────────────────────
 function CashUpContent() {
   const searchParams = useSearchParams();
   const storeParam = searchParams.get('store');
@@ -793,15 +931,9 @@ function CashUpContent() {
     if (!user) { setReady(true); return; }
     const { data: profile } = await supabase.from('profiles').select('role, organisation_id').eq('id', user.id).single();
     setRole(profile?.role || null);
-
     if (storeParam) {
-      // Viewing a specific store via ?store= param
       const { data: store } = await supabase.from('stores').select('id, name, organisation_id').eq('id', storeParam).single();
-      if (store) {
-        setStoreId(store.id);
-        setStoreName(store.name);
-        setOrgId(store.organisation_id);
-      }
+      if (store) { setStoreId(store.id); setStoreName(store.name); setOrgId(store.organisation_id); }
     }
     setReady(true);
   }
@@ -810,23 +942,13 @@ function CashUpContent() {
 
   const isFranchisor = role === 'franchisor_admin' || role === 'platform_admin';
   const isFranchiseeOwner = role === 'franchisee_owner';
-
-  // Franchisor or franchisee owner viewing a specific store → show history list
-  if ((isFranchisor || isFranchiseeOwner) && storeParam) {
-    return <CashUpHistoryView storeId={storeId} storeName={storeName} />;
-  }
-
-  // Store manager or normal view → show the wizard
+  if ((isFranchisor || isFranchiseeOwner) && storeParam) return <CashUpHistoryView storeId={storeId} storeName={storeName} />;
   return <CashUpWizard storeId={storeId} orgId={orgId} storeName={storeName} />;
 }
 
 export default function CashUpPage() {
   return (
-    <Suspense fallback={
-      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f8faf8' }}>
-        <div style={{ color: '#666' }}>Loading...</div>
-      </div>
-    }>
+    <Suspense fallback={<div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f8faf8' }}><div style={{ color: '#666' }}>Loading...</div></div>}>
       <CashUpContent />
     </Suspense>
   );
