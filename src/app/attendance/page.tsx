@@ -1,25 +1,16 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 
 const STORE_ID = '05328298-fc27-4c9f-b091-bb7f6598b601';
 const PRIMARY = '#1a5c38';
 const DARK = '#0a1f12';
 
-type Employee = {
-  id: string; full_name: string; role: string;
-  face_descriptor: number[] | null; clock_pin: string | null;
-};
-type AttendanceRecord = {
-  id: string; employee_id: string; clock_in: string | null; clock_out: string | null;
-};
-
-type ClockResult = {
-  type: 'in' | 'out'; employee: Employee; time: string; late: boolean;
-};
-
-function initials(name: string) { return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2); }
+type Employee = { id: string; full_name: string; role: string; is_active: boolean };
+type AttendanceRecord = { id: string; employee_id: string; work_date: string; clock_in: string | null; clock_out: string | null; hours_worked: number | null; is_late: boolean; notes: string | null };
+type Shift = { id: string; shift_name: string; day_type: string; start_time: string; end_time: string; is_active: boolean };
 
 const ROLE_COLORS: Record<string, { bg: string; color: string }> = {
   'Store Manager': { bg: '#e8f5e9', color: PRIMARY },
@@ -32,400 +23,317 @@ const ROLE_COLORS: Record<string, { bg: string; color: string }> = {
   'Other': { bg: '#f5f5f5', color: '#424242' },
 };
 
-export default function ClockKioskPage() {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [employees, setEmployees] = useState<Employee[]>([]);
-  const [todayRecords, setTodayRecords] = useState<AttendanceRecord[]>([]);
-  const [shifts, setShifts] = useState<{ start_time: string; end_time: string; day_type: string }[]>([]);
-  const [mode, setMode] = useState<'idle' | 'scanning' | 'pin' | 'enrolling' | 'success' | 'error'>('idle');
-  const [cameraReady, setCameraReady] = useState(false);
-  const [faceApiLoaded, setFaceApiLoaded] = useState(false);
-  const [loadingModels, setLoadingModels] = useState(true);
-  const [result, setResult] = useState<ClockResult | null>(null);
-  const [errorMsg, setErrorMsg] = useState('');
-  const [pin, setPin] = useState('');
-  const [pinEmployee, setPinEmployee] = useState<Employee | null>(null);
-  const [pinError, setPinError] = useState('');
-  const [enrollEmployee, setEnrollEmployee] = useState<Employee | null>(null);
-  const [enrollStep, setEnrollStep] = useState<'select' | 'capture' | 'done'>('select');
-  const [enrollSearch, setEnrollSearch] = useState('');
-  const scanningRef = useRef(false);
-  const resultTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const today = new Date().toISOString().split('T')[0];
+function initials(name: string) { return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2); }
+function todayDayType() { const d = new Date().getDay(); return d === 6 ? 'saturday' : d === 0 ? 'sunday' : 'weekday'; }
 
-  useEffect(() => {
-    loadData();
-    loadFaceApi();
-    startCamera();
-    return () => { stopCamera(); if (resultTimerRef.current) clearTimeout(resultTimerRef.current); };
-  }, []);
-
-  async function loadData() {
-    const [empRes, recRes, shiftRes] = await Promise.all([
-      supabase.from('employees').select('id, full_name, role, face_descriptor, clock_pin').eq('store_id', STORE_ID).eq('is_active', true),
-      supabase.from('attendance').select('id, employee_id, clock_in, clock_out').eq('store_id', STORE_ID).eq('work_date', today),
-      supabase.from('store_shifts').select('start_time, end_time, day_type').eq('store_id', STORE_ID).eq('is_active', true),
-    ]);
-    setEmployees(empRes.data || []);
-    setTodayRecords(recRes.data || []);
-    setShifts(shiftRes.data || []);
-  }
-
-  async function loadFaceApi() {
-    setLoadingModels(true);
-    const script = document.createElement('script');
-    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/face-api.js/0.22.2/face-api.min.js';
-    script.onload = async () => {
-      const faceapi = (window as unknown as { faceapi: FaceApi }).faceapi;
-      try {
-        await Promise.all([
-          faceapi.nets.tinyFaceDetector.loadFromUri('/models'),
-          faceapi.nets.faceLandmark68Net.loadFromUri('/models'),
-          faceapi.nets.faceRecognitionNet.loadFromUri('/models'),
-        ]);
-        setFaceApiLoaded(true);
-      } catch {
-        // Models not found — PIN only mode
-        console.log('Face API models not found, PIN-only mode');
-      }
-      setLoadingModels(false);
-    };
-    script.onerror = () => setLoadingModels(false);
-    document.head.appendChild(script);
-  }
-
-  async function startCamera() {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480, facingMode: 'user' } });
-      if (videoRef.current) { videoRef.current.srcObject = stream; setCameraReady(true); }
-    } catch { setCameraReady(false); }
-  }
-
-  function stopCamera() {
-    if (videoRef.current?.srcObject) {
-      const tracks = (videoRef.current.srcObject as MediaStream).getTracks();
-      tracks.forEach(t => t.stop());
-    }
-  }
-
-  function isLate(): boolean {
-    const day = new Date().getDay();
-    const dayType = day === 6 ? 'saturday' : day === 0 ? 'sunday' : 'weekday';
-    const now = `${String(new Date().getHours()).padStart(2, '0')}:${String(new Date().getMinutes()).padStart(2, '0')}`;
-    const todayShifts = shifts.filter(s => s.day_type === dayType);
-    if (!todayShifts.length) return false;
-    return todayShifts.every(s => now > s.start_time);
-  }
-
-  async function performClock(employee: Employee) {
-    const existingRecord = todayRecords.find(r => r.employee_id === employee.id);
-    const now = new Date().toISOString();
-    const late = isLate();
-
-    if (existingRecord?.clock_in && !existingRecord?.clock_out) {
-      const hours = (new Date(now).getTime() - new Date(existingRecord.clock_in).getTime()) / (1000 * 60 * 60);
-      await supabase.from('attendance').update({ clock_out: now, hours_worked: hours }).eq('id', existingRecord.id);
-      setResult({ type: 'out', employee, time: now, late: false });
-    } else {
-      await supabase.from('attendance').insert({ employee_id: employee.id, store_id: STORE_ID, work_date: today, clock_in: now, is_late: late });
-      setResult({ type: 'in', employee, time: now, late });
-    }
-    await loadData();
-    setMode('success');
-    resultTimerRef.current = setTimeout(() => { setMode('idle'); setResult(null); scanningRef.current = false; }, 4000);
-  }
-
-  async function startFaceScan() {
-    if (!faceApiLoaded || !cameraReady) { setMode('pin'); return; }
-    setMode('scanning');
-    scanningRef.current = true;
-    const faceapi = (window as unknown as { faceapi: FaceApi }).faceapi;
-    const employeesWithFaces = employees.filter(e => e.face_descriptor);
-
-    if (!employeesWithFaces.length) {
-      setMode('idle');
-      setErrorMsg('No faces enrolled. Use PIN or enroll faces first.');
-      return;
-    }
-
-    let attempts = 0;
-    const maxAttempts = 30;
-
-    const scan = async () => {
-      if (!scanningRef.current || attempts >= maxAttempts) {
-        if (attempts >= maxAttempts) { setMode('pin'); setErrorMsg('Face not recognised. Please use your PIN.'); }
-        return;
-      }
-      attempts++;
-      try {
-        if (!videoRef.current) return;
-        const detection = await faceapi.detectSingleFace(videoRef.current, new faceapi.TinyFaceDetectorOptions())
-          .withFaceLandmarks().withFaceDescriptor();
-        if (detection) {
-          const labeledDescriptors = employeesWithFaces.map(e => new faceapi.LabeledFaceDescriptors(e.id, [new Float32Array(e.face_descriptor!)]));
-          const faceMatcher = new faceapi.FaceMatcher(labeledDescriptors, 0.5);
-          const match = faceMatcher.findBestMatch(detection.descriptor);
-          if (match.label !== 'unknown') {
-            const matched = employees.find(e => e.id === match.label);
-            if (matched) { scanningRef.current = false; await performClock(matched); return; }
-          }
-        }
-      } catch { /* continue scanning */ }
-      if (scanningRef.current) setTimeout(scan, 500);
-    };
-    scan();
-  }
-
-  function cancelScan() { scanningRef.current = false; setMode('idle'); }
-
-  async function submitPin() {
-    const employee = employees.find(e => e.clock_pin === pin);
-    if (!employee) { setPinError('Incorrect PIN. Please try again.'); setPin(''); return; }
-    setPinEmployee(employee);
-    setPinError('');
-    setPin('');
-    setMode('idle');
-    await performClock(employee);
-  }
-
-  async function enrollFace() {
-    if (!enrollEmployee || !faceApiLoaded || !cameraReady) return;
-    const faceapi = (window as unknown as { faceapi: FaceApi }).faceapi;
-    setEnrollStep('capture');
-    try {
-      if (!videoRef.current) return;
-      const detection = await faceapi.detectSingleFace(videoRef.current, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks().withFaceDescriptor();
-      if (!detection) { setErrorMsg('No face detected. Please look directly at the camera.'); setEnrollStep('select'); return; }
-      const descriptor = Array.from(detection.descriptor);
-      await supabase.from('employees').update({ face_descriptor: descriptor }).eq('id', enrollEmployee.id);
-      await loadData();
-      setEnrollStep('done');
-      setTimeout(() => { setMode('idle'); setEnrollStep('select'); setEnrollEmployee(null); }, 3000);
-    } catch { setErrorMsg('Failed to capture face. Please try again.'); setEnrollStep('select'); }
-  }
-
-  // PIN keypad
-  function pinKeyPress(key: string) {
-    if (key === '←') { setPin(p => p.slice(0, -1)); return; }
-    if (pin.length >= 4) return;
-    const newPin = pin + key;
-    setPin(newPin);
-    if (newPin.length === 4) { setTimeout(() => submitPin(), 100); }
-  }
-
-  const filteredEnrollEmployees = employees.filter(e => e.full_name.toLowerCase().includes(enrollSearch.toLowerCase()));
-
+function ModalWrap({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
   return (
-    <div style={{ minHeight: '100vh', background: '#0a1f12', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', fontFamily: 'system-ui, sans-serif', padding: 24 }}>
-
-      {/* Header */}
-      <div style={{ position: 'fixed' as const, top: 0, left: 0, right: 0, padding: '16px 32px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', zIndex: 10 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div style={{ width: 36, height: 36, borderRadius: 10, background: 'rgba(255,255,255,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M3 9L7 13L15 5" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-          </div>
-          <span style={{ color: '#fff', fontWeight: 700, fontSize: 18 }}>CompliTrack</span>
-        </div>
-        <div style={{ display: 'flex', gap: 10 }}>
-          <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: 14 }}>{new Date().toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })} · {new Date().toLocaleDateString('en-ZA', { weekday: 'long', day: 'numeric', month: 'long' })}</div>
-          <button onClick={() => setMode('enrolling')} style={{ background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)', color: 'rgba(255,255,255,0.7)', borderRadius: 8, padding: '6px 14px', cursor: 'pointer', fontSize: 12 }}>
-            👤 Enroll Face
-          </button>
-          <a href="/attendance" style={{ background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)', color: 'rgba(255,255,255,0.7)', borderRadius: 8, padding: '6px 14px', cursor: 'pointer', fontSize: 12, textDecoration: 'none' }}>
-            ← Back
-          </a>
-        </div>
-      </div>
-
-      {/* Camera feed */}
-      <video ref={videoRef} autoPlay muted playsInline style={{ position: 'fixed' as const, top: 0, left: 0, width: '100%', height: '100%', objectFit: 'cover', opacity: 0.15, zIndex: 0 }} />
-      <canvas ref={canvasRef} style={{ display: 'none' }} />
-
-      {/* ─── IDLE MODE ─── */}
-      {mode === 'idle' && (
-        <div style={{ position: 'relative' as const, zIndex: 1, textAlign: 'center' as const, maxWidth: 480, width: '100%' }}>
-          <div style={{ fontSize: 80, marginBottom: 20 }}>🕐</div>
-          <h1 style={{ color: '#fff', fontSize: 36, fontWeight: 900, margin: '0 0 8px', letterSpacing: -1 }}>Clock In / Out</h1>
-          <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: 16, margin: '0 0 48px' }}>Choose how to clock in</p>
-
-          {errorMsg && (
-            <div style={{ background: 'rgba(239,68,68,0.2)', border: '1px solid rgba(239,68,68,0.4)', borderRadius: 12, padding: '12px 20px', marginBottom: 24, color: '#fca5a5', fontSize: 14, fontWeight: 600 }}>
-              {errorMsg}
-            </div>
-          )}
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {faceApiLoaded && cameraReady && (
-              <button onClick={startFaceScan} style={{ width: '100%', padding: '18px', background: PRIMARY, color: '#fff', border: 'none', borderRadius: 16, fontWeight: 800, cursor: 'pointer', fontSize: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
-                <span style={{ fontSize: 28 }}>😊</span> Face Recognition
-              </button>
-            )}
-            <button onClick={() => { setMode('pin'); setPin(''); setPinError(''); setErrorMsg(''); }} style={{ width: '100%', padding: '18px', background: 'rgba(255,255,255,0.1)', color: '#fff', border: '2px solid rgba(255,255,255,0.2)', borderRadius: 16, fontWeight: 700, cursor: 'pointer', fontSize: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
-              <span style={{ fontSize: 28 }}>🔢</span> Enter PIN
-            </button>
-          </div>
-
-          {loadingModels && (
-            <div style={{ marginTop: 20, color: 'rgba(255,255,255,0.4)', fontSize: 13 }}>Loading face recognition...</div>
-          )}
-
-          {/* On shift now */}
-          {todayRecords.filter(r => r.clock_in && !r.clock_out).length > 0 && (
-            <div style={{ marginTop: 40, textAlign: 'left' as const }}>
-              <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: 12, fontWeight: 600, marginBottom: 10, letterSpacing: 0.5 }}>ON SHIFT NOW</div>
-              <div style={{ display: 'flex', flexWrap: 'wrap' as const, gap: 8 }}>
-                {todayRecords.filter(r => r.clock_in && !r.clock_out).map(r => {
-                  const emp = employees.find(e => e.id === r.employee_id);
-                  if (!emp) return null;
-                  const rc = ROLE_COLORS[emp.role] || { bg: '#f5f5f5', color: '#424242' };
-                  return (
-                    <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(255,255,255,0.1)', borderRadius: 10, padding: '6px 12px' }}>
-                      <div style={{ width: 28, height: 28, borderRadius: '50%', background: rc.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 800, color: rc.color }}>{initials(emp.full_name)}</div>
-                      <span style={{ color: '#fff', fontSize: 13, fontWeight: 600 }}>{emp.full_name.split(' ')[0]}</span>
-                      <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#4ade80' }} />
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ─── SCANNING MODE ─── */}
-      {mode === 'scanning' && (
-        <div style={{ position: 'relative' as const, zIndex: 1, textAlign: 'center' as const, maxWidth: 480, width: '100%' }}>
-          <div style={{ width: 200, height: 200, borderRadius: '50%', border: '4px solid #4ade80', margin: '0 auto 32px', position: 'relative' as const, display: 'flex', alignItems: 'center', justifyContent: 'center', animation: 'pulse 2s infinite' }}>
-            <div style={{ width: 180, height: 180, borderRadius: '50%', border: '2px solid rgba(74,222,128,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <span style={{ fontSize: 64 }}>😊</span>
-            </div>
-            <div style={{ position: 'absolute' as const, inset: -8, borderRadius: '50%', border: '2px solid rgba(74,222,128,0.2)', animation: 'ping 1.5s infinite' }} />
-          </div>
-          <h2 style={{ color: '#fff', fontSize: 28, fontWeight: 800, margin: '0 0 8px' }}>Looking for your face...</h2>
-          <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: 15, margin: '0 0 32px' }}>Please look directly at the camera</p>
-          <button onClick={cancelScan} style={{ background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)', color: '#fff', borderRadius: 12, padding: '12px 28px', cursor: 'pointer', fontSize: 15, fontWeight: 600 }}>
-            Use PIN instead
-          </button>
-          <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.7}} @keyframes ping{0%{transform:scale(1);opacity:0.8}100%{transform:scale(1.3);opacity:0}}`}</style>
-        </div>
-      )}
-
-      {/* ─── PIN MODE ─── */}
-      {mode === 'pin' && (
-        <div style={{ position: 'relative' as const, zIndex: 1, textAlign: 'center' as const, maxWidth: 360, width: '100%' }}>
-          <h2 style={{ color: '#fff', fontSize: 28, fontWeight: 800, margin: '0 0 8px' }}>Enter Your PIN</h2>
-          <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: 14, margin: '0 0 32px' }}>4-digit PIN to clock in or out</p>
-
-          {/* PIN dots */}
-          <div style={{ display: 'flex', justifyContent: 'center', gap: 16, marginBottom: 32 }}>
-            {[0, 1, 2, 3].map(i => (
-              <div key={i} style={{ width: 20, height: 20, borderRadius: '50%', background: i < pin.length ? '#4ade80' : 'rgba(255,255,255,0.2)', transition: 'background 0.2s' }} />
-            ))}
-          </div>
-
-          {pinError && <div style={{ color: '#fca5a5', fontSize: 14, marginBottom: 16, fontWeight: 600 }}>{pinError}</div>}
-
-          {/* Keypad */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 20 }}>
-            {['1', '2', '3', '4', '5', '6', '7', '8', '9', '←', '0', '✓'].map(key => (
-              <button key={key} onClick={() => key === '✓' ? submitPin() : pinKeyPress(key)} style={{ height: 70, background: key === '✓' ? PRIMARY : key === '←' ? 'rgba(239,68,68,0.3)' : 'rgba(255,255,255,0.1)', border: `1px solid ${key === '✓' ? PRIMARY : 'rgba(255,255,255,0.15)'}`, borderRadius: 14, color: '#fff', fontSize: 22, fontWeight: 700, cursor: 'pointer' }}>
-                {key}
-              </button>
-            ))}
-          </div>
-
-          <div style={{ display: 'flex', gap: 10 }}>
-            <button onClick={() => { setMode('idle'); setPin(''); setPinError(''); }} style={{ flex: 1, padding: '12px', background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)', color: '#fff', borderRadius: 12, cursor: 'pointer', fontSize: 14, fontWeight: 600 }}>Back</button>
-            {faceApiLoaded && cameraReady && (
-              <button onClick={() => { setMode('idle'); startFaceScan(); }} style={{ flex: 1, padding: '12px', background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)', color: '#fff', borderRadius: 12, cursor: 'pointer', fontSize: 14, fontWeight: 600 }}>😊 Use Face</button>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* ─── SUCCESS MODE ─── */}
-      {mode === 'success' && result && (
-        <div style={{ position: 'relative' as const, zIndex: 1, textAlign: 'center' as const, maxWidth: 480, width: '100%' }}>
-          <div style={{ width: 120, height: 120, borderRadius: '50%', background: result.type === 'in' ? '#22c55e' : '#ef4444', margin: '0 auto 28px', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: `0 0 60px ${result.type === 'in' ? 'rgba(34,197,94,0.5)' : 'rgba(239,68,68,0.5)'}` }}>
-            <span style={{ fontSize: 60 }}>{result.type === 'in' ? '✅' : '👋'}</span>
-          </div>
-          <h1 style={{ color: '#fff', fontSize: 40, fontWeight: 900, margin: '0 0 8px' }}>
-            {result.type === 'in' ? 'Clocked In!' : 'Clocked Out!'}
-          </h1>
-          <p style={{ color: 'rgba(255,255,255,0.8)', fontSize: 22, fontWeight: 700, margin: '0 0 8px' }}>{result.employee.full_name}</p>
-          <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: 16, margin: '0 0 20px' }}>
-            {new Date(result.time).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })}
-          </p>
-          {result.late && result.type === 'in' && (
-            <div style={{ background: 'rgba(245,158,11,0.2)', border: '1px solid rgba(245,158,11,0.4)', borderRadius: 12, padding: '10px 20px', color: '#fbbf24', fontSize: 14, fontWeight: 700 }}>
-              ⚠️ Late Arrival
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ─── ENROLL MODE ─── */}
-      {mode === 'enrolling' && (
-        <div style={{ position: 'relative' as const, zIndex: 1, textAlign: 'center' as const, maxWidth: 520, width: '100%' }}>
-          <h2 style={{ color: '#fff', fontSize: 28, fontWeight: 800, margin: '0 0 8px' }}>Enroll Face</h2>
-          <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: 14, margin: '0 0 28px' }}>Register an employee&apos;s face for recognition</p>
-
-          {enrollStep === 'select' && (
-            <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: 20, padding: 24 }}>
-              <input placeholder="Search employee..." value={enrollSearch} onChange={e => setEnrollSearch(e.target.value)} style={{ width: '100%', padding: '12px 16px', borderRadius: 12, border: '1px solid rgba(255,255,255,0.2)', background: 'rgba(255,255,255,0.1)', color: '#fff', fontSize: 14, outline: 'none', marginBottom: 16, boxSizing: 'border-box' as const }} />
-              <div style={{ maxHeight: 280, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {filteredEnrollEmployees.map(emp => {
-                  const rc = ROLE_COLORS[emp.role] || { bg: '#f5f5f5', color: '#424242' };
-                  const hasFace = !!emp.face_descriptor;
-                  return (
-                    <div key={emp.id} onClick={() => setEnrollEmployee(emp)} style={{ display: 'flex', alignItems: 'center', gap: 12, background: enrollEmployee?.id === emp.id ? 'rgba(26,92,56,0.4)' : 'rgba(255,255,255,0.05)', borderRadius: 12, padding: '12px 16px', cursor: 'pointer', border: `1px solid ${enrollEmployee?.id === emp.id ? PRIMARY : 'rgba(255,255,255,0.1)'}` }}>
-                      <div style={{ width: 40, height: 40, borderRadius: '50%', background: rc.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 800, color: rc.color, flexShrink: 0 }}>{initials(emp.full_name)}</div>
-                      <div style={{ flex: 1, textAlign: 'left' as const }}>
-                        <div style={{ color: '#fff', fontWeight: 600, fontSize: 14 }}>{emp.full_name}</div>
-                        <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: 12 }}>{emp.role}</div>
-                      </div>
-                      {hasFace && <span style={{ fontSize: 11, color: '#4ade80', fontWeight: 700, padding: '2px 8px', background: 'rgba(74,222,128,0.2)', borderRadius: 20 }}>✓ Enrolled</span>}
-                    </div>
-                  );
-                })}
-              </div>
-              <div style={{ display: 'flex', gap: 10, marginTop: 20 }}>
-                <button onClick={() => { setMode('idle'); setEnrollEmployee(null); setEnrollSearch(''); }} style={{ flex: 1, padding: '12px', background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)', color: '#fff', borderRadius: 12, cursor: 'pointer', fontWeight: 600 }}>Cancel</button>
-                <button onClick={enrollFace} disabled={!enrollEmployee || !faceApiLoaded || !cameraReady} style={{ flex: 2, padding: '12px', background: enrollEmployee ? PRIMARY : 'rgba(255,255,255,0.1)', color: '#fff', border: 'none', borderRadius: 12, cursor: 'pointer', fontWeight: 700, fontSize: 15 }}>
-                  📸 Capture Face
-                </button>
-              </div>
-              {!faceApiLoaded && <div style={{ marginTop: 12, color: 'rgba(255,255,255,0.4)', fontSize: 12 }}>Face recognition models not loaded. Place models in /public/models/</div>}
-            </div>
-          )}
-
-          {enrollStep === 'capture' && (
-            <div>
-              <div style={{ fontSize: 48, marginBottom: 16 }}>📸</div>
-              <p style={{ color: 'rgba(255,255,255,0.7)', fontSize: 16 }}>Capturing face for {enrollEmployee?.full_name}...</p>
-              <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 13 }}>Please look directly at the camera</p>
-            </div>
-          )}
-
-          {enrollStep === 'done' && (
-            <div>
-              <div style={{ fontSize: 64, marginBottom: 16 }}>✅</div>
-              <h3 style={{ color: '#fff', fontSize: 24, fontWeight: 800, margin: '0 0 8px' }}>Face Enrolled!</h3>
-              <p style={{ color: 'rgba(255,255,255,0.6)', fontSize: 15 }}>{enrollEmployee?.full_name} can now clock in using face recognition</p>
-            </div>
-          )}
-        </div>
-      )}
+    <div style={{ position: 'fixed' as const, inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+      <div style={{ background: '#fff', borderRadius: 20, padding: 32, width: '100%', maxWidth: 500, maxHeight: '90vh', overflowY: 'auto' as const }}>{children}</div>
     </div>
   );
 }
 
-// Type for face-api.js loaded via CDN
-interface FaceApi {
-  nets: { tinyFaceDetector: { loadFromUri: (path: string) => Promise<void> }; faceLandmark68Net: { loadFromUri: (path: string) => Promise<void> }; faceRecognitionNet: { loadFromUri: (path: string) => Promise<void> }; };
-  TinyFaceDetectorOptions: new () => unknown;
-  LabeledFaceDescriptors: new (label: string, descriptors: Float32Array[]) => unknown;
-  FaceMatcher: new (descriptors: unknown[], threshold: number) => { findBestMatch: (descriptor: Float32Array) => { label: string; distance: number } };
-  detectSingleFace: (input: HTMLVideoElement, options: unknown) => { withFaceLandmarks: () => { withFaceDescriptor: () => Promise<{ descriptor: Float32Array } | null> } };
-}
+export default function AttendancePage() {
+  const router = useRouter();
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [todayRecords, setTodayRecords] = useState<AttendanceRecord[]>([]);
+  const [shifts, setShifts] = useState<Shift[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<'today' | 'history' | 'shifts'>('today');
+  const [historyRecords, setHistoryRecords] = useState<AttendanceRecord[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [selectedEmployee, setSelectedEmployee] = useState<string>('all');
+  const [saving, setSaving] = useState<string | null>(null);
+  const [showShiftModal, setShowShiftModal] = useState(false);
+  const [editShift, setEditShift] = useState<Shift | null>(null);
+  const [shiftForm, setShiftForm] = useState({ shift_name: '', day_type: 'weekday', start_time: '10:00', end_time: '15:00' });
+  const [shiftSaving, setShiftSaving] = useState(false);
+  const [showManualModal, setShowManualModal] = useState(false);
+  const [manualForm, setManualForm] = useState({ employee_id: '', clock_in: '', clock_out: '', is_late: false, notes: '' });
+  const [manualSaving, setManualSaving] = useState(false);
+  const today = new Date().toISOString().split('T')[0];
+
+  useEffect(() => { checkAuthAndLoad(); }, []);
+
+  async function checkAuthAndLoad() {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) { router.push('/login'); return; }
+    await Promise.all([loadEmployees(), loadTodayRecords(), loadShifts()]);
+    setLoading(false);
+  }
+
+  async function loadEmployees() {
+    const { data } = await supabase.from('employees').select('id, full_name, role, is_active').eq('store_id', STORE_ID).eq('is_active', true).order('full_name');
+    setEmployees(data || []);
+  }
+
+  async function loadTodayRecords() {
+    const { data } = await supabase.from('attendance').select('*').eq('store_id', STORE_ID).eq('work_date', today);
+    setTodayRecords(data || []);
+  }
+
+  async function loadShifts() {
+    const { data } = await supabase.from('store_shifts').select('*').eq('store_id', STORE_ID).order('day_type').order('start_time');
+    setShifts(data || []);
+  }
+
+  async function loadHistory() {
+    setHistoryLoading(true);
+    const thirtyDaysAgo = new Date(); thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    let query = supabase.from('attendance').select('*').eq('store_id', STORE_ID).gte('work_date', thirtyDaysAgo.toISOString().split('T')[0]).order('work_date', { ascending: false }).limit(200);
+    if (selectedEmployee !== 'all') query = query.eq('employee_id', selectedEmployee);
+    const { data } = await query;
+    setHistoryRecords(data || []);
+    setHistoryLoading(false);
+  }
+
+  useEffect(() => { if (activeTab === 'history') loadHistory(); }, [activeTab, selectedEmployee]);
+
+  async function clockIn(employeeId: string) {
+    setSaving(employeeId);
+    const now = new Date().toISOString();
+    const dayType = todayDayType();
+    const currentTime = now.substring(11, 16);
+    const todayShifts = shifts.filter(s => s.day_type === dayType && s.is_active);
+    const late = todayShifts.length > 0 && todayShifts.every(s => currentTime > s.start_time);
+    await supabase.from('attendance').insert({ employee_id: employeeId, store_id: STORE_ID, work_date: today, clock_in: now, is_late: late });
+    await loadTodayRecords();
+    setSaving(null);
+  }
+
+  async function clockOut(recordId: string, clockInTime: string) {
+    setSaving(recordId);
+    const now = new Date().toISOString();
+    const hours = (new Date(now).getTime() - new Date(clockInTime).getTime()) / (1000 * 60 * 60);
+    await supabase.from('attendance').update({ clock_out: now, hours_worked: hours }).eq('id', recordId);
+    await loadTodayRecords();
+    setSaving(null);
+  }
+
+  async function saveShift() {
+    if (!shiftForm.shift_name.trim()) return;
+    setShiftSaving(true);
+    const payload = { store_id: STORE_ID, shift_name: shiftForm.shift_name, day_type: shiftForm.day_type, start_time: shiftForm.start_time, end_time: shiftForm.end_time, is_active: true };
+    if (editShift) { await supabase.from('store_shifts').update(payload).eq('id', editShift.id); }
+    else { await supabase.from('store_shifts').insert(payload); }
+    await loadShifts();
+    setShowShiftModal(false); setEditShift(null); setShiftForm({ shift_name: '', day_type: 'weekday', start_time: '10:00', end_time: '15:00' });
+    setShiftSaving(false);
+  }
+
+  async function deleteShift(id: string) { await supabase.from('store_shifts').delete().eq('id', id); await loadShifts(); }
+
+  async function saveManual() {
+    if (!manualForm.employee_id || !manualForm.clock_in) return;
+    setManualSaving(true);
+    const clockInTime = `${today}T${manualForm.clock_in}:00`;
+    const clockOutTime = manualForm.clock_out ? `${today}T${manualForm.clock_out}:00` : null;
+    const hours = clockOutTime ? (new Date(clockOutTime).getTime() - new Date(clockInTime).getTime()) / (1000 * 60 * 60) : null;
+    await supabase.from('attendance').insert({ employee_id: manualForm.employee_id, store_id: STORE_ID, work_date: today, clock_in: clockInTime, clock_out: clockOutTime, hours_worked: hours, is_late: manualForm.is_late, notes: manualForm.notes || null });
+    await loadTodayRecords();
+    setShowManualModal(false); setManualForm({ employee_id: '', clock_in: '', clock_out: '', is_late: false, notes: '' });
+    setManualSaving(false);
+  }
+
+  const inp = { width: '100%', padding: '10px 14px', borderRadius: 10, border: '1.5px solid #eef2ee', fontSize: 14, outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box' as const };
+  const lbl = { display: 'block' as const, fontSize: 13, fontWeight: 600 as const, color: '#555', marginBottom: 6 };
+  const onShiftNow = todayRecords.filter(r => r.clock_in && !r.clock_out).length;
+  const completedToday = todayRecords.filter(r => r.clock_in && r.clock_out).length;
+  const lateToday = todayRecords.filter(r => r.is_late).length;
+  const notClockedIn = employees.filter(e => !todayRecords.find(r => r.employee_id === e.id)).length;
+  const currentShift = shifts.find(s => { const d = todayDayType(); const now = `${String(new Date().getHours()).padStart(2,'0')}:${String(new Date().getMinutes()).padStart(2,'0')}`; return s.day_type === d && s.is_active && now >= s.start_time && now < s.end_time; });
+  const historyByDate = historyRecords.reduce<Record<string, AttendanceRecord[]>>((acc, r) => { if (!acc[r.work_date]) acc[r.work_date] = []; acc[r.work_date].push(r); return acc; }, {});
+  const getEmpName = (id: string) => employees.find(e => e.id === id)?.full_name || 'Unknown';
+  const getEmpRole = (id: string) => employees.find(e => e.id === id)?.role || '';
+  const DAY_LABELS: Record<string, string> = { weekday: 'Weekdays', saturday: 'Saturday', sunday: 'Sunday' };
+
+  return (
+    <div style={{ minHeight: '100vh', background: '#f8faf8', fontFamily: 'system-ui, sans-serif' }}>
+      {showShiftModal && (
+        <ModalWrap onClose={() => { setShowShiftModal(false); setEditShift(null); }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+            <div style={{ fontSize: 18, fontWeight: 700 }}>{editShift ? 'Edit Shift' : 'Add Shift'}</div>
+            <button onClick={() => { setShowShiftModal(false); setEditShift(null); }} style={{ background: '#f0f4f0', border: 'none', borderRadius: 8, padding: '6px 14px', cursor: 'pointer' }}>Cancel</button>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div><label style={lbl}>Shift Name *</label><input value={shiftForm.shift_name} onChange={e => setShiftForm(p => ({ ...p, shift_name: e.target.value }))} placeholder="e.g. Morning Shift" style={inp} /></div>
+            <div><label style={lbl}>Day Type</label><select value={shiftForm.day_type} onChange={e => setShiftForm(p => ({ ...p, day_type: e.target.value }))} style={inp}><option value="weekday">Weekdays</option><option value="saturday">Saturday</option><option value="sunday">Sunday</option></select></div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div><label style={lbl}>Start</label><input type="time" value={shiftForm.start_time} onChange={e => setShiftForm(p => ({ ...p, start_time: e.target.value }))} style={inp} /></div>
+              <div><label style={lbl}>End</label><input type="time" value={shiftForm.end_time} onChange={e => setShiftForm(p => ({ ...p, end_time: e.target.value }))} style={inp} /></div>
+            </div>
+          </div>
+          <button onClick={saveShift} disabled={shiftSaving || !shiftForm.shift_name.trim()} style={{ width: '100%', marginTop: 20, padding: '13px', background: PRIMARY, color: '#fff', border: 'none', borderRadius: 12, fontWeight: 700, cursor: 'pointer', fontSize: 15 }}>{shiftSaving ? 'Saving...' : editShift ? 'Save Changes' : 'Add Shift'}</button>
+        </ModalWrap>
+      )}
+      {showManualModal && (
+        <ModalWrap onClose={() => setShowManualModal(false)}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+            <div style={{ fontSize: 18, fontWeight: 700 }}>Manual Clock Entry</div>
+            <button onClick={() => setShowManualModal(false)} style={{ background: '#f0f4f0', border: 'none', borderRadius: 8, padding: '6px 14px', cursor: 'pointer' }}>Cancel</button>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div><label style={lbl}>Employee *</label><select value={manualForm.employee_id} onChange={e => setManualForm(p => ({ ...p, employee_id: e.target.value }))} style={inp}><option value="">— Select —</option>{employees.map(e => <option key={e.id} value={e.id}>{e.full_name}</option>)}</select></div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div><label style={lbl}>Clock In *</label><input type="time" value={manualForm.clock_in} onChange={e => setManualForm(p => ({ ...p, clock_in: e.target.value }))} style={inp} /></div>
+              <div><label style={lbl}>Clock Out</label><input type="time" value={manualForm.clock_out} onChange={e => setManualForm(p => ({ ...p, clock_out: e.target.value }))} style={inp} /></div>
+            </div>
+            <div><label style={lbl}>Notes</label><textarea value={manualForm.notes} onChange={e => setManualForm(p => ({ ...p, notes: e.target.value }))} rows={2} style={{ ...inp, resize: 'vertical' as const }} /></div>
+          </div>
+          <button onClick={saveManual} disabled={manualSaving || !manualForm.employee_id || !manualForm.clock_in} style={{ width: '100%', marginTop: 20, padding: '13px', background: PRIMARY, color: '#fff', border: 'none', borderRadius: 12, fontWeight: 700, cursor: 'pointer', fontSize: 15 }}>{manualSaving ? 'Saving...' : 'Save Entry'}</button>
+        </ModalWrap>
+      )}
+
+      {/* Header */}
+      <div style={{ background: `linear-gradient(135deg, ${DARK}, ${PRIMARY})`, padding: '0 32px' }}>
+        <div style={{ maxWidth: 1200, margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 64 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <button onClick={() => router.push('/dashboard')} style={{ background: 'rgba(255,255,255,0.15)', border: 'none', color: '#fff', borderRadius: 8, padding: '6px 14px', cursor: 'pointer', fontSize: 14 }}>← Back</button>
+            <span style={{ color: '#fff', fontWeight: 700, fontSize: 18 }}>Time & Attendance</span>
+          </div>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button onClick={() => window.open('/attendance/clock', '_blank')} style={{ background: '#fff', color: PRIMARY, border: 'none', borderRadius: 10, padding: '8px 18px', fontWeight: 700, cursor: 'pointer', fontSize: 13 }}>🎭 Open Kiosk</button>
+            <button onClick={() => setShowManualModal(true)} style={{ background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.3)', color: '#fff', borderRadius: 10, padding: '8px 16px', fontWeight: 600, cursor: 'pointer', fontSize: 13 }}>+ Manual Entry</button>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ maxWidth: 1200, margin: '0 auto', padding: '32px 24px' }}>
+        {loading && <div style={{ textAlign: 'center', padding: 80, color: '#666' }}>Loading...</div>}
+        {!loading && (
+          <div>
+            {currentShift && (
+              <div style={{ background: `linear-gradient(135deg, ${DARK}, ${PRIMARY})`, borderRadius: 16, padding: '16px 24px', marginBottom: 24, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div><div style={{ color: 'rgba(255,255,255,0.7)', fontSize: 12, fontWeight: 600, marginBottom: 4 }}>CURRENT SHIFT</div><div style={{ color: '#fff', fontWeight: 800, fontSize: 20 }}>{currentShift.shift_name}</div><div style={{ color: 'rgba(255,255,255,0.7)', fontSize: 13, marginTop: 2 }}>{currentShift.start_time} — {currentShift.end_time}</div></div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><div style={{ width: 10, height: 10, borderRadius: '50%', background: '#4ade80' }} /><span style={{ color: '#fff', fontWeight: 600, fontSize: 14 }}>Active</span></div>
+              </div>
+            )}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 32 }}>
+              {[{ label: 'ON SHIFT', value: onShiftNow, color: PRIMARY }, { label: 'COMPLETED', value: completedToday, color: '#1565c0' }, { label: 'LATE', value: lateToday, color: '#f57f17' }, { label: 'NOT IN', value: notClockedIn, color: notClockedIn > 0 ? '#ef4444' : PRIMARY }].map(item => (
+                <div key={item.label} style={{ background: '#fff', borderRadius: 20, padding: 24, border: '1px solid #eef2ee', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
+                  <div style={{ fontSize: 12, color: '#888', fontWeight: 600, marginBottom: 8 }}>{item.label}</div>
+                  <div style={{ fontSize: 40, fontWeight: 800, color: item.color }}>{item.value}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{ display: 'flex', gap: 4, background: '#fff', padding: 4, borderRadius: 14, border: '1px solid #eef2ee', marginBottom: 24, width: 'fit-content' }}>
+              {[{ key: 'today', label: '📅 Today' }, { key: 'history', label: '📊 History' }, { key: 'shifts', label: '⚙️ Shifts' }].map(tab => (
+                <button key={tab.key} onClick={() => setActiveTab(tab.key as typeof activeTab)} style={{ padding: '8px 20px', borderRadius: 10, border: 'none', cursor: 'pointer', fontWeight: 600, fontSize: 13, background: activeTab === tab.key ? PRIMARY : 'transparent', color: activeTab === tab.key ? '#fff' : '#666' }}>{tab.label}</button>
+              ))}
+            </div>
+
+            {activeTab === 'today' && (
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                  <h2 style={{ fontSize: 18, fontWeight: 700, color: '#333', margin: 0 }}>{new Date().toLocaleDateString('en-ZA', { weekday: 'long', day: 'numeric', month: 'long' })}</h2>
+                  <span style={{ fontSize: 13, color: '#aaa' }}>{employees.length} active employees</span>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 16 }}>
+                  {employees.map(emp => {
+                    const record = todayRecords.find(r => r.employee_id === emp.id);
+                    const rc = ROLE_COLORS[emp.role] || { bg: '#f5f5f5', color: '#424242' };
+                    const isOnShift = record?.clock_in && !record?.clock_out;
+                    const isDone = record?.clock_in && record?.clock_out;
+                    const isSaving = saving === emp.id || saving === record?.id;
+                    return (
+                      <div key={emp.id} style={{ background: '#fff', borderRadius: 16, border: `1.5px solid ${isOnShift ? '#bbf7d0' : '#eef2ee'}`, padding: 20, boxShadow: '0 2px 6px rgba(0,0,0,0.04)' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 16 }}>
+                          <div style={{ width: 48, height: 48, borderRadius: '50%', background: rc.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, fontWeight: 800, color: rc.color, flexShrink: 0, position: 'relative' as const }}>
+                            {initials(emp.full_name)}
+                            {isOnShift && <div style={{ position: 'absolute' as const, bottom: 0, right: 0, width: 12, height: 12, borderRadius: '50%', background: '#22c55e', border: '2px solid #fff' }} />}
+                          </div>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontWeight: 700, color: '#333', fontSize: 15 }}>{emp.full_name}</div>
+                            <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: rc.bg, color: rc.color }}>{emp.role}</span>
+                          </div>
+                          {record?.is_late && <span style={{ fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 20, background: '#fff8e1', color: '#f59e0b' }}>LATE</span>}
+                          {isDone && <span style={{ fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 20, background: '#f0f4f0', color: '#666' }}>DONE</span>}
+                        </div>
+                        {record ? (
+                          <div>
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>
+                              <div style={{ background: '#f0f7f4', borderRadius: 10, padding: '8px 12px' }}><div style={{ fontSize: 10, color: '#888', fontWeight: 600 }}>IN</div><div style={{ fontWeight: 700, color: PRIMARY }}>{record.clock_in ? new Date(record.clock_in).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : '—'}</div></div>
+                              <div style={{ background: '#f8faf8', borderRadius: 10, padding: '8px 12px' }}><div style={{ fontSize: 10, color: '#888', fontWeight: 600 }}>OUT</div><div style={{ fontWeight: 700, color: record.clock_out ? '#333' : '#ccc' }}>{record.clock_out ? new Date(record.clock_out).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : '—'}</div></div>
+                            </div>
+                            {record.hours_worked && <div style={{ textAlign: 'center' as const, fontSize: 13, color: '#888', marginBottom: 12 }}>⏱ <strong style={{ color: PRIMARY }}>{record.hours_worked.toFixed(1)}h</strong></div>}
+                            {!record.clock_out && <button onClick={() => clockOut(record.id, record.clock_in!)} disabled={isSaving} style={{ width: '100%', padding: '10px', background: DARK, color: '#fff', border: 'none', borderRadius: 10, fontWeight: 700, cursor: 'pointer' }}>{isSaving ? 'Saving...' : '🔴 Clock Out'}</button>}
+                          </div>
+                        ) : (
+                          <button onClick={() => clockIn(emp.id)} disabled={isSaving} style={{ width: '100%', padding: '10px', background: PRIMARY, color: '#fff', border: 'none', borderRadius: 10, fontWeight: 700, cursor: 'pointer' }}>{isSaving ? 'Saving...' : '🟢 Clock In'}</button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'history' && (
+              <div>
+                <div style={{ display: 'flex', gap: 12, marginBottom: 24 }}>
+                  <select value={selectedEmployee} onChange={e => setSelectedEmployee(e.target.value)} style={{ padding: '10px 14px', borderRadius: 10, border: '1.5px solid #eef2ee', fontSize: 14, outline: 'none', background: '#fff', cursor: 'pointer' }}>
+                    <option value="all">All Employees</option>
+                    {employees.map(e => <option key={e.id} value={e.id}>{e.full_name}</option>)}
+                  </select>
+                  <span style={{ fontSize: 13, color: '#aaa', alignSelf: 'center' }}>Last 30 days</span>
+                </div>
+                {historyLoading && <div style={{ textAlign: 'center', padding: 40, color: '#666' }}>Loading...</div>}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                  {Object.entries(historyByDate).map(([date, records]) => (
+                    <div key={date} style={{ background: '#fff', borderRadius: 16, border: '1px solid #eef2ee', overflow: 'hidden' }}>
+                      <div style={{ padding: '12px 20px', background: date === today ? '#f0f7f4' : '#f8faf8', display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #eef2ee' }}>
+                        <span style={{ fontWeight: 700, color: date === today ? PRIMARY : '#333', fontSize: 14 }}>{date === today ? 'Today' : new Date(date).toLocaleDateString('en-ZA', { weekday: 'long', day: 'numeric', month: 'long' })}</span>
+                        <span style={{ fontSize: 12, color: '#888' }}>{records.length} staff · {records.reduce((s, r) => s + (r.hours_worked || 0), 0).toFixed(1)}h</span>
+                      </div>
+                      {records.map((r, i) => {
+                        const rc = ROLE_COLORS[getEmpRole(r.employee_id)] || { bg: '#f5f5f5', color: '#424242' };
+                        return (
+                          <div key={r.id} style={{ padding: '12px 20px', display: 'flex', alignItems: 'center', gap: 14, borderBottom: i < records.length - 1 ? '1px solid #f5f5f5' : 'none' }}>
+                            <div style={{ width: 36, height: 36, borderRadius: '50%', background: rc.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 800, color: rc.color, flexShrink: 0 }}>{initials(getEmpName(r.employee_id))}</div>
+                            <div style={{ flex: 1 }}><div style={{ fontWeight: 600, color: '#333', fontSize: 14 }}>{getEmpName(r.employee_id)}</div><div style={{ fontSize: 12, color: '#888' }}>{r.clock_in ? new Date(r.clock_in).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : '—'} → {r.clock_out ? new Date(r.clock_out).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : 'On shift'}</div></div>
+                            <div style={{ textAlign: 'right' as const }}>{r.hours_worked && <div style={{ fontWeight: 700, color: PRIMARY }}>{r.hours_worked.toFixed(1)}h</div>}{r.is_late && <div style={{ fontSize: 10, fontWeight: 700, color: '#f59e0b' }}>LATE</div>}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'shifts' && (
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                  <h2 style={{ fontSize: 18, fontWeight: 700, color: '#333', margin: 0 }}>Shift Configuration</h2>
+                  <button onClick={() => { setEditShift(null); setShiftForm({ shift_name: '', day_type: 'weekday', start_time: '10:00', end_time: '15:00' }); setShowShiftModal(true); }} style={{ padding: '8px 20px', background: PRIMARY, color: '#fff', border: 'none', borderRadius: 10, fontWeight: 700, cursor: 'pointer' }}>+ Add Shift</button>
+                </div>
+                {(['weekday', 'saturday', 'sunday'] as const).map(dayType => (
+                  <div key={dayType} style={{ marginBottom: 24 }}>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: '#333', marginBottom: 12 }}>{DAY_LABELS[dayType]}</div>
+                    {shifts.filter(s => s.day_type === dayType).length === 0 ? (
+                      <div style={{ padding: 20, background: '#fff', borderRadius: 12, border: '1px dashed #eef2ee', textAlign: 'center' as const, color: '#ccc', fontSize: 13 }}>No shifts configured</div>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                        {shifts.filter(s => s.day_type === dayType).map(shift => (
+                          <div key={shift.id} style={{ background: '#fff', borderRadius: 14, padding: '16px 20px', border: '1px solid #eef2ee', display: 'flex', alignItems: 'center', gap: 16 }}>
+                            <div style={{ width: 48, height: 48, borderRadius: 12, background: '#f0f7f4', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>⏰</div>
+                            <div style={{ flex: 1 }}><div style={{ fontWeight: 700, color: '#333' }}>{shift.shift_name}</div><div style={{ fontSize: 13, color: PRIMARY, fontWeight: 600 }}>{shift.start_time} — {shift.end_time}</div></div>
+                            <div style={{ display: 'flex', gap: 8 }}>
+                              <button onClick={() => { setEditShift(shift); setShiftForm({ shift_name: shift.shift_name, day_type: shift.day_type, start_time: shift.start_time, end_time: shift.end_time }); setShowShiftModal(true); }} style={{ padding: '6px 14px', background: '#f0f4f0', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 600, fontSize: 13 }}>Edit</button>
+                              <button onClick={() => deleteShift(shift.id)} style={{ padding: '6px 14px', background: '#fdecea', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 600, fontSize: 13, color: '#ef4444' }}>Delete</button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+                                              }
