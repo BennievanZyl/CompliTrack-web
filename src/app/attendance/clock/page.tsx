@@ -23,7 +23,7 @@ interface FaceApiType {
     faceLandmark68Net: { loadFromUri: (path: string) => Promise<void> };
     faceRecognitionNet: { loadFromUri: (path: string) => Promise<void> };
   };
-  TinyFaceDetectorOptions: new () => unknown;
+  TinyFaceDetectorOptions: new (opts?: { inputSize?: number; scoreThreshold?: number }) => unknown;
   LabeledFaceDescriptors: new (label: string, descriptors: Float32Array[]) => unknown;
   FaceMatcher: new (descriptors: unknown[], threshold: number) => { findBestMatch: (descriptor: Float32Array) => { label: string; distance: number } };
   detectSingleFace: (input: HTMLVideoElement, options: unknown) => { withFaceLandmarks: () => { withFaceDescriptor: () => Promise<{ descriptor: Float32Array } | null> } };
@@ -49,6 +49,7 @@ const ROLE_COLORS: Record<string, { bg: string; color: string }> = {
 export default function ClockKioskPage() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const previewRef = useRef<HTMLVideoElement>(null);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [todayRecords, setTodayRecords] = useState<AttendanceRecord[]>([]);
   const [shifts, setShifts] = useState<{ start_time: string; end_time: string; day_type: string }[]>([]);
@@ -64,8 +65,10 @@ export default function ClockKioskPage() {
   const [enrollStep, setEnrollStep] = useState<'select' | 'capture' | 'done'>('select');
   const [enrollSearch, setEnrollSearch] = useState('');
   const [enrollError, setEnrollError] = useState('');
+  const [faceDetected, setFaceDetected] = useState(false);
   const scanningRef = useRef(false);
   const resultTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const faceCheckRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const today = new Date().toISOString().split('T')[0];
 
   useEffect(() => {
@@ -75,8 +78,34 @@ export default function ClockKioskPage() {
     return () => {
       stopCamera();
       if (resultTimerRef.current) clearTimeout(resultTimerRef.current);
+      if (faceCheckRef.current) clearInterval(faceCheckRef.current);
     };
   }, []);
+
+  // Mirror video stream to preview element
+  useEffect(() => {
+    if (previewRef.current && videoRef.current?.srcObject) {
+      previewRef.current.srcObject = videoRef.current.srcObject;
+    }
+  }, [cameraReady, mode]);
+
+  // Live face detection indicator
+  useEffect(() => {
+    if (mode === 'enrolling' && enrollStep === 'select' && faceApiLoaded && cameraReady) {
+      faceCheckRef.current = setInterval(async () => {
+        const fa = getFaceApi();
+        if (!fa || !videoRef.current) return;
+        try {
+          const det = await fa.detectSingleFace(videoRef.current, new fa.TinyFaceDetectorOptions({ inputSize: 160, scoreThreshold: 0.3 })).withFaceLandmarks().withFaceDescriptor();
+          setFaceDetected(!!det);
+        } catch { setFaceDetected(false); }
+      }, 800);
+    } else {
+      if (faceCheckRef.current) { clearInterval(faceCheckRef.current); faceCheckRef.current = null; }
+      setFaceDetected(false);
+    }
+    return () => { if (faceCheckRef.current) clearInterval(faceCheckRef.current); };
+  }, [mode, enrollStep, faceApiLoaded, cameraReady]);
 
   async function loadData() {
     const [empRes, recRes, shiftRes] = await Promise.all([
@@ -108,24 +137,27 @@ export default function ClockKioskPage() {
         attempts++;
       }
       const fa = getFaceApi();
-      if (!fa) throw new Error('faceapi not available on window after 45s');
+      if (!fa) throw new Error('faceapi not available');
       await Promise.all([
         fa.nets.tinyFaceDetector.loadFromUri('/models'),
         fa.nets.faceLandmark68Net.loadFromUri('/models'),
         fa.nets.faceRecognitionNet.loadFromUri('/models'),
       ]);
       setFaceApiLoaded(true);
-      console.log('Face API models loaded successfully');
-    } catch (e) {
-      console.error('Face API failed:', e);
-    }
+    } catch (e) { console.error('Face API failed:', e); }
     setLoadingModels(false);
   }
 
   async function startCamera() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480, facingMode: 'user' } });
-      if (videoRef.current) { videoRef.current.srcObject = stream; setCameraReady(true); }
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.onloadedmetadata = () => {
+          if (previewRef.current) previewRef.current.srcObject = stream;
+          setCameraReady(true);
+        };
+      }
     } catch (e) { console.error('Camera error:', e); setCameraReady(false); }
   }
 
@@ -139,7 +171,7 @@ export default function ClockKioskPage() {
   function isLate(): boolean {
     const day = new Date().getDay();
     const dayType = day === 6 ? 'saturday' : day === 0 ? 'sunday' : 'weekday';
-    const now = `${String(new Date().getHours()).padStart(2, '0')}:${String(new Date().getMinutes()).padStart(2, '0')}`;
+    const now = `${String(new Date().getHours()).padStart(2,'0')}:${String(new Date().getMinutes()).padStart(2,'0')}`;
     const todayShifts = shifts.filter(s => s.day_type === dayType);
     if (!todayShifts.length) return false;
     return todayShifts.every(s => now > s.start_time);
@@ -171,19 +203,18 @@ export default function ClockKioskPage() {
     const employeesWithFaces = employees.filter(e => e.face_descriptor);
     if (!employeesWithFaces.length) { setMode('idle'); setErrorMsg('No faces enrolled yet. Use PIN or enroll faces first.'); return; }
     let attempts = 0;
-    const maxAttempts = 30;
     const scan = async () => {
-      if (!scanningRef.current || attempts >= maxAttempts) {
-        if (attempts >= maxAttempts) { setMode('pin'); setErrorMsg('Face not recognised. Please use your PIN.'); }
+      if (!scanningRef.current || attempts >= 30) {
+        if (attempts >= 30) { setMode('pin'); setErrorMsg('Face not recognised. Please use your PIN.'); }
         return;
       }
       attempts++;
       try {
         if (!videoRef.current) return;
-        const detection = await fa.detectSingleFace(videoRef.current, new fa.TinyFaceDetectorOptions()).withFaceLandmarks().withFaceDescriptor();
+        const detection = await fa.detectSingleFace(videoRef.current, new fa.TinyFaceDetectorOptions({ inputSize: 160, scoreThreshold: 0.3 })).withFaceLandmarks().withFaceDescriptor();
         if (detection) {
           const labeledDescriptors = employeesWithFaces.map(e => new fa.LabeledFaceDescriptors(e.id, [new Float32Array(e.face_descriptor!)]));
-          const faceMatcher = new fa.FaceMatcher(labeledDescriptors, 0.5);
+          const faceMatcher = new fa.FaceMatcher(labeledDescriptors, 0.6);
           const match = faceMatcher.findBestMatch(detection.descriptor);
           if (match.label !== 'unknown') {
             const matched = employees.find(e => e.id === match.label);
@@ -209,14 +240,20 @@ export default function ClockKioskPage() {
     setEnrollError('');
     if (!enrollEmployee) { setEnrollError('Please select an employee first.'); return; }
     if (!cameraReady) { setEnrollError('Camera not available.'); return; }
-    if (!faceApiLoaded) { setEnrollError('Face recognition still loading, please wait.'); return; }
+    if (!faceApiLoaded) { setEnrollError('Face recognition still loading.'); return; }
     const fa = getFaceApi();
     if (!fa) { setEnrollError('Face API not loaded.'); return; }
     setEnrollStep('capture');
     try {
       if (!videoRef.current) { setEnrollError('Camera not ready.'); setEnrollStep('select'); return; }
-      const detection = await fa.detectSingleFace(videoRef.current, new fa.TinyFaceDetectorOptions()).withFaceLandmarks().withFaceDescriptor();
-      if (!detection) { setEnrollError('No face detected. Please look directly at the camera.'); setEnrollStep('select'); return; }
+      // Try multiple times with lower threshold for enrollment
+      let detection = null;
+      for (let i = 0; i < 5; i++) {
+        detection = await fa.detectSingleFace(videoRef.current, new fa.TinyFaceDetectorOptions({ inputSize: 160, scoreThreshold: 0.3 })).withFaceLandmarks().withFaceDescriptor();
+        if (detection) break;
+        await new Promise(r => setTimeout(r, 500));
+      }
+      if (!detection) { setEnrollError('No face detected after 5 attempts. Ensure good lighting and look directly at camera.'); setEnrollStep('select'); return; }
       const descriptor = Array.from(detection.descriptor);
       await supabase.from('employees').update({ face_descriptor: descriptor }).eq('id', enrollEmployee.id);
       await loadData();
@@ -256,26 +293,19 @@ export default function ClockKioskPage() {
       </div>
       <video ref={videoRef} autoPlay muted playsInline style={{ position: 'fixed' as const, top: 0, left: 0, width: '100%', height: '100%', objectFit: 'cover', opacity: 0.15, zIndex: 0 }} />
       <canvas ref={canvasRef} style={{ display: 'none' }} />
+
       {mode === 'idle' && (
         <div style={{ position: 'relative' as const, zIndex: 1, textAlign: 'center' as const, maxWidth: 480, width: '100%' }}>
           <div style={{ fontSize: 80, marginBottom: 20 }}>🕐</div>
           <h1 style={{ color: '#fff', fontSize: 36, fontWeight: 900, margin: '0 0 8px', letterSpacing: -1 }}>Clock In / Out</h1>
           <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: 16, margin: '0 0 40px' }}>Choose how to clock in</p>
-          {errorMsg && (<div style={{ background: 'rgba(239,68,68,0.2)', border: '1px solid rgba(239,68,68,0.4)', borderRadius: 12, padding: '12px 20px', marginBottom: 24, color: '#fca5a5', fontSize: 14, fontWeight: 600 }}>{errorMsg}<button onClick={() => setErrorMsg('')} style={{ marginLeft: 12, background: 'none', border: 'none', color: '#fca5a5', cursor: 'pointer', fontSize: 16 }}>X</button></div>)}
+          {errorMsg && (<div style={{ background: 'rgba(239,68,68,0.2)', border: '1px solid rgba(239,68,68,0.4)', borderRadius: 12, padding: '12px 20px', marginBottom: 24, color: '#fca5a5', fontSize: 14, fontWeight: 600 }}>{errorMsg}<button onClick={() => setErrorMsg('')} style={{ marginLeft: 12, background: 'none', border: 'none', color: '#fca5a5', cursor: 'pointer', fontSize: 16 }}>✕</button></div>)}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             {faceApiLoaded && cameraReady && (<button onClick={startFaceScan} style={{ width: '100%', padding: '18px', background: PRIMARY, color: '#fff', border: 'none', borderRadius: 16, fontWeight: 800, cursor: 'pointer', fontSize: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12 }}><span style={{ fontSize: 28 }}>😊</span> Face Recognition</button>)}
             <button onClick={() => { setMode('pin'); setPin(''); setPinError(''); setErrorMsg(''); }} style={{ width: '100%', padding: '18px', background: 'rgba(255,255,255,0.1)', color: '#fff', border: '2px solid rgba(255,255,255,0.2)', borderRadius: 16, fontWeight: 700, cursor: 'pointer', fontSize: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12 }}><span style={{ fontSize: 28 }}>🔢</span> Enter PIN</button>
           </div>
           <div style={{ marginTop: 20, fontSize: 13 }}>
-            {loadingModels && (
-              <div>
-                <span style={{ color: 'rgba(255,255,255,0.5)' }}>⏳ Loading face recognition... please wait</span>
-                <div style={{ width: '100%', height: 4, background: 'rgba(255,255,255,0.1)', borderRadius: 2, marginTop: 8 }}>
-                  <div style={{ height: '100%', background: PRIMARY, borderRadius: 2, animation: 'loadbar 2s ease-in-out infinite alternate', width: '60%' }} />
-                </div>
-                <style>{`@keyframes loadbar{from{width:10%}to{width:90%}}`}</style>
-              </div>
-            )}
+            {loadingModels && (<div><span style={{ color: 'rgba(255,255,255,0.5)' }}>⏳ Loading face recognition...</span><div style={{ width: '100%', height: 4, background: 'rgba(255,255,255,0.1)', borderRadius: 2, marginTop: 8 }}><div style={{ height: '100%', background: PRIMARY, borderRadius: 2, animation: 'loadbar 2s ease-in-out infinite alternate', width: '60%' }} /></div><style>{`@keyframes loadbar{from{width:10%}to{width:90%}}`}</style></div>)}
             {!loadingModels && faceApiLoaded && <span style={{ color: 'rgba(74,222,128,0.7)' }}>✅ Face recognition ready</span>}
             {!loadingModels && !faceApiLoaded && <span style={{ color: 'rgba(255,255,255,0.3)' }}>PIN mode only</span>}
           </div>
@@ -294,6 +324,7 @@ export default function ClockKioskPage() {
           )}
         </div>
       )}
+
       {mode === 'scanning' && (
         <div style={{ position: 'relative' as const, zIndex: 1, textAlign: 'center' as const, maxWidth: 480, width: '100%' }}>
           <div style={{ width: 200, height: 200, borderRadius: '50%', border: '4px solid #4ade80', margin: '0 auto 32px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><div style={{ width: 180, height: 180, borderRadius: '50%', border: '2px solid rgba(74,222,128,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><span style={{ fontSize: 64 }}>😊</span></div></div>
@@ -302,6 +333,7 @@ export default function ClockKioskPage() {
           <button onClick={cancelScan} style={{ background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)', color: '#fff', borderRadius: 12, padding: '12px 28px', cursor: 'pointer', fontSize: 15, fontWeight: 600 }}>Use PIN instead</button>
         </div>
       )}
+
       {mode === 'pin' && (
         <div style={{ position: 'relative' as const, zIndex: 1, textAlign: 'center' as const, maxWidth: 360, width: '100%' }}>
           <h2 style={{ color: '#fff', fontSize: 28, fontWeight: 800, margin: '0 0 8px' }}>Enter Your PIN</h2>
@@ -317,6 +349,7 @@ export default function ClockKioskPage() {
           </div>
         </div>
       )}
+
       {mode === 'success' && result && (
         <div style={{ position: 'relative' as const, zIndex: 1, textAlign: 'center' as const, maxWidth: 480, width: '100%' }}>
           <div style={{ width: 120, height: 120, borderRadius: '50%', background: result.type === 'in' ? '#22c55e' : '#ef4444', margin: '0 auto 28px', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: `0 0 60px ${result.type === 'in' ? 'rgba(34,197,94,0.5)' : 'rgba(239,68,68,0.5)'}` }}><span style={{ fontSize: 60 }}>{result.type === 'in' ? '✅' : '👋'}</span></div>
@@ -326,37 +359,70 @@ export default function ClockKioskPage() {
           {result.late && result.type === 'in' && (<div style={{ background: 'rgba(245,158,11,0.2)', border: '1px solid rgba(245,158,11,0.4)', borderRadius: 12, padding: '10px 20px', color: '#fbbf24', fontSize: 14, fontWeight: 700 }}>Late Arrival</div>)}
         </div>
       )}
+
       {mode === 'enrolling' && (
-        <div style={{ position: 'relative' as const, zIndex: 1, textAlign: 'center' as const, maxWidth: 520, width: '100%' }}>
-          <h2 style={{ color: '#fff', fontSize: 28, fontWeight: 800, margin: '0 0 8px' }}>Enroll Face</h2>
-          <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: 14, margin: '0 0 28px' }}>Register an employee face for recognition</p>
-          {enrollStep === 'select' && (
-            <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: 20, padding: 24 }}>
-              <input placeholder="Search employee..." value={enrollSearch} onChange={e => setEnrollSearch(e.target.value)} style={{ width: '100%', padding: '12px 16px', borderRadius: 12, border: '1px solid rgba(255,255,255,0.2)', background: 'rgba(255,255,255,0.1)', color: '#fff', fontSize: 14, outline: 'none', marginBottom: 16, boxSizing: 'border-box' as const }} />
-              <div style={{ maxHeight: 280, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
-                {filteredEnrollEmployees.map(emp => {
-                  const rc = ROLE_COLORS[emp.role] || { bg: '#f5f5f5', color: '#424242' };
-                  const hasFace = !!emp.face_descriptor;
-                  return (<div key={emp.id} onClick={() => setEnrollEmployee(emp)} style={{ display: 'flex', alignItems: 'center', gap: 12, background: enrollEmployee?.id === emp.id ? 'rgba(26,92,56,0.5)' : 'rgba(255,255,255,0.05)', borderRadius: 12, padding: '12px 16px', cursor: 'pointer', border: `1.5px solid ${enrollEmployee?.id === emp.id ? PRIMARY : 'rgba(255,255,255,0.1)'}` }}><div style={{ width: 40, height: 40, borderRadius: '50%', background: rc.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 800, color: rc.color, flexShrink: 0 }}>{initials(emp.full_name)}</div><div style={{ flex: 1, textAlign: 'left' as const }}><div style={{ color: '#fff', fontWeight: 600, fontSize: 14 }}>{emp.full_name}</div><div style={{ color: 'rgba(255,255,255,0.5)', fontSize: 12 }}>{emp.role}</div></div>{hasFace && <span style={{ fontSize: 11, color: '#4ade80', fontWeight: 700, padding: '2px 8px', background: 'rgba(74,222,128,0.2)', borderRadius: 20 }}>Enrolled</span>}{enrollEmployee?.id === emp.id && !hasFace && <span style={{ fontSize: 11, color: '#fff', fontWeight: 700, padding: '2px 8px', background: 'rgba(255,255,255,0.2)', borderRadius: 20 }}>Selected</span>}</div>);
-                })}
-              </div>
-              {enrollError && (<div style={{ background: 'rgba(239,68,68,0.2)', border: '1px solid rgba(239,68,68,0.4)', borderRadius: 10, padding: '10px 14px', marginBottom: 14, color: '#fca5a5', fontSize: 13, fontWeight: 600, textAlign: 'left' as const }}>{enrollError}</div>)}
-              <div style={{ marginBottom: 16, fontSize: 12, textAlign: 'left' as const }}>
-                {!cameraReady && <div style={{ color: 'rgba(239,68,68,0.7)' }}>Camera not available</div>}
-                {cameraReady && !faceApiLoaded && loadingModels && <div style={{ color: 'rgba(255,255,255,0.4)' }}>⏳ Loading face recognition models...</div>}
-                {cameraReady && !faceApiLoaded && !loadingModels && <div style={{ color: 'rgba(239,68,68,0.7)' }}>Face recognition not available</div>}
-                {cameraReady && faceApiLoaded && <div style={{ color: 'rgba(74,222,128,0.7)' }}>✅ Camera ready and face recognition ready</div>}
-              </div>
-              <div style={{ display: 'flex', gap: 10 }}>
-                <button onClick={() => { setMode('idle'); setEnrollEmployee(null); setEnrollSearch(''); setEnrollError(''); }} style={{ flex: 1, padding: '12px', background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)', color: '#fff', borderRadius: 12, cursor: 'pointer', fontWeight: 600 }}>Cancel</button>
-                <button onClick={enrollFace} disabled={!enrollEmployee} style={{ flex: 2, padding: '12px', background: enrollEmployee ? PRIMARY : 'rgba(255,255,255,0.1)', color: enrollEmployee ? '#fff' : 'rgba(255,255,255,0.3)', border: 'none', borderRadius: 12, cursor: enrollEmployee ? 'pointer' : 'not-allowed', fontWeight: 700, fontSize: 15 }}>Capture Face</button>
+        <div style={{ position: 'relative' as const, zIndex: 1, width: '100%', maxWidth: 800, display: 'flex', gap: 24, alignItems: 'flex-start' }}>
+          
+          {/* LEFT: Live camera preview */}
+          <div style={{ flex: '0 0 300px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
+            <div style={{ position: 'relative' as const, width: 280, height: 210, borderRadius: 16, overflow: 'hidden', border: `3px solid ${faceDetected ? '#4ade80' : 'rgba(255,255,255,0.2)'}`, transition: 'border-color 0.3s' }}>
+              <video ref={previewRef} autoPlay muted playsInline style={{ width: '100%', height: '100%', objectFit: 'cover', transform: 'scaleX(-1)' }} />
+              {/* Face indicator overlay */}
+              <div style={{ position: 'absolute' as const, inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
+                <div style={{ width: 120, height: 160, border: `2px dashed ${faceDetected ? '#4ade80' : 'rgba(255,255,255,0.4)'}`, borderRadius: '50% 50% 45% 45%', transition: 'border-color 0.3s' }} />
               </div>
             </div>
-          )}
-          {enrollStep === 'capture' && (<div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: 20, padding: 40 }}><div style={{ fontSize: 64, marginBottom: 16 }}>📸</div><p style={{ color: 'rgba(255,255,255,0.8)', fontSize: 18, fontWeight: 600, margin: '0 0 8px' }}>Capturing face for {enrollEmployee?.full_name}...</p><p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 13, margin: 0 }}>Please look directly at the camera and keep still</p></div>)}
-          {enrollStep === 'done' && (<div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: 20, padding: 40 }}><div style={{ fontSize: 64, marginBottom: 16 }}>✅</div><h3 style={{ color: '#fff', fontSize: 24, fontWeight: 800, margin: '0 0 8px' }}>Face Enrolled!</h3><p style={{ color: 'rgba(255,255,255,0.6)', fontSize: 15, margin: 0 }}>{enrollEmployee?.full_name} can now clock in using face recognition</p></div>)}
+            <div style={{ textAlign: 'center' as const }}>
+              {faceDetected
+                ? <span style={{ color: '#4ade80', fontWeight: 700, fontSize: 14 }}>✅ Face detected — ready to capture!</span>
+                : <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: 13 }}>Position your face in the oval</span>
+              }
+            </div>
+            {enrollStep === 'select' && (
+              <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)', textAlign: 'center' as const, lineHeight: 1.5 }}>
+                • Face the camera directly<br/>
+                • Good lighting on your face<br/>
+                • Remove sunglasses/hat<br/>
+                • Stay still when capturing
+              </div>
+            )}
+          </div>
+
+          {/* RIGHT: Employee selection */}
+          <div style={{ flex: 1 }}>
+            <h2 style={{ color: '#fff', fontSize: 24, fontWeight: 800, margin: '0 0 4px' }}>Enroll Face</h2>
+            <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: 13, margin: '0 0 20px' }}>Register an employee face for recognition</p>
+
+            {enrollStep === 'select' && (
+              <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: 20, padding: 20 }}>
+                <input placeholder="Search employee..." value={enrollSearch} onChange={e => setEnrollSearch(e.target.value)} style={{ width: '100%', padding: '10px 14px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.2)', background: 'rgba(255,255,255,0.1)', color: '#fff', fontSize: 13, outline: 'none', marginBottom: 12, boxSizing: 'border-box' as const }} />
+                <div style={{ maxHeight: 220, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12 }}>
+                  {filteredEnrollEmployees.map(emp => {
+                    const rc = ROLE_COLORS[emp.role] || { bg: '#f5f5f5', color: '#424242' };
+                    const hasFace = !!emp.face_descriptor;
+                    return (<div key={emp.id} onClick={() => setEnrollEmployee(emp)} style={{ display: 'flex', alignItems: 'center', gap: 10, background: enrollEmployee?.id === emp.id ? 'rgba(26,92,56,0.5)' : 'rgba(255,255,255,0.05)', borderRadius: 10, padding: '10px 14px', cursor: 'pointer', border: `1.5px solid ${enrollEmployee?.id === emp.id ? PRIMARY : 'rgba(255,255,255,0.1)'}` }}><div style={{ width: 36, height: 36, borderRadius: '50%', background: rc.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 800, color: rc.color, flexShrink: 0 }}>{initials(emp.full_name)}</div><div style={{ flex: 1 }}><div style={{ color: '#fff', fontWeight: 600, fontSize: 13 }}>{emp.full_name}</div><div style={{ color: 'rgba(255,255,255,0.5)', fontSize: 11 }}>{emp.role}</div></div>{hasFace && <span style={{ fontSize: 10, color: '#4ade80', fontWeight: 700, padding: '2px 6px', background: 'rgba(74,222,128,0.2)', borderRadius: 20 }}>✓ Enrolled</span>}{enrollEmployee?.id === emp.id && !hasFace && <span style={{ fontSize: 10, color: '#fff', fontWeight: 700, padding: '2px 6px', background: 'rgba(255,255,255,0.2)', borderRadius: 20 }}>Selected</span>}</div>);
+                  })}
+                </div>
+                {enrollError && (<div style={{ background: 'rgba(239,68,68,0.2)', border: '1px solid rgba(239,68,68,0.4)', borderRadius: 8, padding: '8px 12px', marginBottom: 10, color: '#fca5a5', fontSize: 12, fontWeight: 600 }}>{enrollError}</div>)}
+                <div style={{ marginBottom: 12, fontSize: 11 }}>
+                  {!cameraReady && <div style={{ color: 'rgba(239,68,68,0.7)' }}>⚠️ Camera not available</div>}
+                  {cameraReady && !faceApiLoaded && <div style={{ color: 'rgba(255,255,255,0.4)' }}>⏳ Loading models...</div>}
+                  {cameraReady && faceApiLoaded && <div style={{ color: 'rgba(74,222,128,0.7)' }}>✅ Ready</div>}
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button onClick={() => { setMode('idle'); setEnrollEmployee(null); setEnrollSearch(''); setEnrollError(''); }} style={{ flex: 1, padding: '10px', background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)', color: '#fff', borderRadius: 10, cursor: 'pointer', fontWeight: 600, fontSize: 13 }}>Cancel</button>
+                  <button onClick={enrollFace} disabled={!enrollEmployee || !faceDetected} style={{ flex: 2, padding: '10px', background: (enrollEmployee && faceDetected) ? PRIMARY : 'rgba(255,255,255,0.1)', color: (enrollEmployee && faceDetected) ? '#fff' : 'rgba(255,255,255,0.3)', border: 'none', borderRadius: 10, cursor: (enrollEmployee && faceDetected) ? 'pointer' : 'not-allowed', fontWeight: 700, fontSize: 14 }}>
+                    {faceDetected ? '📸 Capture Face' : '👤 Position face first'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {enrollStep === 'capture' && (<div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: 20, padding: 32, textAlign: 'center' as const }}><div style={{ fontSize: 48, marginBottom: 12 }}>📸</div><p style={{ color: '#fff', fontSize: 16, fontWeight: 600, margin: '0 0 6px' }}>Capturing {enrollEmployee?.full_name}...</p><p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12 }}>Hold still</p></div>)}
+            {enrollStep === 'done' && (<div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: 20, padding: 32, textAlign: 'center' as const }}><div style={{ fontSize: 48, marginBottom: 12 }}>✅</div><h3 style={{ color: '#fff', fontSize: 20, fontWeight: 800, margin: '0 0 6px' }}>Face Enrolled!</h3><p style={{ color: 'rgba(255,255,255,0.6)', fontSize: 13, margin: 0 }}>{enrollEmployee?.full_name} can now clock in by face</p></div>)}
+          </div>
         </div>
       )}
     </div>
   );
-                                   }
+}
