@@ -528,7 +528,7 @@ export default function PeoplePage() {
                                 <div style={{ fontWeight: 700, color: '#333', fontSize: 14 }}>{doc.document_name}</div>
                                 <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>{doc.document_type}</div>
                                 {doc.expiry_date && <div style={{ fontSize: 11, color: expired ? '#ef4444' : expiring ? '#f59e0b' : '#aaa', marginTop: 4, fontWeight: expired || expiring ? 700 : 400 }}>
-                                  {expired ? '🚨 EXPIRED' : expiring ? '⚠️ Expiring'} {new Date(doc.expiry_date).toLocaleDateString('en-ZA')}
+                                  {expired ? '🚨 EXPIRED' : '⚠️ Expiring'} {new Date(doc.expiry_date!).toLocaleDateString('en-ZA')}
                                 </div>}
                               </div>
                               <a href={doc.file_url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: PRIMARY, fontWeight: 700, textDecoration: 'none', padding: '4px 10px', background: '#e8f5e9', borderRadius: 8 }}>View</a>
