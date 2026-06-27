@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
+import { supabase } from '@/lib/supabase'
 import Link from 'next/link'
 
 const STORE_ID = '05328298-fc27-4c9f-b091-bb7f6598b601'
@@ -68,7 +68,6 @@ function getExpiryStatus(expiryDate: string | null) {
 }
 
 export default function DocumentsPage() {
-  const supabase = createClientComponentClient()
   const [documents, setDocuments] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [showUpload, setShowUpload] = useState(false)
