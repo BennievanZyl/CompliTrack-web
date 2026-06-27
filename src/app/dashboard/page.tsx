@@ -153,6 +153,7 @@ function DashboardContent() {
     { icon: <span style={{ fontSize: '26px' }}>📦</span>, iconBg: '#faf5ff', title: 'Stock', subtitle: 'Stock counts and orders', href: '/stock' },
     { icon: <span style={{ fontSize: '26px' }}>👥</span>, iconBg: '#f0fdf4', title: 'People', subtitle: 'Staff profiles and attendance', href: '/people' },
     { icon: <span style={{ fontSize: '26px' }}>🕐</span>, iconBg: '#eff6ff', title: 'Time & Attendance', subtitle: 'Shifts, clock in/out and kiosk', href: '/attendance' }, 
+    { icon: <span style={{ fontSize: '26px' }}>📁</span>, iconBg: '#eff6ff', title: 'Store Documents', subtitle: 'COC, certs, licenses & more', href: '/documents' },
     { icon: <span style={{ fontSize: '26px' }}>🔧</span>, iconBg: '#fff7ed', title: 'Equipment', subtitle: 'Service schedules and alerts', href: '/equipment' },
     {
       icon: (
