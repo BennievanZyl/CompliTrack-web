@@ -227,6 +227,17 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
   const [payoutForm, setPayoutForm] = useState({ amount: '', category: 'Salary Advance', description: '', employee_id: '', employee_name: '' });
   const [payoutSaving, setPayoutSaving] = useState(false);
 
+  const [cashUpDate, setCashUpDate] = useState(() => {
+    // Default to yesterday if before 10am (overnight shift), otherwise today
+    const now = new Date();
+    const useYesterday = now.getHours() < 10;
+    if (useYesterday) { const d = new Date(); d.setDate(d.getDate() - 1); return d.toISOString().split('T')[0]; }
+    return now.toISOString().split('T')[0];
+  });
+  const [numTills, setNumTills] = useState(1);
+  const [tillDenoms, setTillDenoms] = useState<Record<string, number>[]>([
+    { r200: 0, r100: 0, r50: 0, r20: 0, r10: 0, r5: 0, r2: 0, r1: 0, r050: 0, r020: 0, r010: 0, r005: 0 },
+  ]);
   const [bankDenoms, setBankDenoms] = useState<Record<string, number>>({ r200: 0, r100: 0, r50: 0, r20: 0, r10: 0, r5: 0, r2: 0, r1: 0, r050: 0, r020: 0, r010: 0, r005: 0 });
   const [floatDenoms, setFloatDenoms] = useState<Record<string, number>>({ r200: 0, r100: 0, r50: 0, r20: 0, r10: 0, r5: 0, r2: 0, r1: 0, r050: 0, r020: 0, r010: 0, r005: 0 });
   const [recon, setRecon] = useState({ previous_float: '', eft_total: '', pos_slip_total: '', voids: '', banked: false, bank_deposit_amount: '', bank_reference: '' });
@@ -252,22 +263,50 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
     setEmployees(data || []);
   }
 
-  async function loadCashUp() {
+  async function loadCashUp(dateOverride?: string) {
     setLoading(true);
-    const today = new Date().toISOString().split('T')[0];
-    const { data: todayCashUp } = await supabase.from('cash_ups').select('*').eq('store_id', storeId).eq('cash_up_date', today).maybeSingle();
-    if (todayCashUp) {
-      setCashUp(todayCashUp);
-      populateForm(todayCashUp);
-      await loadPayouts(todayCashUp.id);
+    const targetDate = dateOverride || cashUpDate;
+    const { data: existingCashUp } = await supabase.from('cash_ups').select('*').eq('store_id', storeId).eq('cash_up_date', targetDate).maybeSingle();
+    if (existingCashUp) {
+      setCashUp(existingCashUp);
+      populateForm(existingCashUp);
+      await loadPayouts(existingCashUp.id);
+      if (existingCashUp.num_tills) setNumTills(existingCashUp.num_tills);
+      if (existingCashUp.till_data?.length) setTillDenoms(existingCashUp.till_data);
     } else {
-      const yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1);
-      const { data: yCashUp } = await supabase.from('cash_ups').select('float_total').eq('store_id', storeId).eq('cash_up_date', yesterday.toISOString().split('T')[0]).maybeSingle();
-      if (yCashUp?.float_total) setRecon(p => ({ ...p, previous_float: yCashUp.float_total.toString() }));
+      setCashUp(null);
+      // Load previous day float as starting float
+      const prevDate = new Date(targetDate); prevDate.setDate(prevDate.getDate() - 1);
+      const { data: prevCashUp } = await supabase.from('cash_ups').select('float_total').eq('store_id', storeId).eq('cash_up_date', prevDate.toISOString().split('T')[0]).maybeSingle();
+      if (prevCashUp?.float_total) setRecon(p => ({ ...p, previous_float: prevCashUp.float_total.toString() }));
     }
     const { data: hist } = await supabase.from('cash_ups').select('*').eq('store_id', storeId).order('cash_up_date', { ascending: false }).limit(14);
     setHistory(hist || []);
     setLoading(false);
+  }
+
+  async function handleDateChange(newDate: string) {
+    setCashUpDate(newDate);
+    // Reset form
+    setBankDenoms({ r200: 0, r100: 0, r50: 0, r20: 0, r10: 0, r5: 0, r2: 0, r1: 0, r050: 0, r020: 0, r010: 0, r005: 0 });
+    setFloatDenoms({ r200: 0, r100: 0, r50: 0, r20: 0, r10: 0, r5: 0, r2: 0, r1: 0, r050: 0, r020: 0, r010: 0, r005: 0 });
+    setTillDenoms([{ r200: 0, r100: 0, r50: 0, r20: 0, r10: 0, r5: 0, r2: 0, r1: 0, r050: 0, r020: 0, r010: 0, r005: 0 }]);
+    setRecon({ previous_float: '', eft_total: '', pos_slip_total: '', voids: '', banked: false, bank_deposit_amount: '', bank_reference: '' });
+    setNotes(''); setPayouts([]); setActiveStep(1);
+    await loadCashUp(newDate);
+  }
+
+  function handleNumTillsChange(n: number) {
+    setNumTills(n);
+    setTillDenoms(prev => {
+      const next = [...prev];
+      while (next.length < n) next.push({ r200: 0, r100: 0, r50: 0, r20: 0, r10: 0, r5: 0, r2: 0, r1: 0, r050: 0, r020: 0, r010: 0, r005: 0 });
+      return next.slice(0, n);
+    });
+  }
+
+  function updateTillDenom(tillIdx: number, key: string, value: number) {
+    setTillDenoms(prev => prev.map((t, i) => i === tillIdx ? { ...t, [key]: value } : t));
   }
 
   async function loadPayouts(cashUpId: string) {
@@ -276,7 +315,7 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
   }
 
   function populateForm(c: CashUp) {
-    setBankDenoms({ r200: c.r200, r100: c.r100, r50: c.r50, r20: c.r20, r10: c.r10, r5: c.r5, r2: c.r2, r1: c.r1, r050: c.r050, r020: c.r020, r010: c.r010, r005: c.r005 });
+    setBankDenoms({ r200: c.r200 || 0, r100: c.r100 || 0, r50: c.r50 || 0, r20: c.r20 || 0, r10: c.r10 || 0, r5: c.r5 || 0, r2: c.r2 || 0, r1: c.r1 || 0, r050: c.r050 || 0, r020: c.r020 || 0, r010: c.r010 || 0, r005: c.r005 || 0 });
     setFloatDenoms({ r200: c.float_r200, r100: c.float_r100, r50: c.float_r50, r20: c.float_r20, r10: c.float_r10, r5: c.float_r5, r2: c.float_r2, r1: c.float_r1, r050: c.float_r050, r020: c.float_r020, r010: c.float_r010, r005: c.float_r005 });
     setRecon({ previous_float: c.previous_float.toString(), eft_total: c.eft_total.toString(), pos_slip_total: c.pos_slip_total.toString(), voids: c.voids.toString(), banked: c.banked, bank_deposit_amount: c.bank_deposit_amount?.toString() || '', bank_reference: c.bank_reference || '' });
     setPerf({ customer_count: c.customer_count.toString() });
@@ -284,7 +323,8 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
     setSignedByName(c.signed_by_name || '');
   }
 
-  const bankTotal = DENOMS.reduce((sum, d) => sum + (bankDenoms[d.key] || 0) * d.value, 0);
+  const tillTotals = tillDenoms.map(till => DENOMS.reduce((sum, d) => sum + (till[d.key] || 0) * d.value, 0));
+  const bankTotal = tillTotals.reduce((sum, t) => sum + t, 0);
   const floatTotal = DENOMS.reduce((sum, d) => sum + (floatDenoms[d.key] || 0) * d.value, 0);
   const totalCash = bankTotal + floatTotal;
   const prevFloat = parseFloat(recon.previous_float) || 0;
@@ -304,8 +344,8 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
 
   function buildPayload(status: string) {
     return {
-      store_id: storeId, organisation_id: orgId, cash_up_date: new Date().toISOString().split('T')[0],
-      r200: bankDenoms.r200, r100: bankDenoms.r100, r50: bankDenoms.r50, r20: bankDenoms.r20, r10: bankDenoms.r10, r5: bankDenoms.r5, r2: bankDenoms.r2, r1: bankDenoms.r1, r050: bankDenoms.r050, r020: bankDenoms.r020, r010: bankDenoms.r010, r005: bankDenoms.r005,
+      store_id: storeId, organisation_id: orgId, cash_up_date: cashUpDate,
+      r200: tillDenoms.reduce((s,t)=>s+(t.r200||0),0), r100: tillDenoms.reduce((s,t)=>s+(t.r100||0),0), r50: tillDenoms.reduce((s,t)=>s+(t.r50||0),0), r20: tillDenoms.reduce((s,t)=>s+(t.r20||0),0), r10: tillDenoms.reduce((s,t)=>s+(t.r10||0),0), r5: tillDenoms.reduce((s,t)=>s+(t.r5||0),0), r2: tillDenoms.reduce((s,t)=>s+(t.r2||0),0), r1: tillDenoms.reduce((s,t)=>s+(t.r1||0),0), r050: tillDenoms.reduce((s,t)=>s+(t.r050||0),0), r020: tillDenoms.reduce((s,t)=>s+(t.r020||0),0), r010: tillDenoms.reduce((s,t)=>s+(t.r010||0),0), r005: tillDenoms.reduce((s,t)=>s+(t.r005||0),0),
       float_r200: floatDenoms.r200, float_r100: floatDenoms.r100, float_r50: floatDenoms.r50, float_r20: floatDenoms.r20, float_r10: floatDenoms.r10, float_r5: floatDenoms.r5, float_r2: floatDenoms.r2, float_r1: floatDenoms.r1, float_r050: floatDenoms.r050, float_r020: floatDenoms.r020, float_r010: floatDenoms.r010, float_r005: floatDenoms.r005,
       float_total: floatTotal, bank_total: bankTotal, total_cash: totalCash,
       previous_float: prevFloat, eft_total: eft, payouts: payoutsTotal,
@@ -314,6 +354,7 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
       bank_deposit_amount: recon.bank_deposit_amount ? parseFloat(recon.bank_deposit_amount) : null,
       bank_reference: recon.bank_reference || null,
       customer_count: customers, average_spend: avgSpend, notes: notes || null, status,
+      num_tills: numTills, till_data: tillDenoms,
     };
   }
 
@@ -591,7 +632,42 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
               {activeStep === 1 && (
                 <div style={cardStyle}>
                   <div style={{ fontSize: 18, fontWeight: 700, color: '#333', marginBottom: 4 }}>Count Your Cash</div>
-                  <div style={{ fontSize: 13, color: '#888', marginBottom: 20 }}>Enter quantities for Till Float and To Bank separately</div>
+                  <div style={{ fontSize: 13, color: '#888', marginBottom: 16 }}>Enter quantities for Till Float and To Bank separately</div>
+
+                  {/* Date picker + Till selector */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 20, padding: 16, background: '#f8faf8', borderRadius: 12 }}>
+                    <div>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: '#374151', marginBottom: 6, textTransform: 'uppercase' as const, letterSpacing: '0.5px' }}>Cash-Up Date</div>
+                      <input type="date" value={cashUpDate} onChange={e => handleDateChange(e.target.value)} disabled={readOnly}
+                        style={{ width: '100%', padding: '10px 12px', border: '1.5px solid #d1d5db', borderRadius: 10, fontSize: 15, fontWeight: 600, boxSizing: 'border-box' as const, background: readOnly ? '#f3f4f6' : '#fff' }} />
+                      <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 4 }}>
+                        {cashUpDate === new Date().toISOString().split('T')[0] ? '📅 Today' :
+                         cashUpDate === (() => { const d = new Date(); d.setDate(d.getDate()-1); return d.toISOString().split('T')[0]; })() ? '🌙 Yesterday (overnight shift)' : '📆 ' + cashUpDate}
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: '#374151', marginBottom: 6, textTransform: 'uppercase' as const, letterSpacing: '0.5px' }}>Number of Tills</div>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        {[1, 2, 3, 4].map(n => (
+                          <button key={n} onClick={() => !readOnly && handleNumTillsChange(n)} disabled={readOnly}
+                            style={{ flex: 1, padding: '10px 0', borderRadius: 10, border: numTills === n ? 'none' : '1.5px solid #d1d5db', background: numTills === n ? PRIMARY : '#fff', color: numTills === n ? '#fff' : '#374151', fontWeight: 700, fontSize: 15, cursor: readOnly ? 'not-allowed' : 'pointer' }}>
+                            {n}
+                          </button>
+                        ))}
+                      </div>
+                      <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 4 }}>{numTills === 1 ? 'Single till' : `${numTills} tills — each counted separately`}</div>
+                    </div>
+                  </div>
+
+                  {/* Per-till denomination grids */}
+                  {tillDenoms.map((till, tillIdx) => (
+                    <div key={tillIdx} style={{ marginBottom: 20 }}>
+                      {numTills > 1 && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: PRIMARY, background: '#f0fdf4', padding: '4px 14px', borderRadius: 20 }}>Till {tillIdx + 1}</div>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: '#333' }}>Subtotal: {fmt(tillTotals[tillIdx] || 0)}</div>
+                        </div>
+                      )}
                   <div style={{ display: 'grid', gridTemplateColumns: '80px 1fr 20px 1fr', gap: 8, marginBottom: 8 }}>
                     <div />
                     <div style={{ background: DARK, color: '#fff', borderRadius: 8, padding: '8px 12px', textAlign: 'center' as const, fontWeight: 700, fontSize: 13 }}>TILL FLOAT</div>
@@ -619,17 +695,26 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
                       </div>
                       <div style={{ textAlign: 'center' as const, color: '#ddd', fontSize: 18 }}>|</div>
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, background: '#e8f5e9', borderRadius: 8, padding: 4 }}>
-                        <input type="number" min="0" value={bankDenoms[d.key] || ''} onChange={e => setBankDenoms(p => ({ ...p, [d.key]: parseInt(e.target.value) || 0 }))} disabled={readOnly} placeholder="0" style={denomInputStyle(readOnly)} />
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 600, color: PRIMARY, fontSize: 13 }}>{fmt((bankDenoms[d.key] || 0) * d.value)}</div>
+                        <input type="number" min="0" value={till[d.key] || ''} onChange={e => updateTillDenom(tillIdx, d.key, parseInt(e.target.value) || 0)} disabled={readOnly} placeholder="0" style={denomInputStyle(readOnly)} />
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 600, color: PRIMARY, fontSize: 13 }}>{fmt((till[d.key] || 0) * d.value)}</div>
                       </div>
                     </div>
                   ))}
-                  <div style={{ display: 'grid', gridTemplateColumns: '80px 1fr 20px 1fr', gap: 8, marginTop: 16 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '80px 1fr 20px 1fr', gap: 8, marginTop: 12 }}>
                     <div style={{ fontWeight: 700, color: '#333', fontSize: 13 }}>TOTAL</div>
                     <div style={{ background: DARK, color: '#fff', borderRadius: 10, padding: '12px 16px', textAlign: 'center' as const, fontWeight: 800, fontSize: 18 }}>{fmt(floatTotal)}</div>
                     <div />
-                    <div style={{ background: PRIMARY, color: '#fff', borderRadius: 10, padding: '12px 16px', textAlign: 'center' as const, fontWeight: 800, fontSize: 18 }}>{fmt(bankTotal)}</div>
+                    <div style={{ background: PRIMARY, color: '#fff', borderRadius: 10, padding: '12px 16px', textAlign: 'center' as const, fontWeight: 800, fontSize: 18 }}>{fmt(tillTotals[tillIdx] || 0)}</div>
                   </div>
+                  {numTills > 1 && tillIdx < numTills - 1 && <div style={{ borderTop: '2px dashed #e5e7eb', margin: '16px 0' }} />}
+                    </div>
+                  ))}
+                  {numTills > 1 && (
+                    <div style={{ background: '#f0fdf4', border: '2px solid #bbf7d0', borderRadius: 12, padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                      <span style={{ fontWeight: 700, color: '#166534', fontSize: 14 }}>Combined Bank Total ({numTills} tills)</span>
+                      <span style={{ fontWeight: 800, color: PRIMARY, fontSize: 22 }}>{fmt(bankTotal)}</span>
+                    </div>
+                  )}
                   <div style={{ marginTop: 12, padding: '14px 20px', background: `linear-gradient(135deg, ${DARK}, ${PRIMARY})`, borderRadius: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span style={{ color: '#fff', fontWeight: 600, fontSize: 15 }}>Total Cash Counted</span>
                     <span style={{ color: '#fff', fontWeight: 800, fontSize: 26 }}>{fmt(totalCash)}</span>
