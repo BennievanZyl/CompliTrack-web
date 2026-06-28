@@ -36,7 +36,13 @@ type Expense = {
 type ExpenseCategory = {
   id: string
   name: string
-  colour: string
+  key: string
+}
+
+const CAT_COLOURS: Record<string, string> = {
+  rent: '#3b82f6', utilities: '#f59e0b', stock_cogs: '#10b981', labour: '#8b5cf6',
+  royalties: '#ef4444', marketing: '#06b6d4', repairs: '#f97316',
+  insurance: '#6366f1', packaging: '#84cc16', other: '#6b7280'
 }
 
 const PAYMENT_METHODS = ['bank_transfer', 'cash', 'credit_card', 'debit_order', 'eft']
@@ -91,8 +97,9 @@ export default function FinancesPage() {
         .gte('sale_date', monthStart).lte('sale_date', monthEnd).order('sale_date', { ascending: false }),
       supabase.from('expenses').select('*').eq('store_id', STORE_ID)
         .gte('expense_date', monthStart).lte('expense_date', monthEnd).order('expense_date', { ascending: false }),
-      supabase.from('expense_categories').select('id, name, colour')
-        .or(`store_id.eq.${STORE_ID},is_default.eq.true`).order('name'),
+      supabase.from('expense_categories').select('id, name, key')
+        .eq('organisation_id', 'e903386b-133a-4bad-b054-ef7ef616a3ff')
+        .eq('is_active', true).order('sort_order'),
     ])
     setSales(salesRes.data || [])
     setExpenses(expRes.data || [])
@@ -275,7 +282,7 @@ export default function FinancesPage() {
                   ) : (
                     Object.entries(expByCategory).sort((a, b) => b[1] - a[1]).map(([cat, amt]) => {
                       const pct = totalExpenses > 0 ? (amt / totalExpenses) * 100 : 0
-                      const catColor = categories.find(c => c.name === cat)?.colour || '#6b7280'
+                      const catColor = CAT_COLOURS[categories.find(c => c.name === cat)?.key || 'other'] || '#6b7280'
                       return (
                         <div key={cat} style={{ marginBottom: 12 }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, fontSize: 14 }}>
@@ -517,7 +524,7 @@ export default function FinancesPage() {
                       </thead>
                       <tbody>
                         {expenses.map(e => {
-                          const catColor = categories.find(c => c.id === e.category_id)?.colour || '#6b7280'
+                          const catColor = CAT_COLOURS[categories.find(c => c.id === e.category_id)?.key || 'other'] || '#6b7280'
                           return (
                             <tr key={e.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
                               <td style={{ padding: '9px 10px' }}>{e.expense_date}</td>
@@ -585,3 +592,4 @@ export default function FinancesPage() {
     </div>
   )
 }
+
