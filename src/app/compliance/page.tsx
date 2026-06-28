@@ -146,7 +146,16 @@ export default function CompliancePage() {
   async function loadData() {
     setLoading(true);
     const today = new Date().toISOString().split('T')[0];
-    const { data: sessionData } = await supabase.from('daily_sessions').select('*').eq('store_id', STORE_ID).eq('session_date', today).single();
+    // Use maybeSingle replaced with limit — handles multiple sessions gracefully
+    // Prefer in_progress session, fallback to most recent
+    const { data: sessions } = await supabase
+      .from('daily_sessions')
+      .select('*')
+      .eq('store_id', STORE_ID)
+      .eq('session_date', today)
+      .order('created_at', { ascending: false });
+    // Pick in_progress first, otherwise take the latest
+    const sessionData = sessions?.find(s => s.status === 'in_progress') || sessions?.[0] || null;
     setSession(sessionData);
     if (sessionData) await loadSessionData(sessionData.id);
     setLoading(false);
