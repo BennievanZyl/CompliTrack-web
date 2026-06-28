@@ -88,20 +88,6 @@ export default function FinancesPage() {
 
   const CAT_MAP = Object.fromEntries(categories.map(c => [c.key, c]))
 
-  async function saveQuickCategory() {
-    if (!quickCatForm.name) return
-    setSavingCat(true)
-    const key = quickCatForm.name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')
-    await supabase.from('expense_categories').insert({
-      organisation_id: ORG_ID, name: quickCatForm.name, key,
-      colour: quickCatForm.colour, is_active: true, sort_order: categories.length + 1
-    })
-    setQuickCatForm({ name: '', colour: '#10b981' })
-    setShowQuickCat(false)
-    setSavingCat(false)
-    await load()
-  }
-
   const load = useCallback(async () => {
     setLoading(true)
     const monthStart = `${month}-01`
@@ -133,6 +119,21 @@ export default function FinancesPage() {
   }, [month])
 
   useEffect(() => { load() }, [load])
+
+  async function saveQuickCategory() {
+    if (!quickCatForm.name) return
+    setSavingCat(true)
+    const key = quickCatForm.name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')
+    await supabase.from('expense_categories').insert({
+      organisation_id: ORG_ID, name: quickCatForm.name, key,
+      colour: quickCatForm.colour, is_active: true, sort_order: categories.length + 1
+    })
+    setQuickCatForm({ name: '', colour: '#10b981' })
+    setShowQuickCat(false)
+    setSavingCat(false)
+    load()
+  }
+
 
   // ── Summary calcs ──
   const totalSales = cashUps.reduce((s, r) => s + Number(r.cash_up_total || 0), 0)
@@ -231,7 +232,7 @@ export default function FinancesPage() {
   // ── Quick expense CRUD ──
   async function saveQuick() {
     setSaving(true); setError('')
-    const cat = EXPENSE_CATEGORIES.find(c => c.key === qForm.category_key)
+    const cat = categories.find(c => c.key === qForm.category_key)
     const payload = {
       store_id: STORE_ID, expense_date: qForm.expense_date,
       category_key: qForm.category_key, category_name: cat?.name || '',
@@ -333,7 +334,7 @@ export default function FinancesPage() {
                     ? <p style={{ color: '#6b7280', fontSize: 14 }}>No expenses recorded this month.</p>
                     : Object.entries(expByCategory).sort((a, b) => b[1] - a[1]).map(([cat, amt]) => {
                       const pct = totalExpenses > 0 ? (amt / totalExpenses) * 100 : 0
-                      const catEntry = EXPENSE_CATEGORIES.find(c => c.name === cat)
+                      const catEntry = categories.find(c => c.name === cat)
                       return (
                         <div key={cat} style={{ marginBottom: 12 }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, fontSize: 13 }}>
@@ -662,7 +663,7 @@ export default function FinancesPage() {
                     </thead>
                     <tbody>
                       {quickExp.map(e => {
-                        const cat = CAT_MAP[e.category_key] || EXPENSE_CATEGORIES.find(c => c.name === e.category_name)
+                        const cat = CAT_MAP[e.category_key]
                         return (
                           <tr key={e.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
                             <td style={{ padding: '9px 10px' }}>{e.expense_date}</td>
