@@ -68,7 +68,7 @@ function DashboardContent() {
     const today = new Date().toISOString().split('T')[0]
     const { data: session } = await supabase
       .from('daily_sessions').select('*')
-      .eq('store_id', storeId).eq('session_date', today).maybeSingle()
+      .eq('store_id', storeId).eq('session_date', today).eq('session_type', 'daily').maybeSingle()
     setTodaySession(session)
     if (session) {
       const { data: items } = await supabase
