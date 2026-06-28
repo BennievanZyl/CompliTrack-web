@@ -272,7 +272,19 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
       populateForm(existingCashUp);
       await loadPayouts(existingCashUp.id);
       if (existingCashUp.num_tills) setNumTills(existingCashUp.num_tills);
-      if (existingCashUp.till_data?.length) setTillDenoms(existingCashUp.till_data);
+      // Restore till denominations: use saved till_data if available, else fall back to legacy r200/r100 columns
+      if (existingCashUp.till_data?.length) {
+        setTillDenoms(existingCashUp.till_data);
+      } else {
+        setTillDenoms([{
+          r200: existingCashUp.r200 || 0, r100: existingCashUp.r100 || 0,
+          r50: existingCashUp.r50 || 0, r20: existingCashUp.r20 || 0,
+          r10: existingCashUp.r10 || 0, r5: existingCashUp.r5 || 0,
+          r2: existingCashUp.r2 || 0, r1: existingCashUp.r1 || 0,
+          r050: existingCashUp.r050 || 0, r020: existingCashUp.r020 || 0,
+          r010: existingCashUp.r010 || 0, r005: existingCashUp.r005 || 0,
+        }]);
+      }
     } else {
       setCashUp(null);
       // Load previous day float as starting float
