@@ -9,36 +9,8 @@ const VAT_RATE = 0.15
 
 const TABS = ['Summary', 'Cash-Ups / Sales', 'Supplier Bills', 'Quick Expenses', 'Food Cost']
 
-// Matches Excel columns exactly
-const EXPENSE_CATEGORIES = [
-  { key: 'cost_of_sales', name: 'Cost of Sales', colour: '#10b981' },
-  { key: 'cleaning', name: 'Cleaning', colour: '#06b6d4' },
-  { key: 'packaging', name: 'Packaging', colour: '#84cc16' },
-  { key: 'banking', name: 'Banking', colour: '#3b82f6' },
-  { key: 'accounting', name: 'Accounting', colour: '#6366f1' },
-  { key: 'franchise_fee', name: 'Franchise Fee', colour: '#ef4444' },
-  { key: 'marketing', name: 'Marketing', colour: '#f97316' },
-  { key: 'casual_wages', name: 'Casual Wages', colour: '#8b5cf6' },
-  { key: 'micros', name: 'Micros', colour: '#14b8a6' },
-  { key: 'staff', name: 'Staff', colour: '#a855f7' },
-  { key: 'credit_cards', name: 'Credit Cards', colour: '#ec4899' },
-  { key: 'delivery', name: 'Delivery', colour: '#f59e0b' },
-  { key: 'gas', name: 'Gas', colour: '#64748b' },
-  { key: 'insurance', name: 'Insurance', colour: '#0ea5e9' },
-  { key: 'internet', name: 'Internet', colour: '#22c55e' },
-  { key: 'pest_control', name: 'Pest Control', colour: '#a16207' },
-  { key: 'rental', name: 'Rental', colour: '#dc2626' },
-  { key: 'repair', name: 'Repair & Maintenance', colour: '#ea580c' },
-  { key: 'salaries', name: 'Salaries', colour: '#7c3aed' },
-  { key: 'security', name: 'Security', colour: '#1d4ed8' },
-  { key: 'stationery', name: 'Stationery', colour: '#0891b2' },
-  { key: 'telephone', name: 'Telephone', colour: '#16a34a' },
-  { key: 'municipality', name: 'Municipality', colour: '#b45309' },
-  { key: 'fuel', name: 'Fuel', colour: '#475569' },
-  { key: 'other', name: 'Other', colour: '#6b7280' },
-]
+const COLOUR_PALETTE = ['#10b981','#ef4444','#3b82f6','#f59e0b','#8b5cf6','#06b6d4','#f97316','#ec4899','#84cc16','#6b7280','#dc2626','#0ea5e9','#a855f7','#22c55e','#1d4ed8']
 
-const CAT_MAP = Object.fromEntries(EXPENSE_CATEGORIES.map(c => [c.key, c]))
 
 const PAYMENT_METHODS = ['bank_transfer', 'cash', 'credit_card', 'debit_order', 'eft', 'cheque']
 const INVOICE_STATUSES = ['draft', 'approved', 'paid']
@@ -73,7 +45,7 @@ function thisMonth() {
 }
 function today() { return new Date().toISOString().split('T')[0] }
 
-const emptyLine = (): InvoiceLine => ({ category_key: 'cost_of_sales', description: '', amount: 0, vat_amount: 0 })
+const emptyLine = (firstKey = 'cost_of_sales'): InvoiceLine => ({ category_key: firstKey, description: '', amount: 0, vat_amount: 0 })
 const emptyInvoice = () => ({
   supplier: '', invoice_number: '', invoice_date: today(),
   due_date: '', status: 'draft', payment_method: 'bank_transfer', notes: ''
@@ -89,12 +61,18 @@ export default function FinancesPage() {
   const [tab, setTab] = useState(0)
   const [month, setMonth] = useState(thisMonth())
 
+  const [categories, setCategories] = useState<{id:string;name:string;key:string;colour:string}[]>([])
   const [cashUps, setCashUps] = useState<CashUp[]>([])
   const [invoices, setInvoices] = useState<Invoice[]>([])
   const [quickExp, setQuickExp] = useState<QuickExpense[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+
+  // Category quick-add state
+  const [showQuickCat, setShowQuickCat] = useState(false)
+  const [quickCatForm, setQuickCatForm] = useState({ name: '', colour: '#10b981' })
+  const [savingCat, setSavingCat] = useState(false)
 
   // Invoice form state
   const [showInvForm, setShowInvForm] = useState(false)
@@ -108,11 +86,27 @@ export default function FinancesPage() {
   const [editQ, setEditQ] = useState<QuickExpense | null>(null)
   const [qForm, setQForm] = useState(emptyQuick())
 
+  const CAT_MAP = Object.fromEntries(categories.map(c => [c.key, c]))
+
+  async function saveQuickCategory() {
+    if (!quickCatForm.name) return
+    setSavingCat(true)
+    const key = quickCatForm.name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')
+    await supabase.from('expense_categories').insert({
+      organisation_id: ORG_ID, name: quickCatForm.name, key,
+      colour: quickCatForm.colour, is_active: true, sort_order: categories.length + 1
+    })
+    setQuickCatForm({ name: '', colour: '#10b981' })
+    setShowQuickCat(false)
+    setSavingCat(false)
+    await load()
+  }
+
   const load = useCallback(async () => {
     setLoading(true)
     const monthStart = `${month}-01`
     const monthEnd = `${month}-31`
-    const [cuRes, invRes, qRes] = await Promise.all([
+    const [cuRes, invRes, qRes, catRes] = await Promise.all([
       supabase.from('cash_ups')
         .select('id,cash_up_date,cash_up_total,total_cash,eft_total,payouts,variance,customer_count,average_spend,status,notes')
         .eq('store_id', STORE_ID)
@@ -123,6 +117,7 @@ export default function FinancesPage() {
         .eq('store_id', STORE_ID)
         .gte('invoice_date', monthStart).lte('invoice_date', monthEnd)
         .order('invoice_date', { ascending: false }),
+      supabase.from('expense_categories').select('id, name, key, colour, sort_order').eq('organisation_id', ORG_ID).eq('is_active', true).order('sort_order'),
       supabase.from('expenses')
         .select('*').eq('store_id', STORE_ID)
         .gte('expense_date', monthStart).lte('expense_date', monthEnd)
@@ -130,6 +125,8 @@ export default function FinancesPage() {
     ])
     setCashUps(cuRes.data || [])
     setInvoices(invRes.data || [])
+    const cats = catRes.data || []
+    setCategories(cats.length ? cats : [])
     setQuickExp(qRes.data || [])
     setLoading(false)
   }, [month])
@@ -490,9 +487,12 @@ export default function FinancesPage() {
                     </div>
                     {invLines.map((line, i) => (
                       <div key={i} style={{ display: 'grid', gridTemplateColumns: '2fr 2fr 1fr 1fr auto', gap: 8, marginBottom: 8, alignItems: 'center' }}>
-                        <select value={line.category_key} onChange={e => updateLine(i, 'category_key', e.target.value)} style={{ ...inp, padding: '8px 10px' }}>
-                          {EXPENSE_CATEGORIES.map(c => <option key={c.key} value={c.key}>{c.name}</option>)}
-                        </select>
+                        <div>
+                          <select value={line.category_key} onChange={e => updateLine(i, 'category_key', e.target.value)} style={{ ...inp, padding: '8px 10px' }}>
+                            {categories.map(c => <option key={c.key} value={c.key}>{c.name}</option>)}
+                          </select>
+                          {i === 0 && <button type="button" onClick={() => setShowQuickCat(true)} style={{ fontSize: '11px', color: '#1a5c38', background: 'none', border: 'none', cursor: 'pointer', padding: '2px 0', fontWeight: '600' }}>+ New Category</button>}
+                        </div>
                         <input type="text" placeholder="Description" value={line.description} onChange={e => updateLine(i, 'description', e.target.value)} style={{ ...inp, padding: '8px 10px' }} />
                         <input type="number" step="0.01" placeholder="0.00" value={line.amount || ''} onChange={e => updateLine(i, 'amount', e.target.value)} style={{ ...inp, padding: '8px 10px' }} />
                         <input type="number" step="0.01" placeholder="0.00" value={line.vat_amount || ''} onChange={e => updateLine(i, 'vat_amount', e.target.value)} style={{ ...inp, padding: '8px 10px' }} />
@@ -612,7 +612,7 @@ export default function FinancesPage() {
                     <div>
                       <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Category *</label>
                       <select value={qForm.category_key} onChange={e => setQForm(f => ({ ...f, category_key: e.target.value }))} style={inp}>
-                        {EXPENSE_CATEGORIES.map(c => <option key={c.key} value={c.key}>{c.name}</option>)}
+                        {categories.map(c => <option key={c.key} value={c.key}>{c.name}</option>)}
                       </select>
                     </div>
                     <div>
@@ -719,6 +719,50 @@ export default function FinancesPage() {
           )}
         </>)}
       </div>
+      {/* Quick Add Category Modal */}
+      {showQuickCat && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: '16px' }}>
+          <div style={{ background: '#fff', borderRadius: '16px', width: '100%', maxWidth: '400px', boxShadow: '0 24px 60px rgba(0,0,0,0.2)' }}>
+            <div style={{ padding: '20px 24px 16px', borderBottom: '1px solid #f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <h2 style={{ fontSize: '16px', fontWeight: '800', color: '#111', margin: 0 }}>🏷️ New Expense Category</h2>
+              <button onClick={() => setShowQuickCat(false)} style={{ background: '#f3f4f6', border: 'none', borderRadius: '8px', width: '32px', height: '32px', cursor: 'pointer', fontSize: '16px' }}>✕</button>
+            </div>
+            <div style={{ padding: '20px 24px' }}>
+              <div style={{ marginBottom: '16px' }}>
+                <label style={{ fontSize: '13px', fontWeight: '600', display: 'block', marginBottom: '6px' }}>Category Name *</label>
+                <input type="text" placeholder="e.g. Royalties, Cleaning, Gas" value={quickCatForm.name}
+                  onChange={e => setQuickCatForm(f => ({ ...f, name: e.target.value }))}
+                  style={{ width: '100%', padding: '10px 12px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '14px', boxSizing: 'border-box' as const }} />
+              </div>
+              <div style={{ marginBottom: '20px' }}>
+                <label style={{ fontSize: '13px', fontWeight: '600', display: 'block', marginBottom: '8px' }}>Colour</label>
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                  <input type="color" value={quickCatForm.colour} onChange={e => setQuickCatForm(f => ({ ...f, colour: e.target.value }))}
+                    style={{ width: '40px', height: '40px', border: '1.5px solid #e5e7eb', borderRadius: '8px', cursor: 'pointer', padding: '2px' }} />
+                  {COLOUR_PALETTE.map(c => (
+                    <div key={c} onClick={() => setQuickCatForm(f => ({ ...f, colour: c }))}
+                      style={{ width: '22px', height: '22px', borderRadius: '4px', background: c, cursor: 'pointer', border: quickCatForm.colour === c ? '2px solid #111' : '2px solid transparent' }} />
+                  ))}
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <button onClick={saveQuickCategory} disabled={savingCat || !quickCatForm.name}
+                  style={{ flex: 1, background: quickCatForm.name ? '#1a5c38' : '#d1d5db', color: '#fff', border: 'none', borderRadius: '8px', padding: '12px', cursor: quickCatForm.name ? 'pointer' : 'not-allowed', fontSize: '14px', fontWeight: '700' }}>
+                  {savingCat ? 'Saving…' : 'Add Category'}
+                </button>
+                <button onClick={() => setShowQuickCat(false)}
+                  style={{ background: '#f3f4f6', color: '#374151', border: 'none', borderRadius: '8px', padding: '12px 16px', cursor: 'pointer', fontSize: '14px', fontWeight: '700' }}>
+                  Cancel
+                </button>
+              </div>
+              <p style={{ margin: '12px 0 0', fontSize: '12px', color: '#9ca3af', textAlign: 'center' }}>
+                Manage all categories in <a href="/settings" style={{ color: '#1a5c38' }}>Settings → Expense Categories</a>
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   )
 }
