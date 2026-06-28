@@ -2,9 +2,10 @@ import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 
 export function useStore() {
-  const [storeId, setStoreId] = useState<string | null>(null)
+  const [storeId, setStoreId]     = useState<string | null>(null)
+  const [orgId, setOrgId]         = useState<string | null>(null)
   const [storeName, setStoreName] = useState<string | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading]     = useState(true)
 
   useEffect(() => {
     async function load() {
@@ -21,17 +22,21 @@ export function useStore() {
 
       const { data: store } = await supabase
         .from('stores')
-        .select('id, name')
+        .select('id, name, organisation_id')
         .eq('organisation_id', profile.organisation_id)
         .eq('is_active', true)
         .limit(1)
         .single()
 
-      if (store) { setStoreId(store.id); setStoreName(store.name) }
+      if (store) {
+        setStoreId(store.id)
+        setOrgId(store.organisation_id)
+        setStoreName(store.name)
+      }
       setLoading(false)
     }
     load()
   }, [])
 
-  return { storeId, storeName, loading }
+  return { storeId, orgId, storeName, loading }
 }
