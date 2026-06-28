@@ -66,7 +66,7 @@ export default function SettingsPage() {
   const [editCat, setEditCat] = useState<ExpenseCategory | null>(null)
   const [catForm, setCatForm] = useState({ name: '', colour: '#10b981' })
 
-  const SECTIONS = [...new Set(templates.map(t => t.section))], 'Opening', 'During Service', 'Closing', 'Cleaning', 'Safety'].filter((v, i, a) => a.indexOf(v) === i)
+  const SECTIONS = [...new Set(templates.map(t => t.section)), 'Opening', 'During Service', 'Closing', 'Cleaning', 'Safety'].filter((v, i, a) => a.indexOf(v) === i)
 
   useEffect(() => { loadAll() }, [])
 
