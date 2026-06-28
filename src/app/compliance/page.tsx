@@ -153,9 +153,10 @@ export default function CompliancePage() {
       .select('*')
       .eq('store_id', STORE_ID)
       .eq('session_date', today)
+      .eq('session_type', 'daily')
       .order('created_at', { ascending: false });
-    // Pick in_progress first, otherwise take the latest
-    const sessionData = sessions?.find(s => s.status === 'in_progress') || sessions?.[0] || null;
+    // Pick in_progress first, otherwise take the latest signed_off
+    const sessionData = sessions?.find(s => s.status === 'in_progress') || sessions?.find(s => s.status === 'signed_off') || sessions?.[0] || null;
     setSession(sessionData);
     if (sessionData) await loadSessionData(sessionData.id);
     setLoading(false);
@@ -554,3 +555,4 @@ export default function CompliancePage() {
     </div>
   );
 }
+
