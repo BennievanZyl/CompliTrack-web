@@ -111,6 +111,7 @@ export default function FinancesPage() {
         .select('id,cash_up_date,cash_up_total,total_cash,eft_total,payouts,variance,customer_count,average_spend,status,notes')
         .eq('store_id', STORE_ID)
         .gte('cash_up_date', monthStart).lte('cash_up_date', monthEnd)
+        .not('status', 'eq', 'draft')
         .order('cash_up_date', { ascending: false }),
       supabase.from('invoices')
         .select('*, invoice_lines(*)')
@@ -269,7 +270,7 @@ export default function FinancesPage() {
     const map: Record<string, { bg: string; color: string }> = {
       submitted: { bg: '#f0fdf4', color: '#16a34a' }, pending: { bg: '#fffbeb', color: '#d97706' },
       approved: { bg: '#eff6ff', color: '#2563eb' }, draft: { bg: '#f3f4f6', color: '#6b7280' },
-      paid: { bg: '#f0fdf4', color: '#15803d' },
+      paid: { bg: '#f0fdf4', color: '#15803d' }, signed_off: { bg: '#f0fdf4', color: '#15803d' },
     }
     const s = map[status] || { bg: '#f3f4f6', color: '#6b7280' }
     return <span style={{ background: s.bg, color: s.color, padding: '2px 10px', borderRadius: 20, fontSize: size, fontWeight: 600, textTransform: 'capitalize' as const }}>{status || 'draft'}</span>
