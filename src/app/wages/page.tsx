@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 
-const { storeId, loading: storeLoading } = useStore()
+const STORE_ID = '05328298-fc27-4c9f-b091-bb7f6598b601'
 type Employee = { id: string; full_name: string; role: string }
 type EmployeeWage = { id: string; employee_id: string; hourly_rate: number; uif_employee: number; uif_employer: number; tax_rate: number; pay_frequency: string; bank_name?: string; bank_account?: string; bank_branch?: string; id_number?: string }
 type PayrollPeriod = { id: string; period_start: string; period_end: string; pay_frequency: string; status: string }
