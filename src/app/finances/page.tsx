@@ -5,49 +5,63 @@ import { supabase } from '@/lib/supabase'
 
 const STORE_ID = '05328298-fc27-4c9f-b091-bb7f6598b601'
 const ORG_ID = 'e903386b-133a-4bad-b054-ef7ef616a3ff'
+const VAT_RATE = 0.15
 
-const TABS = ['Summary', 'Cash-Ups / Sales', 'Expenses', 'Food Cost']
+const TABS = ['Summary', 'Cash-Ups / Sales', 'Supplier Bills', 'Quick Expenses', 'Food Cost']
 
-const CAT_COLOURS: Record<string, string> = {
-  rent: '#3b82f6', utilities: '#f59e0b', stock_cogs: '#10b981', labour: '#8b5cf6',
-  royalties: '#ef4444', marketing: '#06b6d4', repairs: '#f97316',
-  insurance: '#6366f1', packaging: '#84cc16', other: '#6b7280'
-}
-const PAYMENT_METHODS = ['bank_transfer', 'cash', 'credit_card', 'debit_order', 'eft']
+// Matches Excel columns exactly
+const EXPENSE_CATEGORIES = [
+  { key: 'cost_of_sales', name: 'Cost of Sales', colour: '#10b981' },
+  { key: 'cleaning', name: 'Cleaning', colour: '#06b6d4' },
+  { key: 'packaging', name: 'Packaging', colour: '#84cc16' },
+  { key: 'banking', name: 'Banking', colour: '#3b82f6' },
+  { key: 'accounting', name: 'Accounting', colour: '#6366f1' },
+  { key: 'franchise_fee', name: 'Franchise Fee', colour: '#ef4444' },
+  { key: 'marketing', name: 'Marketing', colour: '#f97316' },
+  { key: 'casual_wages', name: 'Casual Wages', colour: '#8b5cf6' },
+  { key: 'micros', name: 'Micros', colour: '#14b8a6' },
+  { key: 'staff', name: 'Staff', colour: '#a855f7' },
+  { key: 'credit_cards', name: 'Credit Cards', colour: '#ec4899' },
+  { key: 'delivery', name: 'Delivery', colour: '#f59e0b' },
+  { key: 'gas', name: 'Gas', colour: '#64748b' },
+  { key: 'insurance', name: 'Insurance', colour: '#0ea5e9' },
+  { key: 'internet', name: 'Internet', colour: '#22c55e' },
+  { key: 'pest_control', name: 'Pest Control', colour: '#a16207' },
+  { key: 'rental', name: 'Rental', colour: '#dc2626' },
+  { key: 'repair', name: 'Repair & Maintenance', colour: '#ea580c' },
+  { key: 'salaries', name: 'Salaries', colour: '#7c3aed' },
+  { key: 'security', name: 'Security', colour: '#1d4ed8' },
+  { key: 'stationery', name: 'Stationery', colour: '#0891b2' },
+  { key: 'telephone', name: 'Telephone', colour: '#16a34a' },
+  { key: 'municipality', name: 'Municipality', colour: '#b45309' },
+  { key: 'fuel', name: 'Fuel', colour: '#475569' },
+  { key: 'other', name: 'Other', colour: '#6b7280' },
+]
+
+const CAT_MAP = Object.fromEntries(EXPENSE_CATEGORIES.map(c => [c.key, c]))
+
+const PAYMENT_METHODS = ['bank_transfer', 'cash', 'credit_card', 'debit_order', 'eft', 'cheque']
+const INVOICE_STATUSES = ['draft', 'approved', 'paid']
 
 type CashUp = {
-  id: string
-  cash_up_date: string
-  cash_up_total: number
-  total_cash: number
-  eft_total: number
-  payouts: number
-  variance: number
-  customer_count: number
-  average_spend: number
-  status: string
-  notes: string
-  submitted_by: string
+  id: string; cash_up_date: string; cash_up_total: number; total_cash: number
+  eft_total: number; payouts: number; variance: number; customer_count: number
+  average_spend: number; status: string; notes: string
 }
-
-type Expense = {
-  id: string
-  expense_date: string
-  category_id: string | null
-  category_name: string
-  description: string
-  amount: number
-  vat_amount: number
-  supplier: string
-  invoice_number: string
-  payment_method: string
-  notes: string
+type InvoiceLine = {
+  id?: string; category_key: string; description: string
+  amount: number; vat_amount: number
 }
-
-type ExpenseCategory = {
-  id: string
-  name: string
-  key: string
+type Invoice = {
+  id: string; supplier: string; invoice_number: string; invoice_date: string
+  due_date: string; status: string; payment_method: string; notes: string
+  total_amount: number; total_vat: number
+  invoice_lines?: InvoiceLine[]
+}
+type QuickExpense = {
+  id: string; expense_date: string; category_key: string; category_name: string
+  description: string; amount: number; vat_amount: number
+  supplier: string; invoice_number: string; payment_method: string; notes: string
 }
 
 function fmt(n: number) {
@@ -59,81 +73,178 @@ function thisMonth() {
 }
 function today() { return new Date().toISOString().split('T')[0] }
 
+const emptyLine = (): InvoiceLine => ({ category_key: 'cost_of_sales', description: '', amount: 0, vat_amount: 0 })
+const emptyInvoice = () => ({
+  supplier: '', invoice_number: '', invoice_date: today(),
+  due_date: '', status: 'draft', payment_method: 'bank_transfer', notes: ''
+})
+const emptyQuick = () => ({
+  expense_date: today(), category_key: 'other', description: '',
+  amount: '', vat_amount: '', supplier: '', invoice_number: '',
+  payment_method: 'cash', notes: ''
+})
+
 export default function FinancesPage() {
   const router = useRouter()
   const [tab, setTab] = useState(0)
   const [month, setMonth] = useState(thisMonth())
 
   const [cashUps, setCashUps] = useState<CashUp[]>([])
-  const [expenses, setExpenses] = useState<Expense[]>([])
-  const [categories, setCategories] = useState<ExpenseCategory[]>([])
+  const [invoices, setInvoices] = useState<Invoice[]>([])
+  const [quickExp, setQuickExp] = useState<QuickExpense[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
-  const [showExpForm, setShowExpForm] = useState(false)
-  const [editExp, setEditExp] = useState<Expense | null>(null)
-  const [expForm, setExpForm] = useState({
-    expense_date: today(), category_id: '', description: '', amount: '',
-    vat_amount: '', supplier: '', invoice_number: '', payment_method: 'bank_transfer', notes: ''
-  })
+  // Invoice form state
+  const [showInvForm, setShowInvForm] = useState(false)
+  const [editInv, setEditInv] = useState<Invoice | null>(null)
+  const [invForm, setInvForm] = useState(emptyInvoice())
+  const [invLines, setInvLines] = useState<InvoiceLine[]>([emptyLine()])
+  const [expandedInv, setExpandedInv] = useState<string | null>(null)
+
+  // Quick expense form state
+  const [showQForm, setShowQForm] = useState(false)
+  const [editQ, setEditQ] = useState<QuickExpense | null>(null)
+  const [qForm, setQForm] = useState(emptyQuick())
 
   const load = useCallback(async () => {
     setLoading(true)
     const monthStart = `${month}-01`
     const monthEnd = `${month}-31`
-    const [cuRes, expRes, catRes] = await Promise.all([
-      supabase.from('cash_ups').select('id,cash_up_date,cash_up_total,total_cash,eft_total,payouts,variance,customer_count,average_spend,status,notes,submitted_by')
+    const [cuRes, invRes, qRes] = await Promise.all([
+      supabase.from('cash_ups')
+        .select('id,cash_up_date,cash_up_total,total_cash,eft_total,payouts,variance,customer_count,average_spend,status,notes')
         .eq('store_id', STORE_ID)
         .gte('cash_up_date', monthStart).lte('cash_up_date', monthEnd)
         .order('cash_up_date', { ascending: false }),
-      supabase.from('expenses').select('*').eq('store_id', STORE_ID)
+      supabase.from('invoices')
+        .select('*, invoice_lines(*)')
+        .eq('store_id', STORE_ID)
+        .gte('invoice_date', monthStart).lte('invoice_date', monthEnd)
+        .order('invoice_date', { ascending: false }),
+      supabase.from('expenses')
+        .select('*').eq('store_id', STORE_ID)
         .gte('expense_date', monthStart).lte('expense_date', monthEnd)
         .order('expense_date', { ascending: false }),
-      supabase.from('expense_categories').select('id, name, key')
-        .eq('organisation_id', ORG_ID).eq('is_active', true).order('sort_order'),
     ])
     setCashUps(cuRes.data || [])
-    setExpenses(expRes.data || [])
-    setCategories(catRes.data || [])
+    setInvoices(invRes.data || [])
+    setQuickExp(qRes.data || [])
     setLoading(false)
   }, [month])
 
   useEffect(() => { load() }, [load])
 
-  // Summary calcs
+  // ── Summary calcs ──
   const totalSales = cashUps.reduce((s, r) => s + Number(r.cash_up_total || 0), 0)
-  const totalExpenses = expenses.reduce((s, r) => s + Number(r.amount || 0), 0)
+  const totalInvoices = invoices.reduce((s, r) => s + Number(r.total_amount || 0), 0)
+  const totalQuick = quickExp.reduce((s, r) => s + Number(r.amount || 0), 0)
+  const totalExpenses = totalInvoices + totalQuick
   const netProfit = totalSales - totalExpenses
   const totalVariance = cashUps.reduce((s, r) => s + Number(r.variance || 0), 0)
   const totalCustomers = cashUps.reduce((s, r) => s + Number(r.customer_count || 0), 0)
 
+  // Category breakdown across invoices + quick
   const expByCategory: Record<string, number> = {}
-  expenses.forEach(e => {
-    const k = e.category_name || 'Other'
+  invoices.forEach(inv => {
+    (inv.invoice_lines || []).forEach(line => {
+      const k = CAT_MAP[line.category_key]?.name || line.category_key
+      expByCategory[k] = (expByCategory[k] || 0) + Number(line.amount)
+    })
+  })
+  quickExp.forEach(e => {
+    const k = CAT_MAP[e.category_key]?.name || e.category_name || 'Other'
     expByCategory[k] = (expByCategory[k] || 0) + Number(e.amount)
   })
 
-  // Expense CRUD
-  async function saveExp() {
+  // ── Invoice CRUD ──
+  function openNewInvoice() {
+    setEditInv(null); setInvForm(emptyInvoice()); setInvLines([emptyLine()]); setShowInvForm(true)
+  }
+  function openEditInvoice(inv: Invoice) {
+    setEditInv(inv)
+    setInvForm({ supplier: inv.supplier, invoice_number: inv.invoice_number, invoice_date: inv.invoice_date, due_date: inv.due_date || '', status: inv.status, payment_method: inv.payment_method || 'bank_transfer', notes: inv.notes || '' })
+    setInvLines(inv.invoice_lines?.length ? inv.invoice_lines.map(l => ({ id: l.id, category_key: l.category_key, description: l.description || '', amount: Number(l.amount), vat_amount: Number(l.vat_amount || 0) })) : [emptyLine()])
+    setShowInvForm(true)
+  }
+
+  function addLine() { setInvLines(l => [...l, emptyLine()]) }
+  function removeLine(i: number) { setInvLines(l => l.filter((_, idx) => idx !== i)) }
+  function updateLine(i: number, field: keyof InvoiceLine, value: string | number) {
+    setInvLines(lines => lines.map((l, idx) => {
+      if (idx !== i) return l
+      const updated = { ...l, [field]: value }
+      // Auto-calc VAT when amount changes
+      if (field === 'amount') updated.vat_amount = Math.round(Number(value) / (1 + VAT_RATE) * VAT_RATE * 100) / 100
+      return updated
+    }))
+  }
+
+  const lineTotal = invLines.reduce((s, l) => s + Number(l.amount || 0), 0)
+  const lineVatTotal = invLines.reduce((s, l) => s + Number(l.vat_amount || 0), 0)
+
+  async function saveInvoice() {
+    if (!invForm.supplier) { setError('Supplier is required'); return }
+    if (!invForm.invoice_date) { setError('Date is required'); return }
+    if (invLines.every(l => !l.amount)) { setError('At least one line item with an amount is required'); return }
     setSaving(true); setError('')
-    const cat = categories.find(c => c.id === expForm.category_id)
     const payload = {
       store_id: STORE_ID,
-      expense_date: expForm.expense_date,
-      category_id: expForm.category_id || null,
-      category_name: cat?.name || '',
-      description: expForm.description,
-      amount: parseFloat(expForm.amount) || 0,
-      vat_amount: parseFloat(expForm.vat_amount) || 0,
-      supplier: expForm.supplier,
-      invoice_number: expForm.invoice_number,
-      payment_method: expForm.payment_method,
-      notes: expForm.notes,
+      organisation_id: ORG_ID,
+      ...invForm,
+      total_amount: lineTotal,
+      total_vat: lineVatTotal,
+    }
+    let invoiceId = editInv?.id
+    if (editInv) {
+      const { error: e } = await supabase.from('invoices').update(payload).eq('id', editInv.id)
+      if (e) { setError(e.message); setSaving(false); return }
+      await supabase.from('invoice_lines').delete().eq('invoice_id', editInv.id)
+    } else {
+      const { data, error: e } = await supabase.from('invoices').insert(payload).select().single()
+      if (e) { setError(e.message); setSaving(false); return }
+      invoiceId = data.id
+    }
+    const lines = invLines.filter(l => Number(l.amount) > 0).map(l => ({
+      invoice_id: invoiceId, store_id: STORE_ID,
+      category_key: l.category_key, description: l.description,
+      amount: Number(l.amount), vat_amount: Number(l.vat_amount || 0),
+    }))
+    if (lines.length) {
+      const { error: le } = await supabase.from('invoice_lines').insert(lines)
+      if (le) { setError(le.message); setSaving(false); return }
+    }
+    setSaving(false); setShowInvForm(false); setEditInv(null); load()
+  }
+
+  async function deleteInvoice(id: string) {
+    if (!confirm('Delete this invoice and all its lines?')) return
+    await supabase.from('invoice_lines').delete().eq('invoice_id', id)
+    await supabase.from('invoices').delete().eq('id', id)
+    load()
+  }
+
+  async function updateInvoiceStatus(id: string, status: string) {
+    await supabase.from('invoices').update({ status }).eq('id', id)
+    load()
+  }
+
+  // ── Quick expense CRUD ──
+  async function saveQuick() {
+    setSaving(true); setError('')
+    const cat = EXPENSE_CATEGORIES.find(c => c.key === qForm.category_key)
+    const payload = {
+      store_id: STORE_ID, expense_date: qForm.expense_date,
+      category_key: qForm.category_key, category_name: cat?.name || '',
+      description: qForm.description, amount: parseFloat(String(qForm.amount)) || 0,
+      vat_amount: parseFloat(String(qForm.vat_amount)) || 0,
+      supplier: qForm.supplier, invoice_number: qForm.invoice_number,
+      payment_method: qForm.payment_method, notes: qForm.notes,
     }
     let err = null
-    if (editExp) {
-      const res = await supabase.from('expenses').update(payload).eq('id', editExp.id)
+    if (editQ) {
+      const res = await supabase.from('expenses').update(payload).eq('id', editQ.id)
       err = res.error
     } else {
       const res = await supabase.from('expenses').insert(payload)
@@ -141,69 +252,40 @@ export default function FinancesPage() {
     }
     setSaving(false)
     if (err) { setError(err.message); return }
-    setShowExpForm(false); setEditExp(null); load()
+    setShowQForm(false); setEditQ(null); load()
   }
 
-  async function deleteExp(id: string) {
+  async function deleteQuick(id: string) {
     if (!confirm('Delete this expense?')) return
     await supabase.from('expenses').delete().eq('id', id)
     load()
   }
 
-  function openEditExp(e: Expense) {
-    setEditExp(e)
-    setExpForm({
-      expense_date: e.expense_date, category_id: e.category_id || '',
-      description: e.description, amount: String(e.amount),
-      vat_amount: String(e.vat_amount || ''), supplier: e.supplier || '',
-      invoice_number: e.invoice_number || '', payment_method: e.payment_method || 'bank_transfer',
-      notes: e.notes || ''
-    })
-    setShowExpForm(true)
-  }
+  // ── Styles ──
+  const hdr: React.CSSProperties = { background: 'linear-gradient(135deg, #0a1f12 0%, #1a5c38 100%)', padding: '24px 32px', color: '#fff', display: 'flex', alignItems: 'center', gap: 16 }
+  const card: React.CSSProperties = { background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 1px 4px rgba(0,0,0,0.08)', marginBottom: 16 }
+  const inp: React.CSSProperties = { width: '100%', padding: '10px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 14, boxSizing: 'border-box' as const }
+  const btn = (color = '#1a5c38'): React.CSSProperties => ({ background: color, color: '#fff', border: 'none', borderRadius: 8, padding: '10px 18px', cursor: 'pointer', fontSize: 14, fontWeight: 600 })
+  const smBtn = (bg: string, color: string): React.CSSProperties => ({ background: bg, color, border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 12, fontWeight: 600 })
 
-  const hdr: React.CSSProperties = {
-    background: 'linear-gradient(135deg, #0a1f12 0%, #1a5c38 100%)',
-    padding: '24px 32px', color: '#fff', display: 'flex', alignItems: 'center', gap: 16
-  }
-  const card: React.CSSProperties = {
-    background: '#fff', borderRadius: 12, padding: 24,
-    boxShadow: '0 1px 4px rgba(0,0,0,0.08)', marginBottom: 16
-  }
-  const inp: React.CSSProperties = {
-    width: '100%', padding: '10px 12px', border: '1px solid #d1d5db',
-    borderRadius: 8, fontSize: 14, boxSizing: 'border-box' as const
-  }
-  const btn = (color = '#1a5c38'): React.CSSProperties => ({
-    background: color, color: '#fff', border: 'none', borderRadius: 8,
-    padding: '10px 18px', cursor: 'pointer', fontSize: 14, fontWeight: 600
-  })
-
-  const statusBadge = (status: string) => {
-    const map: Record<string, {bg: string, color: string}> = {
-      submitted: { bg: '#f0fdf4', color: '#16a34a' },
-      pending: { bg: '#fffbeb', color: '#d97706' },
-      approved: { bg: '#eff6ff', color: '#2563eb' },
+  const statusBadge = (status: string, size = 12) => {
+    const map: Record<string, { bg: string; color: string }> = {
+      submitted: { bg: '#f0fdf4', color: '#16a34a' }, pending: { bg: '#fffbeb', color: '#d97706' },
+      approved: { bg: '#eff6ff', color: '#2563eb' }, draft: { bg: '#f3f4f6', color: '#6b7280' },
+      paid: { bg: '#f0fdf4', color: '#15803d' },
     }
     const s = map[status] || { bg: '#f3f4f6', color: '#6b7280' }
-    return (
-      <span style={{ background: s.bg, color: s.color, padding: '2px 10px', borderRadius: 20, fontSize: 12, fontWeight: 600, textTransform: 'capitalize' as const }}>
-        {status || 'draft'}
-      </span>
-    )
+    return <span style={{ background: s.bg, color: s.color, padding: '2px 10px', borderRadius: 20, fontSize: size, fontWeight: 600, textTransform: 'capitalize' as const }}>{status || 'draft'}</span>
   }
 
   return (
     <div style={{ minHeight: '100vh', background: '#f0f4f0' }}>
       {/* Header */}
       <div style={hdr}>
-        <button onClick={() => router.push('/dashboard')}
-          style={{ background: 'rgba(255,255,255,0.15)', border: 'none', borderRadius: 8, color: '#fff', padding: '8px 14px', cursor: 'pointer', fontSize: 14 }}>
-          ← Back
-        </button>
+        <button onClick={() => router.push('/dashboard')} style={{ background: 'rgba(255,255,255,0.15)', border: 'none', borderRadius: 8, color: '#fff', padding: '8px 14px', cursor: 'pointer', fontSize: 14 }}>← Back</button>
         <div>
           <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>💰 Income &amp; Expenses</h1>
-          <p style={{ margin: '2px 0 0', opacity: 0.7, fontSize: 13 }}>Track sales, costs and profitability</p>
+          <p style={{ margin: '2px 0 0', opacity: 0.7, fontSize: 13 }}>Track sales, supplier bills and expenses</p>
         </div>
         <div style={{ marginLeft: 'auto' }}>
           <input type="month" value={month} onChange={e => setMonth(e.target.value)}
@@ -212,10 +294,10 @@ export default function FinancesPage() {
       </div>
 
       {/* Tabs */}
-      <div style={{ background: '#fff', borderBottom: '1px solid #e5e7eb', display: 'flex', paddingLeft: 24 }}>
+      <div style={{ background: '#fff', borderBottom: '1px solid #e5e7eb', display: 'flex', paddingLeft: 24, overflowX: 'auto' }}>
         {TABS.map((t, i) => (
           <button key={t} onClick={() => setTab(i)}
-            style={{ padding: '14px 20px', border: 'none', background: 'none', cursor: 'pointer',
+            style={{ padding: '14px 20px', border: 'none', background: 'none', cursor: 'pointer', whiteSpace: 'nowrap',
               fontWeight: tab === i ? 700 : 400, color: tab === i ? '#1a5c38' : '#6b7280', fontSize: 14,
               borderBottom: tab === i ? '2px solid #1a5c38' : '2px solid transparent' }}>
             {t}
@@ -224,294 +306,418 @@ export default function FinancesPage() {
       </div>
 
       <div style={{ maxWidth: 1200, margin: '0 auto', padding: '24px 16px' }}>
-        {loading ? (
-          <div style={{ textAlign: 'center', padding: 60, color: '#6b7280' }}>Loading…</div>
-        ) : (
-          <>
-            {/* ── SUMMARY ── */}
-            {tab === 0 && (
-              <div>
-                {/* KPI row */}
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 16, marginBottom: 24 }}>
+        {loading ? <div style={{ textAlign: 'center', padding: 60, color: '#6b7280' }}>Loading…</div> : (<>
+
+          {/* ── SUMMARY ── */}
+          {tab === 0 && (
+            <div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 16, marginBottom: 24 }}>
+                {[
+                  { label: 'Total Sales', value: fmt(totalSales), color: '#16a34a', icon: '📈', sub: `${cashUps.length} cash-ups` },
+                  { label: 'Supplier Bills', value: fmt(totalInvoices), color: '#dc2626', icon: '🧾', sub: `${invoices.length} invoices` },
+                  { label: 'Quick Expenses', value: fmt(totalQuick), color: '#f97316', icon: '💵', sub: `${quickExp.length} entries` },
+                  { label: netProfit >= 0 ? 'Net Profit' : 'Net Loss', value: fmt(netProfit), color: netProfit >= 0 ? '#1a5c38' : '#ef4444', icon: netProfit >= 0 ? '✅' : '⚠️', sub: totalSales > 0 ? `${((netProfit / totalSales) * 100).toFixed(1)}% margin` : '' },
+                  { label: 'Variance', value: fmt(totalVariance), color: Math.abs(totalVariance) > 500 ? '#dc2626' : '#6b7280', icon: '⚖️', sub: `${totalCustomers} customers` },
+                ].map(k => (
+                  <div key={k.label} style={{ ...card, marginBottom: 0, textAlign: 'center', padding: 18 }}>
+                    <div style={{ fontSize: 24 }}>{k.icon}</div>
+                    <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>{k.label}</div>
+                    <div style={{ fontSize: 20, fontWeight: 700, color: k.color, marginTop: 4 }}>{k.value}</div>
+                    {k.sub && <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>{k.sub}</div>}
+                  </div>
+                ))}
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                <div style={card}>
+                  <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 700 }}>Expense Breakdown by Category</h3>
+                  {Object.keys(expByCategory).length === 0
+                    ? <p style={{ color: '#6b7280', fontSize: 14 }}>No expenses recorded this month.</p>
+                    : Object.entries(expByCategory).sort((a, b) => b[1] - a[1]).map(([cat, amt]) => {
+                      const pct = totalExpenses > 0 ? (amt / totalExpenses) * 100 : 0
+                      const catEntry = EXPENSE_CATEGORIES.find(c => c.name === cat)
+                      return (
+                        <div key={cat} style={{ marginBottom: 12 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, fontSize: 13 }}>
+                            <span style={{ fontWeight: 600 }}>{cat}</span>
+                            <span>{fmt(amt)} <span style={{ color: '#9ca3af' }}>({pct.toFixed(1)}%)</span></span>
+                          </div>
+                          <div style={{ background: '#f3f4f6', borderRadius: 6, height: 7 }}>
+                            <div style={{ background: catEntry?.colour || '#6b7280', width: `${pct}%`, height: 7, borderRadius: 6 }} />
+                          </div>
+                        </div>
+                      )
+                    })}
+                </div>
+                <div style={card}>
+                  <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 700 }}>Sales vs Expenses — {month}</h3>
                   {[
-                    { label: 'Total Sales', value: fmt(totalSales), color: '#16a34a', icon: '📈', sub: `${cashUps.length} cash-ups` },
-                    { label: 'Total Expenses', value: fmt(totalExpenses), color: '#dc2626', icon: '🧾', sub: `${expenses.length} entries` },
-                    { label: netProfit >= 0 ? 'Net Profit' : 'Net Loss', value: fmt(netProfit), color: netProfit >= 0 ? '#1a5c38' : '#ef4444', icon: netProfit >= 0 ? '✅' : '⚠️', sub: totalSales > 0 ? `${((netProfit/totalSales)*100).toFixed(1)}% margin` : '' },
-                    { label: 'Total Variance', value: fmt(totalVariance), color: Math.abs(totalVariance) > 500 ? '#dc2626' : '#6b7280', icon: '⚖️', sub: 'cash vs POS' },
-                    { label: 'Customers', value: totalCustomers.toLocaleString(), color: '#2563eb', icon: '👥', sub: cashUps.length > 0 ? `avg ${Math.round(totalCustomers/cashUps.length)}/day` : '' },
-                  ].map(k => (
-                    <div key={k.label} style={{ ...card, marginBottom: 0, textAlign: 'center', padding: 18 }}>
-                      <div style={{ fontSize: 24 }}>{k.icon}</div>
-                      <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>{k.label}</div>
-                      <div style={{ fontSize: 20, fontWeight: 700, color: k.color, marginTop: 4 }}>{k.value}</div>
-                      {k.sub && <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>{k.sub}</div>}
+                    { label: 'Total Sales', value: totalSales, color: '#16a34a', pct: 100 },
+                    { label: 'Supplier Bills', value: totalInvoices, color: '#dc2626', pct: totalSales > 0 ? (totalInvoices / totalSales) * 100 : 0 },
+                    { label: 'Quick Expenses', value: totalQuick, color: '#f97316', pct: totalSales > 0 ? (totalQuick / totalSales) * 100 : 0 },
+                  ].map(row => (
+                    <div key={row.label} style={{ marginBottom: 16 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, marginBottom: 4 }}>
+                        <span style={{ fontWeight: 600 }}>{row.label}</span>
+                        <span style={{ color: row.color, fontWeight: 700 }}>{fmt(row.value)}</span>
+                      </div>
+                      <div style={{ background: '#f3f4f6', borderRadius: 6, height: 10 }}>
+                        <div style={{ background: row.color, width: `${Math.min(row.pct, 100)}%`, height: 10, borderRadius: 6 }} />
+                      </div>
                     </div>
                   ))}
-                </div>
-
-                {/* Expense breakdown */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-                  <div style={card}>
-                    <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 700 }}>Expense Breakdown</h3>
-                    {Object.keys(expByCategory).length === 0 ? (
-                      <p style={{ color: '#6b7280', fontSize: 14 }}>No expenses recorded this month.</p>
-                    ) : (
-                      Object.entries(expByCategory).sort((a, b) => b[1] - a[1]).map(([cat, amt]) => {
-                        const pct = totalExpenses > 0 ? (amt / totalExpenses) * 100 : 0
-                        const catColor = CAT_COLOURS[categories.find(c => c.name === cat)?.key || 'other'] || '#6b7280'
-                        return (
-                          <div key={cat} style={{ marginBottom: 14 }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, fontSize: 13 }}>
-                              <span style={{ fontWeight: 600 }}>{cat}</span>
-                              <span>{fmt(amt)} <span style={{ color: '#9ca3af' }}>({pct.toFixed(1)}%)</span></span>
-                            </div>
-                            <div style={{ background: '#f3f4f6', borderRadius: 6, height: 8 }}>
-                              <div style={{ background: catColor, width: `${pct}%`, height: 8, borderRadius: 6 }} />
-                            </div>
-                          </div>
-                        )
-                      })
-                    )}
-                  </div>
-
-                  {/* Cash-up summary */}
-                  <div style={card}>
-                    <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 700 }}>Sales Summary — {month}</h3>
-                    {cashUps.length === 0 ? (
-                      <p style={{ color: '#6b7280', fontSize: 14 }}>No cash-ups submitted this month.</p>
-                    ) : (
-                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-                        <thead>
-                          <tr style={{ borderBottom: '2px solid #e5e7eb' }}>
-                            {['Date', 'Total', 'Cash', 'EFT', 'Variance', 'Status'].map(h => (
-                              <th key={h} style={{ padding: '6px 8px', textAlign: h === 'Date' || h === 'Status' ? 'left' : 'right', color: '#6b7280', fontWeight: 600, fontSize: 12 }}>{h}</th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {[...cashUps].sort((a,b) => a.cash_up_date.localeCompare(b.cash_up_date)).map(c => (
-                            <tr key={c.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                              <td style={{ padding: '7px 8px' }}>{c.cash_up_date}</td>
-                              <td style={{ padding: '7px 8px', textAlign: 'right', fontWeight: 600, color: '#16a34a' }}>{fmt(Number(c.cash_up_total))}</td>
-                              <td style={{ padding: '7px 8px', textAlign: 'right' }}>{fmt(Number(c.total_cash))}</td>
-                              <td style={{ padding: '7px 8px', textAlign: 'right' }}>{fmt(Number(c.eft_total))}</td>
-                              <td style={{ padding: '7px 8px', textAlign: 'right', color: Math.abs(Number(c.variance)) > 50 ? '#dc2626' : '#16a34a' }}>{fmt(Number(c.variance))}</td>
-                              <td style={{ padding: '7px 8px' }}>{statusBadge(c.status)}</td>
-                            </tr>
-                          ))}
-                          <tr style={{ borderTop: '2px solid #e5e7eb', background: '#f0fdf4' }}>
-                            <td style={{ padding: '8px', fontWeight: 700 }}>Total</td>
-                            <td style={{ padding: '8px', textAlign: 'right', fontWeight: 800, color: '#16a34a' }}>{fmt(totalSales)}</td>
-                            <td colSpan={4} />
-                          </tr>
-                        </tbody>
-                      </table>
-                    )}
+                  <div style={{ borderTop: '2px solid #e5e7eb', paddingTop: 12, marginTop: 4, display: 'flex', justifyContent: 'space-between', fontSize: 15, fontWeight: 700 }}>
+                    <span>{netProfit >= 0 ? 'Net Profit' : 'Net Loss'}</span>
+                    <span style={{ color: netProfit >= 0 ? '#16a34a' : '#dc2626' }}>{fmt(netProfit)}</span>
                   </div>
                 </div>
               </div>
-            )}
+            </div>
+          )}
 
-            {/* ── CASH-UPS / SALES ── */}
-            {tab === 1 && (
-              <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                  <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Cash-Ups / Sales</h2>
-                  <button style={btn()} onClick={() => router.push('/cashup')}>
-                    + New Cash-Up →
-                  </button>
-                </div>
-                <div style={{ ...card, background: '#fffbeb', border: '1px solid #fde68a', padding: '12px 16px', marginBottom: 16 }}>
-                  <p style={{ margin: 0, fontSize: 13, color: '#92400e' }}>
-                    💡 Cash-ups are submitted via the <strong>Cash-Up module</strong> in the mobile app or at <a href="/cashup" style={{ color: '#92400e' }}>/cashup</a>. Sales figures here are pulled directly from submitted cash-ups.
-                  </p>
-                </div>
-
-                {cashUps.length === 0 ? (
-                  <div style={{ ...card, textAlign: 'center', padding: 48, color: '#6b7280' }}>
-                    <div style={{ fontSize: 40, marginBottom: 8 }}>🧾</div>
-                    <p>No cash-ups submitted for {month}.</p>
-                    <button style={{ ...btn(), marginTop: 12 }} onClick={() => router.push('/cashup')}>Go to Cash-Up →</button>
-                  </div>
-                ) : (
-                  <div style={card}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
-                      <thead>
-                        <tr style={{ borderBottom: '2px solid #e5e7eb' }}>
-                          {['Date', 'POS Total', 'Cash', 'EFT', 'Payouts', 'Variance', 'Customers', 'Avg Spend', 'Status'].map(h => (
-                            <th key={h} style={{ padding: '8px 10px', textAlign: h === 'Date' || h === 'Status' ? 'left' : 'right', color: '#6b7280', fontWeight: 600, fontSize: 12, whiteSpace: 'nowrap' }}>{h}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {cashUps.map(c => (
-                          <tr key={c.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                            <td style={{ padding: '9px 10px', fontWeight: 600 }}>{c.cash_up_date}</td>
-                            <td style={{ padding: '9px 10px', textAlign: 'right', fontWeight: 700, color: '#16a34a' }}>{fmt(Number(c.cash_up_total))}</td>
-                            <td style={{ padding: '9px 10px', textAlign: 'right' }}>{fmt(Number(c.total_cash))}</td>
-                            <td style={{ padding: '9px 10px', textAlign: 'right' }}>{fmt(Number(c.eft_total))}</td>
-                            <td style={{ padding: '9px 10px', textAlign: 'right', color: '#dc2626' }}>{fmt(Number(c.payouts))}</td>
-                            <td style={{ padding: '9px 10px', textAlign: 'right', color: Math.abs(Number(c.variance)) > 50 ? '#dc2626' : '#16a34a', fontWeight: 600 }}>{fmt(Number(c.variance))}</td>
-                            <td style={{ padding: '9px 10px', textAlign: 'right' }}>{c.customer_count || '—'}</td>
-                            <td style={{ padding: '9px 10px', textAlign: 'right' }}>{c.average_spend ? fmt(Number(c.average_spend)) : '—'}</td>
-                            <td style={{ padding: '9px 10px' }}>{statusBadge(c.status)}</td>
-                          </tr>
-                        ))}
-                        <tr style={{ borderTop: '2px solid #e5e7eb', background: '#f0fdf4' }}>
-                          <td style={{ padding: '10px', fontWeight: 700 }}>Month Total</td>
-                          <td style={{ padding: '10px', textAlign: 'right', fontWeight: 800, color: '#16a34a', fontSize: 15 }}>{fmt(totalSales)}</td>
-                          <td colSpan={7} />
-                        </tr>
-                      </tbody>
-                    </table>
-                  </div>
-                )}
+          {/* ── CASH-UPS / SALES ── */}
+          {tab === 1 && (
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Cash-Ups / Sales</h2>
+                <button style={btn()} onClick={() => router.push('/cashup')}>+ New Cash-Up →</button>
               </div>
-            )}
-
-            {/* ── EXPENSES ── */}
-            {tab === 2 && (
-              <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                  <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Expenses</h2>
-                  <button style={btn()} onClick={() => {
-                    setEditExp(null)
-                    setExpForm({ expense_date: today(), category_id: '', description: '', amount: '', vat_amount: '', supplier: '', invoice_number: '', payment_method: 'bank_transfer', notes: '' })
-                    setShowExpForm(true)
-                  }}>+ Add Expense</button>
-                </div>
-
-                {showExpForm && (
-                  <div style={{ ...card, border: '2px solid #1a5c38', marginBottom: 24 }}>
-                    <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 700 }}>{editExp ? 'Edit' : 'New'} Expense</h3>
-                    {error && <div style={{ background: '#fef2f2', color: '#dc2626', padding: '8px 12px', borderRadius: 8, marginBottom: 12, fontSize: 13 }}>{error}</div>}
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
-                      <div>
-                        <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Date *</label>
-                        <input type="date" value={expForm.expense_date} onChange={e => setExpForm(f => ({...f, expense_date: e.target.value}))} style={inp} />
-                      </div>
-                      <div>
-                        <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Category</label>
-                        <select value={expForm.category_id} onChange={e => setExpForm(f => ({...f, category_id: e.target.value}))} style={inp}>
-                          <option value="">— Select —</option>
-                          {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                        </select>
-                      </div>
-                      <div>
-                        <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Payment Method</label>
-                        <select value={expForm.payment_method} onChange={e => setExpForm(f => ({...f, payment_method: e.target.value}))} style={inp}>
-                          {PAYMENT_METHODS.map(m => <option key={m} value={m}>{m.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</option>)}
-                        </select>
-                      </div>
-                      <div style={{ gridColumn: 'span 2' }}>
-                        <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Description *</label>
-                        <input type="text" placeholder="e.g. Monthly electricity bill" value={expForm.description} onChange={e => setExpForm(f => ({...f, description: e.target.value}))} style={inp} />
-                      </div>
-                      <div>
-                        <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Amount (R) *</label>
-                        <input type="number" step="0.01" placeholder="0.00" value={expForm.amount} onChange={e => setExpForm(f => ({...f, amount: e.target.value}))} style={inp} />
-                      </div>
-                      <div>
-                        <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>VAT Amount (R)</label>
-                        <input type="number" step="0.01" placeholder="0.00" value={expForm.vat_amount} onChange={e => setExpForm(f => ({...f, vat_amount: e.target.value}))} style={inp} />
-                      </div>
-                      <div>
-                        <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Supplier</label>
-                        <input type="text" placeholder="Supplier name" value={expForm.supplier} onChange={e => setExpForm(f => ({...f, supplier: e.target.value}))} style={inp} />
-                      </div>
-                      <div>
-                        <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Invoice #</label>
-                        <input type="text" placeholder="INV-001" value={expForm.invoice_number} onChange={e => setExpForm(f => ({...f, invoice_number: e.target.value}))} style={inp} />
-                      </div>
-                      <div>
-                        <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Notes</label>
-                        <input type="text" placeholder="Optional notes" value={expForm.notes} onChange={e => setExpForm(f => ({...f, notes: e.target.value}))} style={inp} />
-                      </div>
-                    </div>
-                    <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
-                      <button style={btn()} onClick={saveExp} disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
-                      <button style={btn('#6b7280')} onClick={() => { setShowExpForm(false); setEditExp(null) }}>Cancel</button>
-                    </div>
-                  </div>
-                )}
-
-                {expenses.length === 0 ? (
-                  <div style={{ ...card, textAlign: 'center', padding: 48, color: '#6b7280' }}>
-                    <div style={{ fontSize: 40, marginBottom: 8 }}>🧾</div>
-                    No expenses for {month}. Click &quot;Add Expense&quot; to start.
-                  </div>
-                ) : (
-                  <div style={card}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
-                      <thead>
-                        <tr style={{ borderBottom: '2px solid #e5e7eb' }}>
-                          {['Date', 'Category', 'Description', 'Supplier', 'Inv #', 'VAT', 'Amount', 'Method', ''].map(h => (
-                            <th key={h} style={{ textAlign: h === 'Amount' || h === 'VAT' ? 'right' : 'left', padding: '8px 10px', color: '#6b7280', fontWeight: 600, fontSize: 12, whiteSpace: 'nowrap' }}>{h}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {expenses.map(e => {
-                          const catColor = CAT_COLOURS[categories.find(c => c.id === e.category_id)?.key || 'other'] || '#6b7280'
-                          return (
-                            <tr key={e.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                              <td style={{ padding: '9px 10px' }}>{e.expense_date}</td>
-                              <td style={{ padding: '9px 10px' }}>
-                                <span style={{ background: catColor + '20', color: catColor, padding: '2px 8px', borderRadius: 20, fontSize: 12, fontWeight: 600 }}>
-                                  {e.category_name || '—'}
-                                </span>
-                              </td>
-                              <td style={{ padding: '9px 10px' }}>{e.description}</td>
-                              <td style={{ padding: '9px 10px', color: '#6b7280', fontSize: 12 }}>{e.supplier || '—'}</td>
-                              <td style={{ padding: '9px 10px', color: '#6b7280', fontSize: 12 }}>{e.invoice_number || '—'}</td>
-                              <td style={{ padding: '9px 10px', textAlign: 'right', color: '#6b7280', fontSize: 12 }}>{e.vat_amount ? fmt(Number(e.vat_amount)) : '—'}</td>
-                              <td style={{ padding: '9px 10px', textAlign: 'right', fontWeight: 700, color: '#dc2626' }}>{fmt(Number(e.amount))}</td>
-                              <td style={{ padding: '9px 10px', color: '#6b7280', fontSize: 12 }}>{(e.payment_method || '').replace(/_/g, ' ')}</td>
-                              <td style={{ padding: '9px 10px' }}>
-                                <div style={{ display: 'flex', gap: 6 }}>
-                                  <button onClick={() => openEditExp(e)} style={{ background: '#eff6ff', color: '#2563eb', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 12 }}>Edit</button>
-                                  <button onClick={() => deleteExp(e.id)} style={{ background: '#fef2f2', color: '#dc2626', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 12 }}>Del</button>
-                                </div>
-                              </td>
-                            </tr>
-                          )
-                        })}
-                        <tr style={{ borderTop: '2px solid #e5e7eb', background: '#fef2f2' }}>
-                          <td colSpan={6} style={{ padding: '10px', fontWeight: 700 }}>Month Total</td>
-                          <td style={{ padding: '10px', textAlign: 'right', fontWeight: 800, color: '#dc2626', fontSize: 15 }}>{fmt(totalExpenses)}</td>
-                          <td colSpan={2} />
-                        </tr>
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* ── FOOD COST ── */}
-            {tab === 3 && (
-              <div style={{ ...card, textAlign: 'center', padding: 60 }}>
-                <div style={{ fontSize: 48, marginBottom: 12 }}>🍔</div>
-                <h3 style={{ margin: '0 0 8px', fontSize: 20, fontWeight: 700 }}>Food Cost Analysis</h3>
-                <p style={{ color: '#6b7280', fontSize: 14, maxWidth: 400, margin: '0 auto 16px' }}>
-                  Compare theoretical vs actual food cost using your Stock Management data.
+              <div style={{ ...card, background: '#fffbeb', border: '1px solid #fde68a', padding: '12px 16px', marginBottom: 16 }}>
+                <p style={{ margin: 0, fontSize: 13, color: '#92400e' }}>
+                  💡 Sales figures are pulled directly from submitted cash-ups. Submit cash-ups via the mobile app or <a href="/cashup" style={{ color: '#92400e' }}>/cashup</a>.
                 </p>
-                <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, padding: '16px 24px', display: 'inline-block', textAlign: 'left' }}>
-                  <p style={{ margin: '0 0 6px', fontWeight: 700, color: '#166534', fontSize: 14 }}>Coming next:</p>
-                  <ul style={{ margin: 0, paddingLeft: 20, color: '#374151', fontSize: 13, lineHeight: 1.8 }}>
-                    <li>Opening stock value</li>
-                    <li>Purchases from stock module</li>
-                    <li>Closing stock value + wastage</li>
-                    <li>Food cost % vs Mochachos target</li>
-                  </ul>
-                </div>
-                <div style={{ marginTop: 24 }}>
-                  <button style={btn()} onClick={() => router.push('/stock')}>Go to Stock Management →</button>
-                </div>
               </div>
-            )}
-          </>
-        )}
+              {cashUps.length === 0
+                ? <div style={{ ...card, textAlign: 'center', padding: 48, color: '#6b7280' }}>
+                  <div style={{ fontSize: 40, marginBottom: 8 }}>🧾</div>
+                  <p>No cash-ups submitted for {month}.</p>
+                  <button style={{ ...btn(), marginTop: 12 }} onClick={() => router.push('/cashup')}>Go to Cash-Up →</button>
+                </div>
+                : <div style={card}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+                    <thead>
+                      <tr style={{ borderBottom: '2px solid #e5e7eb' }}>
+                        {['Date', 'POS Total', 'Cash', 'EFT', 'Payouts', 'Variance', 'Customers', 'Avg Spend', 'Status'].map(h => (
+                          <th key={h} style={{ padding: '8px 10px', textAlign: h === 'Date' || h === 'Status' ? 'left' : 'right', color: '#6b7280', fontWeight: 600, fontSize: 12, whiteSpace: 'nowrap' }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {cashUps.map(c => (
+                        <tr key={c.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                          <td style={{ padding: '9px 10px', fontWeight: 600 }}>{c.cash_up_date}</td>
+                          <td style={{ padding: '9px 10px', textAlign: 'right', fontWeight: 700, color: '#16a34a' }}>{fmt(Number(c.cash_up_total))}</td>
+                          <td style={{ padding: '9px 10px', textAlign: 'right' }}>{fmt(Number(c.total_cash))}</td>
+                          <td style={{ padding: '9px 10px', textAlign: 'right' }}>{fmt(Number(c.eft_total))}</td>
+                          <td style={{ padding: '9px 10px', textAlign: 'right', color: '#dc2626' }}>{fmt(Number(c.payouts))}</td>
+                          <td style={{ padding: '9px 10px', textAlign: 'right', color: Math.abs(Number(c.variance)) > 50 ? '#dc2626' : '#16a34a', fontWeight: 600 }}>{fmt(Number(c.variance))}</td>
+                          <td style={{ padding: '9px 10px', textAlign: 'right' }}>{c.customer_count || '—'}</td>
+                          <td style={{ padding: '9px 10px', textAlign: 'right' }}>{c.average_spend ? fmt(Number(c.average_spend)) : '—'}</td>
+                          <td style={{ padding: '9px 10px' }}>{statusBadge(c.status)}</td>
+                        </tr>
+                      ))}
+                      <tr style={{ borderTop: '2px solid #e5e7eb', background: '#f0fdf4' }}>
+                        <td style={{ padding: '10px', fontWeight: 700 }}>Month Total</td>
+                        <td style={{ padding: '10px', textAlign: 'right', fontWeight: 800, color: '#16a34a', fontSize: 15 }}>{fmt(totalSales)}</td>
+                        <td colSpan={7} />
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>}
+            </div>
+          )}
+
+          {/* ── SUPPLIER BILLS ── */}
+          {tab === 2 && (
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Supplier Bills</h2>
+                <button style={btn()} onClick={openNewInvoice}>+ New Invoice</button>
+              </div>
+
+              {/* Invoice form */}
+              {showInvForm && (
+                <div style={{ ...card, border: '2px solid #1a5c38', marginBottom: 24 }}>
+                  <h3 style={{ margin: '0 0 20px', fontSize: 16, fontWeight: 700 }}>{editInv ? 'Edit' : 'New'} Supplier Invoice</h3>
+                  {error && <div style={{ background: '#fef2f2', color: '#dc2626', padding: '8px 12px', borderRadius: 8, marginBottom: 12, fontSize: 13 }}>{error}</div>}
+
+                  {/* Header fields */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 20 }}>
+                    <div>
+                      <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Supplier *</label>
+                      <input type="text" placeholder="e.g. SAR, Mochachos, Municipality" value={invForm.supplier} onChange={e => setInvForm(f => ({ ...f, supplier: e.target.value }))} style={inp} />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Invoice Number</label>
+                      <input type="text" placeholder="INV-001" value={invForm.invoice_number} onChange={e => setInvForm(f => ({ ...f, invoice_number: e.target.value }))} style={inp} />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Status</label>
+                      <select value={invForm.status} onChange={e => setInvForm(f => ({ ...f, status: e.target.value }))} style={inp}>
+                        {INVOICE_STATUSES.map(s => <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Invoice Date *</label>
+                      <input type="date" value={invForm.invoice_date} onChange={e => setInvForm(f => ({ ...f, invoice_date: e.target.value }))} style={inp} />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Due Date</label>
+                      <input type="date" value={invForm.due_date} onChange={e => setInvForm(f => ({ ...f, due_date: e.target.value }))} style={inp} />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Payment Method</label>
+                      <select value={invForm.payment_method} onChange={e => setInvForm(f => ({ ...f, payment_method: e.target.value }))} style={inp}>
+                        {PAYMENT_METHODS.map(m => <option key={m} value={m}>{m.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</option>)}
+                      </select>
+                    </div>
+                    <div style={{ gridColumn: 'span 3' }}>
+                      <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Notes</label>
+                      <input type="text" placeholder="Optional notes" value={invForm.notes} onChange={e => setInvForm(f => ({ ...f, notes: e.target.value }))} style={inp} />
+                    </div>
+                  </div>
+
+                  {/* Line items */}
+                  <div style={{ background: '#f9fafb', borderRadius: 10, padding: 16, marginBottom: 16 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                      <h4 style={{ margin: 0, fontSize: 14, fontWeight: 700 }}>Line Items</h4>
+                      <button style={btn()} onClick={addLine}>+ Add Line</button>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '2fr 2fr 1fr 1fr auto', gap: 8, marginBottom: 8 }}>
+                      {['Category', 'Description', 'Amount (incl VAT)', 'VAT Amount', ''].map(h => (
+                        <div key={h} style={{ fontSize: 12, fontWeight: 600, color: '#6b7280' }}>{h}</div>
+                      ))}
+                    </div>
+                    {invLines.map((line, i) => (
+                      <div key={i} style={{ display: 'grid', gridTemplateColumns: '2fr 2fr 1fr 1fr auto', gap: 8, marginBottom: 8, alignItems: 'center' }}>
+                        <select value={line.category_key} onChange={e => updateLine(i, 'category_key', e.target.value)} style={{ ...inp, padding: '8px 10px' }}>
+                          {EXPENSE_CATEGORIES.map(c => <option key={c.key} value={c.key}>{c.name}</option>)}
+                        </select>
+                        <input type="text" placeholder="Description" value={line.description} onChange={e => updateLine(i, 'description', e.target.value)} style={{ ...inp, padding: '8px 10px' }} />
+                        <input type="number" step="0.01" placeholder="0.00" value={line.amount || ''} onChange={e => updateLine(i, 'amount', e.target.value)} style={{ ...inp, padding: '8px 10px' }} />
+                        <input type="number" step="0.01" placeholder="0.00" value={line.vat_amount || ''} onChange={e => updateLine(i, 'vat_amount', e.target.value)} style={{ ...inp, padding: '8px 10px' }} />
+                        <button onClick={() => removeLine(i)} disabled={invLines.length === 1}
+                          style={{ background: '#fef2f2', color: '#dc2626', border: 'none', borderRadius: 6, padding: '8px 12px', cursor: 'pointer', fontSize: 16, fontWeight: 700 }}>×</button>
+                      </div>
+                    ))}
+                    <div style={{ borderTop: '2px solid #e5e7eb', marginTop: 8, paddingTop: 12, display: 'flex', justifyContent: 'flex-end', gap: 24, fontSize: 14 }}>
+                      <span style={{ color: '#6b7280' }}>VAT: <strong>{fmt(lineVatTotal)}</strong></span>
+                      <span style={{ fontWeight: 800, fontSize: 16 }}>Total: <span style={{ color: '#1a5c38' }}>{fmt(lineTotal)}</span></span>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: 10 }}>
+                    <button style={btn()} onClick={saveInvoice} disabled={saving}>{saving ? 'Saving…' : 'Save Invoice'}</button>
+                    <button style={btn('#6b7280')} onClick={() => { setShowInvForm(false); setEditInv(null) }}>Cancel</button>
+                  </div>
+                </div>
+              )}
+
+              {/* Invoice list */}
+              {invoices.length === 0 && !showInvForm
+                ? <div style={{ ...card, textAlign: 'center', padding: 48, color: '#6b7280' }}>
+                  <div style={{ fontSize: 40, marginBottom: 8 }}>📄</div>
+                  <p>No supplier invoices for {month}.</p>
+                  <button style={{ ...btn(), marginTop: 12 }} onClick={openNewInvoice}>+ New Invoice</button>
+                </div>
+                : invoices.map(inv => (
+                  <div key={inv.id} style={card}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                        <div>
+                          <div style={{ fontWeight: 700, fontSize: 15 }}>{inv.supplier}</div>
+                          <div style={{ fontSize: 12, color: '#6b7280' }}>
+                            {inv.invoice_number && <span style={{ marginRight: 10 }}>#{inv.invoice_number}</span>}
+                            {inv.invoice_date}
+                            {inv.due_date && <span style={{ marginLeft: 10 }}>Due: {inv.due_date}</span>}
+                          </div>
+                        </div>
+                        {statusBadge(inv.status, 13)}
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <span style={{ fontWeight: 800, fontSize: 17, color: '#dc2626' }}>{fmt(Number(inv.total_amount))}</span>
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          {inv.status === 'draft' && <button onClick={() => updateInvoiceStatus(inv.id, 'approved')} style={smBtn('#f0fdf4', '#16a34a')}>Approve</button>}
+                          {inv.status === 'approved' && <button onClick={() => updateInvoiceStatus(inv.id, 'paid')} style={smBtn('#eff6ff', '#2563eb')}>Mark Paid</button>}
+                          <button onClick={() => openEditInvoice(inv)} style={smBtn('#f3f4f6', '#374151')}>Edit</button>
+                          <button onClick={() => setExpandedInv(expandedInv === inv.id ? null : inv.id)} style={smBtn('#f3f4f6', '#374151')}>
+                            {expandedInv === inv.id ? '▲ Hide' : '▼ Lines'}
+                          </button>
+                          <button onClick={() => deleteInvoice(inv.id)} style={smBtn('#fef2f2', '#dc2626')}>Del</button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Expanded lines */}
+                    {expandedInv === inv.id && (
+                      <div style={{ marginTop: 16, borderTop: '1px solid #f3f4f6', paddingTop: 12 }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                          <thead>
+                            <tr style={{ borderBottom: '1px solid #e5e7eb' }}>
+                              {['Category', 'Description', 'Amount', 'VAT'].map(h => (
+                                <th key={h} style={{ padding: '6px 10px', textAlign: h === 'Amount' || h === 'VAT' ? 'right' : 'left', color: '#6b7280', fontWeight: 600 }}>{h}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(inv.invoice_lines || []).map((line, i) => {
+                              const cat = CAT_MAP[line.category_key]
+                              return (
+                                <tr key={i} style={{ borderBottom: '1px solid #f9fafb' }}>
+                                  <td style={{ padding: '7px 10px' }}>
+                                    <span style={{ background: (cat?.colour || '#6b7280') + '20', color: cat?.colour || '#6b7280', padding: '2px 8px', borderRadius: 20, fontSize: 11, fontWeight: 600 }}>
+                                      {cat?.name || line.category_key}
+                                    </span>
+                                  </td>
+                                  <td style={{ padding: '7px 10px', color: '#374151' }}>{line.description || '—'}</td>
+                                  <td style={{ padding: '7px 10px', textAlign: 'right', fontWeight: 600 }}>{fmt(Number(line.amount))}</td>
+                                  <td style={{ padding: '7px 10px', textAlign: 'right', color: '#6b7280' }}>{fmt(Number(line.vat_amount || 0))}</td>
+                                </tr>
+                              )
+                            })}
+                            <tr style={{ borderTop: '2px solid #e5e7eb', background: '#f9fafb' }}>
+                              <td colSpan={2} style={{ padding: '8px 10px', fontWeight: 700 }}>Total</td>
+                              <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 800, color: '#dc2626' }}>{fmt(Number(inv.total_amount))}</td>
+                              <td style={{ padding: '8px 10px', textAlign: 'right', color: '#6b7280' }}>{fmt(Number(inv.total_vat || 0))}</td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                ))}
+            </div>
+          )}
+
+          {/* ── QUICK EXPENSES ── */}
+          {tab === 3 && (
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <div>
+                  <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Quick Expenses</h2>
+                  <p style={{ margin: '4px 0 0', fontSize: 13, color: '#6b7280' }}>Small cash items without a formal invoice — petrol, airtime, staff meals, etc.</p>
+                </div>
+                <button style={btn()} onClick={() => { setEditQ(null); setQForm(emptyQuick()); setShowQForm(true) }}>+ Add Expense</button>
+              </div>
+
+              {showQForm && (
+                <div style={{ ...card, border: '2px solid #1a5c38', marginBottom: 24, marginTop: 16 }}>
+                  <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 700 }}>{editQ ? 'Edit' : 'New'} Quick Expense</h3>
+                  {error && <div style={{ background: '#fef2f2', color: '#dc2626', padding: '8px 12px', borderRadius: 8, marginBottom: 12, fontSize: 13 }}>{error}</div>}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+                    <div>
+                      <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Date *</label>
+                      <input type="date" value={qForm.expense_date} onChange={e => setQForm(f => ({ ...f, expense_date: e.target.value }))} style={inp} />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Category *</label>
+                      <select value={qForm.category_key} onChange={e => setQForm(f => ({ ...f, category_key: e.target.value }))} style={inp}>
+                        {EXPENSE_CATEGORIES.map(c => <option key={c.key} value={c.key}>{c.name}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Amount (R) *</label>
+                      <input type="number" step="0.01" placeholder="0.00" value={qForm.amount} onChange={e => setQForm(f => ({ ...f, amount: e.target.value }))} style={inp} />
+                    </div>
+                    <div style={{ gridColumn: 'span 2' }}>
+                      <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Description *</label>
+                      <input type="text" placeholder="e.g. Petrol for delivery" value={qForm.description} onChange={e => setQForm(f => ({ ...f, description: e.target.value }))} style={inp} />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Payment Method</label>
+                      <select value={qForm.payment_method} onChange={e => setQForm(f => ({ ...f, payment_method: e.target.value }))} style={inp}>
+                        {PAYMENT_METHODS.map(m => <option key={m} value={m}>{m.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Supplier (optional)</label>
+                      <input type="text" placeholder="Supplier name" value={qForm.supplier} onChange={e => setQForm(f => ({ ...f, supplier: e.target.value }))} style={inp} />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Notes</label>
+                      <input type="text" placeholder="Optional notes" value={qForm.notes} onChange={e => setQForm(f => ({ ...f, notes: e.target.value }))} style={inp} />
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
+                    <button style={btn()} onClick={saveQuick} disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
+                    <button style={btn('#6b7280')} onClick={() => { setShowQForm(false); setEditQ(null) }}>Cancel</button>
+                  </div>
+                </div>
+              )}
+
+              {quickExp.length === 0
+                ? <div style={{ ...card, textAlign: 'center', padding: 48, color: '#6b7280', marginTop: 16 }}>
+                  <div style={{ fontSize: 40, marginBottom: 8 }}>💵</div>
+                  <p>No quick expenses for {month}.</p>
+                </div>
+                : <div style={{ ...card, marginTop: 16 }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+                    <thead>
+                      <tr style={{ borderBottom: '2px solid #e5e7eb' }}>
+                        {['Date', 'Category', 'Description', 'Supplier', 'Method', 'Amount', ''].map(h => (
+                          <th key={h} style={{ textAlign: h === 'Amount' ? 'right' : 'left', padding: '8px 10px', color: '#6b7280', fontWeight: 600, fontSize: 12 }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {quickExp.map(e => {
+                        const cat = CAT_MAP[e.category_key] || EXPENSE_CATEGORIES.find(c => c.name === e.category_name)
+                        return (
+                          <tr key={e.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                            <td style={{ padding: '9px 10px' }}>{e.expense_date}</td>
+                            <td style={{ padding: '9px 10px' }}>
+                              <span style={{ background: (cat?.colour || '#6b7280') + '20', color: cat?.colour || '#6b7280', padding: '2px 8px', borderRadius: 20, fontSize: 12, fontWeight: 600 }}>
+                                {cat?.name || e.category_name || '—'}
+                              </span>
+                            </td>
+                            <td style={{ padding: '9px 10px' }}>{e.description}</td>
+                            <td style={{ padding: '9px 10px', color: '#6b7280', fontSize: 12 }}>{e.supplier || '—'}</td>
+                            <td style={{ padding: '9px 10px', color: '#6b7280', fontSize: 12 }}>{(e.payment_method || '').replace(/_/g, ' ')}</td>
+                            <td style={{ padding: '9px 10px', textAlign: 'right', fontWeight: 700, color: '#dc2626' }}>{fmt(Number(e.amount))}</td>
+                            <td style={{ padding: '9px 10px' }}>
+                              <div style={{ display: 'flex', gap: 6 }}>
+                                <button onClick={() => { setEditQ(e); setQForm({ expense_date: e.expense_date, category_key: e.category_key || 'other', description: e.description, amount: String(e.amount), vat_amount: String(e.vat_amount || ''), supplier: e.supplier || '', invoice_number: e.invoice_number || '', payment_method: e.payment_method || 'cash', notes: e.notes || '' }); setShowQForm(true) }} style={smBtn('#eff6ff', '#2563eb')}>Edit</button>
+                                <button onClick={() => deleteQuick(e.id)} style={smBtn('#fef2f2', '#dc2626')}>Del</button>
+                              </div>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                      <tr style={{ borderTop: '2px solid #e5e7eb', background: '#fef2f2' }}>
+                        <td colSpan={5} style={{ padding: '10px', fontWeight: 700 }}>Month Total</td>
+                        <td style={{ padding: '10px', textAlign: 'right', fontWeight: 800, color: '#dc2626', fontSize: 15 }}>{fmt(totalQuick)}</td>
+                        <td />
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>}
+            </div>
+          )}
+
+          {/* ── FOOD COST ── */}
+          {tab === 4 && (
+            <div style={{ ...card, textAlign: 'center', padding: 60 }}>
+              <div style={{ fontSize: 48, marginBottom: 12 }}>🍔</div>
+              <h3 style={{ margin: '0 0 8px', fontSize: 20, fontWeight: 700 }}>Food Cost Analysis</h3>
+              <p style={{ color: '#6b7280', fontSize: 14, maxWidth: 400, margin: '0 auto 16px' }}>
+                Compare theoretical vs actual food cost using your Stock Management data.
+              </p>
+              <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, padding: '16px 24px', display: 'inline-block', textAlign: 'left' }}>
+                <p style={{ margin: '0 0 6px', fontWeight: 700, color: '#166534', fontSize: 14 }}>Formula (matches your Excel):</p>
+                <ul style={{ margin: 0, paddingLeft: 20, color: '#374151', fontSize: 13, lineHeight: 2 }}>
+                  <li>Opening Stock Value</li>
+                  <li>+ Purchases (from Stock module)</li>
+                  <li>− Closing Stock Value</li>
+                  <li>− Wastage</li>
+                  <li>= Cost of Sales → Food Cost %</li>
+                </ul>
+              </div>
+              <div style={{ marginTop: 24 }}>
+                <button style={btn()} onClick={() => router.push('/stock')}>Go to Stock Management →</button>
+              </div>
+            </div>
+          )}
+        </>)}
       </div>
     </div>
   )
