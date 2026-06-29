@@ -199,7 +199,7 @@ export default function StockPage() {
         stock_item_id: i.id,
         expected_qty: 0,
         actual_qty: 0,
-        unit_cost: Number(i.cost_price ?? i.price ?? 0)
+        unit_cost: Number(i.cost_price) || Number(i.price) || 0
       }))
       const { error: linesErr } = await supabase.from('stock_count_lines').insert(lines)
       if (linesErr) { alert('Could not create count lines: ' + linesErr.message); setSaving(false); return }
@@ -636,15 +636,29 @@ export default function StockPage() {
                               </div>
                             </td>
                             <td style={{ padding: '12px 16px', fontSize: '13px', color: '#6b7280' }}>{item.unit}</td>
-                            <td style={{ padding: '12px 16px', fontSize: '13px', color: '#374151' }}>{formatCurrency(item.cost_price ?? item.price ?? 0)}</td>
+                            <td style={{ padding: '12px 16px', fontSize: '13px', color: '#374151' }}>{formatCurrency(Number(item.cost_price) || Number(item.price) || 0)}</td>
                             <td style={{ padding: '12px 16px', fontSize: '13px', color: '#374151' }}>
                               {item.is_catch_weight
-                                ? <span title={`R${item.kg_price || 0}/kg x ${item.avg_weight_kg || 0}kg`} style={{ cursor: 'help' }}>{formatCurrency(Number(item.price ?? 0))} ⚖️</span>
-                                : formatCurrency(Number(item.price ?? 0))}
+                                ? <span title={`R${item.kg_price || 0}/kg x ${item.avg_weight_kg || 0}kg`} style={{ cursor: 'help' }}>{formatCurrency(Number(item.price || 0))} ⚖️</span>
+                                : formatCurrency(Number(item.price || 0))}
                             </td>
                             <td style={{ padding: '12px 16px' }}>
                               <div style={{ display: 'flex', gap: '6px' }}>
-                                <button onClick={() => { setEditItem(item); setItemForm({ name: item.description || item.name || '', description: item.description || '', category_id: item.category || 'goods', unit: item.unit, cost_price: String(item.is_catch_weight ? ((item.kg_price ?? 0) * (item.avg_weight_kg ?? 0)).toFixed(2) : (item.price ?? 0)), par_level: String(item.par_level ?? 0), supplier: item.supplier || 'Other', on_daily_sheet: item.on_daily_sheet || false, is_catch_weight: item.is_catch_weight || false, kg_price: String(item.kg_price || ''), avg_weight_kg: String(item.avg_weight_kg || '') }); setShowAddItem(true) }} style={{ fontSize: '12px', color: '#1d4ed8', background: '#eff6ff', border: 'none', borderRadius: '8px', padding: '5px 10px', cursor: 'pointer', fontWeight: 600 }}>Edit</button>
+                                <button onClick={() => { setEditItem(item); setItemForm({
+              name: item.description || item.name || '',
+              description: item.description || '',
+              category_id: item.category || 'goods',
+              unit: item.unit || 'each',
+              cost_price: item.is_catch_weight
+                ? String(((Number(item.kg_price) || 0) * (Number(item.avg_weight_kg) || 0)).toFixed(2))
+                : String(Number(item.price) || 0),
+              par_level: String(Number(item.par_level) || 0),
+              supplier: item.supplier || 'Other',
+              on_daily_sheet: item.on_daily_sheet || false,
+              is_catch_weight: item.is_catch_weight || false,
+              kg_price: String(Number(item.kg_price) || ''),
+              avg_weight_kg: String(Number(item.avg_weight_kg) || '')
+            }); setShowAddItem(true) }} style={{ fontSize: '12px', color: '#1d4ed8', background: '#eff6ff', border: 'none', borderRadius: '8px', padding: '5px 10px', cursor: 'pointer', fontWeight: 600 }}>Edit</button>
                                 <button onClick={() => deleteItem(item.id)} style={{ fontSize: '12px', color: '#dc2626', background: '#fee2e2', border: 'none', borderRadius: '8px', padding: '5px 8px', cursor: 'pointer', fontWeight: 700 }}>✕</button>
                               </div>
                             </td>
@@ -764,7 +778,7 @@ export default function StockPage() {
         <div style={{ padding: '20px 28px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
           <div><label style={LABEL}>Date</label><input type="date" value={purchaseForm.purchase_date} onChange={e => setPurchaseForm(f => ({ ...f, purchase_date: e.target.value }))} style={INPUT} /></div>
           <div><label style={LABEL}>Stock Item (optional)</label>
-            <select value={purchaseForm.stock_item_id} onChange={e => { const item = items.find(i => i.id === e.target.value); setPurchaseForm(f => ({ ...f, stock_item_id: e.target.value, item_name: (item?.name || item?.description) || f.item_name, unit: item?.unit || f.unit, unit_cost: item ? String(item.cost_price ?? item.price ?? 0) : f.unit_cost })) }} style={INPUT}>
+            <select value={purchaseForm.stock_item_id} onChange={e => { const item = items.find(i => i.id === e.target.value); setPurchaseForm(f => ({ ...f, stock_item_id: e.target.value, item_name: (item?.name || item?.description) || f.item_name, unit: item?.unit || f.unit, unit_cost: item ? String(Number(item.cost_price) || Number(item.price) || 0) : f.unit_cost })) }} style={INPUT}>
               <option value="">Select from stock list</option>
               {['goods','beverages','packaging','basting','other'].map(cat => <optgroup key={cat} label={cat}>{items.filter(i => i.category === cat).map(i => <option key={i.id} value={i.id}>{i.name || i.description}</option>)}</optgroup>)}
             </select>
@@ -789,7 +803,7 @@ export default function StockPage() {
       <Modal show={showAddWastage} onClose={() => setShowAddWastage(false)} title="Log Wastage">
         <div style={{ padding: '20px 28px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
           <div><label style={LABEL}>Date</label><input type="date" value={wastageForm.wastage_date} onChange={e => setWastageForm(f => ({ ...f, wastage_date: e.target.value }))} style={INPUT} /></div>
-          <div><label style={LABEL}>Stock Item</label><select value={wastageForm.stock_item_id} onChange={e => { const item = items.find(i => i.id === e.target.value); setWastageForm(f => ({ ...f, stock_item_id: e.target.value, item_name: (item?.name || item?.description) || '', unit: item?.unit || 'each', unit_cost: item ? String(item.cost_price ?? item.price ?? 0) : '' })) }} style={INPUT}><option value="">Select item</option>{items.map(i => <option key={i.id} value={i.id}>{i.name || i.description}</option>)}</select></div>
+          <div><label style={LABEL}>Stock Item</label><select value={wastageForm.stock_item_id} onChange={e => { const item = items.find(i => i.id === e.target.value); setWastageForm(f => ({ ...f, stock_item_id: e.target.value, item_name: (item?.name || item?.description) || '', unit: item?.unit || 'each', unit_cost: item ? String(Number(item.cost_price) || Number(item.price) || 0) : '' })) }} style={INPUT}><option value="">Select item</option>{items.map(i => <option key={i.id} value={i.id}>{i.name || i.description}</option>)}</select></div>
           <div><label style={LABEL}>Item Name</label><input value={wastageForm.item_name} onChange={e => setWastageForm(f => ({ ...f, item_name: e.target.value }))} placeholder="or type manually" style={INPUT} /></div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
             <div><label style={LABEL}>Quantity</label><input type="number" step="0.1" value={wastageForm.quantity} onChange={e => setWastageForm(f => ({ ...f, quantity: e.target.value }))} placeholder="0" style={INPUT} /></div>
