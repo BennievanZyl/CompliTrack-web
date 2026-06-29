@@ -211,7 +211,8 @@ export default function FinancesPage() {
       description: i.description || '',
       unit: i.unit || 'each',
       qty_received: '',
-      unit_cost: ''
+      unit_cost: String(Number(i.cost_price || i.price || 0) || ''),
+      units_per_case: ''
     })))
     setShowGRV(true)
   }
@@ -927,25 +928,45 @@ export default function FinancesPage() {
                 </div>
               ) : (
                 <>
-                  <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr', gap: 8, marginBottom: 8, fontSize: 12, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase' as const }}>
-                    <div>Item</div><div>Unit</div><div>Qty Received</div><div>Unit Cost (R)</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '2fr 80px 80px 100px 90px', gap: 8, marginBottom: 8, fontSize: 12, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase' as const }}>
+                    <div>Item</div><div style={{textAlign:'center'}}>Qty</div><div>Unit Cost</div><div>÷ Per Case</div><div></div>
                   </div>
                   <div style={{ maxHeight: 400, overflowY: 'auto' }}>
                     {grvLines.map((line, i) => (
-                      <div key={line.stock_item_id} style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr', gap: 8, marginBottom: 8, alignItems: 'center' }}>
-                        <div style={{ fontWeight: 600, fontSize: 14 }}>{line.description}</div>
-                        <div style={{ fontSize: 13, color: '#6b7280' }}>{line.unit}</div>
-                        <input type="number" step="0.1" min="0" placeholder="0"
-                          value={line.qty_received}
-                          onChange={e => setGrvLines(ls => ls.map((l,idx) => idx===i ? {...l, qty_received: e.target.value} : l))}
-                          style={{ padding: '8px 10px', border: '1.5px solid #e5e7eb', borderRadius: 8, fontSize: 14, outline: 'none',
-                            background: parseFloat(line.qty_received) > 0 ? '#f0fdf4' : '#fff',
-                            borderColor: parseFloat(line.qty_received) > 0 ? '#16a34a' : '#e5e7eb' }} />
-                        <input type="number" step="0.01" min="0" placeholder="0.00"
-                          value={line.unit_cost}
-                          onChange={e => setGrvLines(ls => ls.map((l,idx) => idx===i ? {...l, unit_cost: e.target.value} : l))}
-                          style={{ padding: '8px 10px', border: '1.5px solid #e5e7eb', borderRadius: 8, fontSize: 14, outline: 'none' }} />
-                      </div>
+                       <div key={line.stock_item_id} style={{ borderTop: '1px solid #f3f4f6', padding: '10px 0' }}>
+                         <div style={{ display: 'grid', gridTemplateColumns: '2fr 80px 80px 100px 90px', gap: 8, alignItems: 'center' }}>
+                           <div>
+                             <div style={{ fontWeight: 600, fontSize: 14 }}>{line.description}</div>
+                             <div style={{ fontSize: 12, color: '#6b7280' }}>{line.unit}</div>
+                           </div>
+                           <input type="number" step="0.1" min="0" placeholder="0"
+                             value={line.qty_received}
+                             onChange={e => setGrvLines(ls => ls.map((l,idx) => idx===i ? {...l, qty_received: e.target.value} : l))}
+                             style={{ padding: '6px 8px', border: `1.5px solid ${parseFloat(line.qty_received) > 0 ? '#16a34a' : '#e5e7eb'}`, borderRadius: 8, fontSize: 15, textAlign: 'center' as const, outline: 'none', background: parseFloat(line.qty_received) > 0 ? '#f0fdf4' : '#fff' }} />
+                           <input type="number" step="0.01" min="0" placeholder="unit cost"
+                             value={line.unit_cost}
+                             onChange={e => setGrvLines(ls => ls.map((l,idx) => idx===i ? {...l, unit_cost: e.target.value} : l))}
+                             style={{ padding: '6px 8px', border: '1.5px solid #e5e7eb', borderRadius: 8, fontSize: 14, outline: 'none' }} />
+                           <div>
+                             <input type="number" step="0.1" min="0" placeholder="units/case"
+                               value={(line as {units_per_case?: string}).units_per_case || ''}
+                               onChange={e => { const u=parseFloat(e.target.value)||0; setGrvLines(ls => ls.map((l,idx) => idx===i ? {...l, units_per_case: e.target.value, unit_cost: u > 0 && l.unit_cost ? String((parseFloat(l.unit_cost)/u).toFixed(4)) : l.unit_cost} : l)) }}
+                               title="Units per case/box - divides unit cost to get per-unit price"
+                               style={{ width: '100%', padding: '6px 8px', border: '1.5px solid #fde68a', borderRadius: 8, fontSize: 13, outline: 'none', background: '#fefce8' }} />
+                             <div style={{ fontSize: '10px', color: '#92400e', marginTop: 2 }}>÷ per case</div>
+                           </div>
+                           {(line as {units_per_case?: string}).units_per_case && parseFloat(line.unit_cost) > 0 ? (
+                             <button onClick={async () => {
+                               const { createClient } = await import('@supabase/supabase-js')
+                               const sb = createClient('https://fdixocuxhpafxkfytvxu.supabase.co', process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '')
+                               await sb.from('stock_items').update({ price: parseFloat(line.unit_cost), cost_price: parseFloat(line.unit_cost) }).eq('id', line.stock_item_id)
+                               alert('Stock price updated to R' + parseFloat(line.unit_cost).toFixed(4) + ' per ' + line.unit)
+                             }} style={{ background: '#1a5c38', color: 'white', border: 'none', borderRadius: 8, padding: '6px 8px', fontSize: 11, cursor: 'pointer', fontWeight: 700 }}>
+                               Update price
+                             </button>
+                           ) : <div />}
+                         </div>
+                       </div>
                     ))}
                   </div>
                   <div style={{ borderTop: '2px solid #e5e7eb', marginTop: 16, paddingTop: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
