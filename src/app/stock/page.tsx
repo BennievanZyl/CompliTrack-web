@@ -117,6 +117,7 @@ export default function StockPage() {
 
   async function loadAll() {
     setLoading(true)
+    try {
     const [catRes, itemRes, countRes, purchRes, wastRes, ordRes, suppRes] = await Promise.all([
       supabase.from('stock_categories').select('*').eq('store_id', STORE_ID).order('sort_order'),
       supabase.from('stock_items').select('*').eq('store_id', STORE_ID).eq('is_active', true).order('sort_order', { nullsFirst: false }),
@@ -131,8 +132,10 @@ export default function StockPage() {
     setCounts(countRes.data || [])
     setPurchases(purchRes.data || [])
     setWastage(wastRes.data || [])
+    if (suppRes?.error) console.error('suppliers error:', suppRes.error.message)
     setOrders(ordRes.data || [])
     setSuppliers(suppRes?.data || [])
+    } catch(e) { console.error('loadAll error:', e) }
     setLoading(false)
   }
 
