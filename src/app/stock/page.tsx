@@ -23,10 +23,9 @@ const TABS = [
 ]
 
 const COUNT_TYPES = [
-  { key: 'opening', label: 'Opening Count', desc: 'Perishables & quick items', color: '#16a34a', bg: '#dcfce7' },
-  { key: 'closing', label: 'Closing Count', desc: 'End of day variance check', color: '#2563eb', bg: '#dbeafe' },
-  { key: 'mid_month', label: 'Mid-Month', desc: 'Full stocktake & food cost', color: '#7c3aed', bg: '#ede9fe' },
-  { key: 'spot', label: 'Spot Check', desc: 'Quick spot check on specific items', color: '#d97706', bg: '#fef3c7' },
+  { key: 'daily', label: 'Daily Count', desc: 'Quick daily check — buy for the day', color: '#16a34a', bg: '#dcfce7' },
+  { key: 'weekly', label: 'Weekly Count', desc: 'Weekly stocktake — calculate food cost', color: '#2563eb', bg: '#dbeafe' },
+  { key: 'monthly', label: 'Monthly Count', desc: 'Full month stocktake — monthly food cost', color: '#7c3aed', bg: '#ede9fe' },
 ]
 
 const UNITS = ['each', 'kg', 'g', 'L', 'ml', 'pack', 'box', 'bag', 'bottle', 'tin', 'tray', 'dozen']
@@ -51,7 +50,7 @@ export default function StockPage() {
   const [saving, setSaving] = useState(false)
   const [activeCount, setActiveCount] = useState<StockCount | null>(null)
   const [countLines, setCountLines] = useState<StockCountLine[]>([])
-  const [countTypeFilter, setCountTypeFilter] = useState('opening')
+  const [countTypeFilter, setCountTypeFilter] = useState('daily')
   const [showAIImport, setShowAIImport] = useState(false)
   const [aiText, setAIText] = useState('')
   const [aiLoading, setAILoading] = useState(false)
