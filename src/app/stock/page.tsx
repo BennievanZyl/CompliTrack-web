@@ -194,17 +194,18 @@ export default function StockPage() {
     setShowAIImport(false); setAIText(''); setAIResults([])
   }
 
-  const groupedItems = categories.reduce((acc, cat) => {
-                    const catItems = items.filter(i => i.category === catKey)
-    if (catItems.length) acc[cat.id] = { cat, items: catItems }
+  const CAT_LABELS: Record<string,string> = { goods: 'Goods', beverages: 'Beverages', packaging: 'Packaging', basting: 'Basting & Sauces', other: 'Other' }
+  const CAT_COLORS: Record<string,string> = { goods: '#16a34a', beverages: '#2563eb', packaging: '#d97706', basting: '#dc2626', other: '#6b7280' }
+  const FIXED_CATS = ['goods','beverages','packaging','basting','other']
+  const groupedItems = FIXED_CATS.reduce((acc, catKey) => {
+    const catItems = (items || []).filter(i => i.category === catKey)
+    if (catItems.length) acc[catKey] = { key: catKey, label: CAT_LABELS[catKey], color: CAT_COLORS[catKey], items: catItems }
     return acc
-  }, {} as Record<string, { cat: StockCategory; items: StockItem[] }>)
-
-                    // uncategorised items shown under other
+  }, {} as Record<string, { key: string; label: string; color: string; items: StockItem[] }>)
   const todayStr = new Date().toISOString().split('T')[0]
-  const todayPurchases = purchases.filter(p => p.purchase_date === todayStr)
-  const todayWastage = wastage.filter(w => w.wastage_date === todayStr)
-  const pendingOrders = orders.filter(o => o.status === 'pending')
+  const todayPurchases = (purchases || []).filter(p => p.purchase_date === todayStr)
+  const todayWastage = (wastage || []).filter(w => w.wastage_date === todayStr)
+  const pendingOrders = (orders || []).filter(o => o.status === 'pending')
   const sc = (s: string) => s === 'delivered' ? { bg: '#dcfce7', color: '#166534' } : s === 'pending' ? { bg: '#fef3c7', color: '#92400e' } : s === 'partial' ? { bg: '#dbeafe', color: '#1e40af' } : { bg: '#fee2e2', color: '#dc2626' }
 
   const Modal = ({ show, onClose, title, children, maxWidth = '480px' }: { show: boolean; onClose: () => void; title: string; children: React.ReactNode; maxWidth?: string }) => !show ? null : (
@@ -353,13 +354,13 @@ export default function StockPage() {
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 90px 90px 100px 110px 90px', padding: '12px 20px', background: '#f9fafb', fontSize: '11px', fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
                     <span>Item</span><span>Date</span><span>Qty</span><span>Unit Cost</span><span>Total</span><span>Invoice</span>
                   </div>
-                  {purchases.map(p => (
+                  {(purchases || []).map(p => (
                     <div key={p.id} style={{ display: 'grid', gridTemplateColumns: '1fr 90px 90px 100px 110px 90px', padding: '14px 20px', borderTop: '1px solid #f3f4f6', alignItems: 'center' }}>
                       <div><div style={{ fontWeight: 700, fontSize: '14px', color: '#111' }}>{p.item_name}</div>{p.supplier_name && <div style={{ fontSize: '12px', color: '#9ca3af' }}>{p.supplier_name}</div>}</div>
                       <div style={{ fontSize: '12px', color: '#6b7280' }}>{formatDate(p.purchase_date)}</div>
                       <div style={{ fontSize: '13px', color: '#374151' }}>{p.quantity} {p.unit}</div>
                       <div style={{ fontSize: '13px', color: '#374151' }}>{formatCurrency(p.unit_cost)}</div>
-                      <div style={{ fontSize: '14px', fontWeight: 800, color: '#1a5c38' }}>{formatCurrency(p.total_cost)}</div>
+                      <div style={{ fontSize: '14px', fontWeight: 800, color: '#1a5c38' }}>{formatCurrency(Number(p.total_cost) || 0)}</div>
                       <div style={{ fontSize: '12px', color: '#9ca3af' }}>{p.invoice_number || '—'}</div>
                     </div>
                   ))}
@@ -381,11 +382,11 @@ export default function StockPage() {
               </div>
               <div style={{ background: 'white', borderRadius: '20px', border: '1.5px solid #eef2ee', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
                 {wastage.length === 0 ? <div style={{ padding: '48px', textAlign: 'center', color: '#9ca3af' }}>No wastage logged yet</div> : (<>
-                  {wastage.map(w => (
+                  {(wastage || []).map(w => (
                     <div key={w.id} style={{ display: 'flex', alignItems: 'center', gap: '16px', padding: '14px 20px', borderTop: '1px solid #f3f4f6' }}>
                       <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: '#fee2e2', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px', flexShrink: 0 }}>🗑️</div>
                       <div style={{ flex: 1 }}><div style={{ fontWeight: 700, fontSize: '14px', color: '#111' }}>{w.item_name}</div><div style={{ fontSize: '12px', color: '#9ca3af' }}>{w.quantity} {w.unit} • {w.reason} • {formatDate(w.wastage_date)}</div></div>
-                      <div style={{ fontWeight: 800, fontSize: '15px', color: '#dc2626' }}>{formatCurrency(w.total_cost)}</div>
+                      <div style={{ fontWeight: 800, fontSize: '15px', color: '#dc2626' }}>{formatCurrency(Number(w.total_cost) || 0)}</div>
                     </div>
                   ))}
                   <div style={{ padding: '14px 20px', borderTop: '2px solid #e5e7eb', display: 'flex', justifyContent: 'flex-end', gap: '24px' }}>
@@ -443,7 +444,7 @@ export default function StockPage() {
               {['goods','beverages','packaging','basting','other'].map(catKey => {
                 const catLabels: Record<string,string> = { goods: 'Goods', beverages: 'Beverages', packaging: 'Packaging', basting: 'Basting & Sauces', other: 'Other' }
                 const catColors: Record<string,string> = { goods: '#16a34a', beverages: '#2563eb', packaging: '#d97706', basting: '#dc2626', other: '#6b7280' }
-                const catItems = items.filter(i => i.category === catKey)
+                const catItems = (items || []).filter(i => i.category === catKey)
                 if (!catItems.length) return null
                 return (
                   <div key={catKey} style={{ background: 'white', borderRadius: '20px', border: '1.5px solid #eef2ee', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
