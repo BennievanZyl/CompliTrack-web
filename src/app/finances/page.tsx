@@ -62,6 +62,7 @@ export default function FinancesPage() {
   const [month, setMonth] = useState(thisMonth())
 
   const [categories, setCategories] = useState<{id:string;name:string;key:string;colour:string}[]>([])
+  const [suppliers, setSuppliers] = useState<{id:string;name:string}[]>([])
   const [cashUps, setCashUps] = useState<CashUp[]>([])
   const [invoices, setInvoices] = useState<Invoice[]>([])
   const [quickExp, setQuickExp] = useState<QuickExpense[]>([])
@@ -127,6 +128,7 @@ export default function FinancesPage() {
         .gte('invoice_date', monthStart).lte('invoice_date', monthEnd)
         .order('invoice_date', { ascending: false }),
       supabase.from('expense_categories').select('id, name, key, colour, sort_order').eq('organisation_id', ORG_ID).eq('is_active', true).order('sort_order'),
+      supabase.from('stock_suppliers').select('id, name').eq('store_id', STORE_ID).eq('is_active', true).order('sort_order'),
       supabase.from('expenses')
         .select('*').eq('store_id', STORE_ID)
         .gte('expense_date', monthStart).lte('expense_date', monthEnd)
