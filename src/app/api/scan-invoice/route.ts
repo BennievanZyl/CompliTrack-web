@@ -14,6 +14,25 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'API key not configured' }, { status: 500 })
     }
 
+    const today = new Date().toISOString().split('T')[0]
+    const prompt = `Extract invoice details from this image. Return ONLY valid JSON:
+{
+  "supplier": "supplier company name",
+  "invoice_number": "invoice number",
+  "invoice_date": "YYYY-MM-DD",
+  "due_date": "YYYY-MM-DD or null",
+  "notes": "reference or PO number if any",
+  "lines": [
+    {
+      "description": "item description",
+      "amount": 123.45,
+      "vat_amount": 16.08,
+      "category_key": "cost_of_sales"
+    }
+  ]
+}
+Rules: amounts are numbers. Use Total (Incl) column for amount. VAT column for vat_amount. For food/meat/frozen use cost_of_sales. If no date found use ${today}. Return ONLY JSON.`
+
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -31,10 +50,7 @@ export async function POST(req: NextRequest) {
               type: 'image',
               source: { type: 'base64', media_type: mediaType || 'image/jpeg', data: base64 }
             },
-            {
-              type: 'text',
-              text: 
-            }
+            { type: 'text', text: prompt }
           ]
         }]
       })
@@ -43,13 +59,12 @@ export async function POST(req: NextRequest) {
     if (!response.ok) {
       const errText = await response.text()
       console.error('Anthropic API error:', response.status, errText)
-      return NextResponse.json({ error:  }, { status: 500 })
+      return NextResponse.json({ error: 'AI service error: ' + response.status }, { status: 500 })
     }
 
     const result = await response.json()
     const text = result.content?.[0]?.text || ''
-    const clean = text.replace(/
-?/g, '').trim()
+    const clean = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
     const data = JSON.parse(clean)
 
     return NextResponse.json(data)
