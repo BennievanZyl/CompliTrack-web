@@ -22,6 +22,7 @@ type CashUp = {
 }
 type InvoiceLine = {
   id?: string; category_key: string; description: string
+  qty: number; uom: string; unit_price: number
   amount: number; vat_amount: number
 }
 type Invoice = {
@@ -286,9 +287,12 @@ export default function FinancesPage() {
       if (data.due_date) setInvForm(f => ({ ...f, due_date: data.due_date }))
       if (data.notes) setInvForm(f => ({ ...f, notes: data.notes }))
       if (data.lines && data.lines.length > 0) {
-        setInvLines(data.lines.map((l: {category_key?: string; description?: string; amount?: number; vat_amount?: number}) => ({
+        setInvLines(data.lines.map((l: {category_key?: string; description?: string; qty?: number; uom?: string; unit_price?: number; amount?: number; vat_amount?: number}) => ({
           category_key: l.category_key || 'cost_of_sales',
           description: l.description || '',
+          qty: Number(l.qty) || 1,
+          uom: l.uom || 'each',
+          unit_price: Number(l.unit_price) || 0,
           amount: Number(l.amount) || 0,
           vat_amount: Number(l.vat_amount) || 0,
         })))
