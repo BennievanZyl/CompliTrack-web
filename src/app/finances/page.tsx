@@ -549,21 +549,15 @@ export default function FinancesPage() {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                 <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Supplier Bills</h2>
                 <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                  <div style={{ position: 'relative' }}>
-                    <input id="scan-file-input" type="file" accept="image/*,application/pdf"
-                      style={{ position: 'absolute', opacity: 0, width: 0, height: 0, overflow: 'hidden' }}
+                  <label style={{ ...btn('#6366f1'), cursor: scanning ? 'wait' : 'pointer', opacity: scanning ? 0.7 : 1, display: 'inline-block' }}>
+                    {scanning ? '⏳ Scanning...' : '📷 Scan Invoice'}
+                    <input type="file" accept="image/*,application/pdf" disabled={scanning}
+                      style={{ display: 'none' }}
                       onChange={e => {
-                      const files = e.target.files
-                      if (files && files.length > 0) {
-                        const f = files[0]
-                        scanInvoice(f)
-                      }
-                    }} />
-                    <button disabled={scanning} onClick={() => { const el = document.getElementById('scan-file-input') as HTMLInputElement; if (el) el.click() }}
-                      style={{ ...btn('#6366f1'), cursor: scanning ? 'wait' : 'pointer', opacity: scanning ? 0.7 : 1 }}>
-                      {scanning ? '⏳ Scanning...' : '📷 Scan Invoice'}
-                    </button>
-                  </div>
+                        const f = e.target.files?.[0]
+                        if (f) scanInvoice(f)
+                      }} />
+                  </label>
                   <button style={btn()} onClick={openNewInvoice}>+ New Invoice</button>
                 </div>
               </div>
