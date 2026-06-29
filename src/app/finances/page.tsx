@@ -5,8 +5,6 @@ import { supabase } from '@/lib/supabase'
 
 const STORE_ID = '05328298-fc27-4c9f-b091-bb7f6598b601'
 const ORG_ID = 'e903386b-133a-4bad-b054-ef7ef616a3ff'
-
-type StockSupplier = { id: string; name: string }
 const VAT_RATE = 0.15
 
 const TABS = ['Summary', 'Cash-Ups / Sales', 'Supplier Bills', 'Quick Expenses', 'Food Cost']
@@ -64,12 +62,16 @@ export default function FinancesPage() {
   const [month, setMonth] = useState(thisMonth())
 
   const [categories, setCategories] = useState<{id:string;name:string;key:string;colour:string}[]>([])
-  const [suppliers, setSuppliers] = useState<StockSupplier[]>([])
   const [cashUps, setCashUps] = useState<CashUp[]>([])
   const [invoices, setInvoices] = useState<Invoice[]>([])
   const [quickExp, setQuickExp] = useState<QuickExpense[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [showGRV, setShowGRV] = useState(false)
+  const [grvInvoice, setGrvInvoice] = useState<Invoice | null>(null)
+  const [grvItems, setGrvItems] = useState<{id:string;description:string;unit:string;supplier:string|null}[]>([])
+  const [grvLines, setGrvLines] = useState<{stock_item_id:string;description:string;unit:string;qty_received:string;unit_cost:string}[]>([])
+  const [savingGRV, setSavingGRV] = useState(false)
   const [error, setError] = useState('')
 
   // Category quick-add state
@@ -110,7 +112,7 @@ export default function FinancesPage() {
     const monthStart = `${month}-01`
     const [mYear, mMonth] = month.split('-').map(Number)
     const monthEnd = new Date(mYear, mMonth, 0).toISOString().split('T')[0]
-    const [cuRes, invRes, catRes, suppRes, qRes] = await Promise.all([
+    const [cuRes, invRes, catRes, qRes] = await Promise.all([
       supabase.from('cash_ups')
         .select('id,cash_up_date,cash_up_total,total_cash,eft_total,payouts,variance,customer_count,average_spend,status,notes')
         .eq('store_id', STORE_ID)
@@ -123,7 +125,6 @@ export default function FinancesPage() {
         .gte('invoice_date', monthStart).lte('invoice_date', monthEnd)
         .order('invoice_date', { ascending: false }),
       supabase.from('expense_categories').select('id, name, key, colour, sort_order').eq('organisation_id', ORG_ID).eq('is_active', true).order('sort_order'),
-      supabase.from('stock_suppliers').select('id, name').eq('store_id', STORE_ID).eq('is_active', true).order('sort_order'),
       supabase.from('expenses')
         .select('*').eq('store_id', STORE_ID)
         .gte('expense_date', monthStart).lte('expense_date', monthEnd)
@@ -134,7 +135,6 @@ export default function FinancesPage() {
     const cats = catRes.data || []
     setCategories(cats.length ? cats : [])
     setQuickExp(qRes.data || [])
-    setSuppliers(suppRes?.data || [])
     setLoading(false)
   }, [month])
 
@@ -187,6 +187,62 @@ export default function FinancesPage() {
 
   const lineTotal = invLines.reduce((s, l) => s + Number(l.amount || 0), 0)
   const lineVatTotal = invLines.reduce((s, l) => s + Number(l.vat_amount || 0), 0)
+
+  async function openGRV(inv: Invoice) {
+    setGrvInvoice(inv)
+    // Load supplier's stock items
+    const { data: items } = await supabase
+      .from('stock_items')
+      .select('id, description, unit, supplier')
+      .eq('store_id', STORE_ID)
+      .eq('is_active', true)
+      .eq('supplier', inv.supplier)
+      .order('description')
+    setGrvItems(items || [])
+    // Pre-populate lines from stock items
+    setGrvLines((items || []).map(i => ({
+      stock_item_id: i.id,
+      description: i.description || '',
+      unit: i.unit || 'each',
+      qty_received: '',
+      unit_cost: ''
+    })))
+    setShowGRV(true)
+  }
+
+  async function saveGRV() {
+    if (!grvInvoice) return
+    setSavingGRV(true)
+    // Only save lines where qty was entered
+    const linesToSave = grvLines.filter(l => parseFloat(l.qty_received) > 0)
+    if (linesToSave.length === 0) {
+      alert('Enter at least one received quantity')
+      setSavingGRV(false)
+      return
+    }
+    // Insert stock purchases
+    const purchases = linesToSave.map(l => ({
+      store_id: STORE_ID,
+      purchase_date: grvInvoice.invoice_date,
+      supplier_name: grvInvoice.supplier,
+      stock_item_id: l.stock_item_id,
+      item_name: l.description,
+      quantity: parseFloat(l.qty_received),
+      unit: l.unit,
+      unit_cost: parseFloat(l.unit_cost) || 0,
+      total_cost: parseFloat(l.qty_received) * (parseFloat(l.unit_cost) || 0),
+      invoice_number: grvInvoice.invoice_number || null,
+      invoice_id: grvInvoice.id,
+    }))
+    const { error } = await supabase.from('stock_purchases').insert(purchases)
+    if (error) { alert('Error saving GRV: ' + error.message); setSavingGRV(false); return }
+    // Update invoice status to received
+    await supabase.from('invoices').update({ status: 'received' }).eq('id', grvInvoice.id)
+    setShowGRV(false)
+    setGrvInvoice(null)
+    setSavingGRV(false)
+    load()
+  }
 
   async function saveInvoice() {
     if (!invForm.supplier) { setError('Supplier is required'); return }
@@ -449,10 +505,7 @@ export default function FinancesPage() {
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 20 }}>
                     <div>
                       <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Supplier *</label>
-                      <select value={invForm.supplier} onChange={e => setInvForm(f => ({ ...f, supplier: e.target.value }))} style={inp}>
-                        <option value="">— Select Supplier —</option>
-                        {suppliers.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
-                      </select>
+                      <input type="text" placeholder="e.g. SAR, Mochachos, Municipality" value={invForm.supplier} onChange={e => setInvForm(f => ({ ...f, supplier: e.target.value }))} style={inp} />
                     </div>
                     <div>
                       <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Invoice Number</label>
@@ -548,7 +601,9 @@ export default function FinancesPage() {
                         <span style={{ fontWeight: 800, fontSize: 17, color: '#dc2626' }}>{fmt(Number(inv.total_amount))}</span>
                         <div style={{ display: 'flex', gap: 6 }}>
                           {inv.status === 'draft' && <button onClick={() => updateInvoiceStatus(inv.id, 'approved')} style={smBtn('#f0fdf4', '#16a34a')}>Approve</button>}
+                          {inv.status === 'approved' && <button onClick={() => openGRV(inv)} style={smBtn('#fef3c7', '#d97706')}>📦 Receive Goods</button>}
                           {inv.status === 'approved' && <button onClick={() => updateInvoiceStatus(inv.id, 'paid')} style={smBtn('#eff6ff', '#2563eb')}>Mark Paid</button>}
+                          {inv.status === 'received' && <button onClick={() => updateInvoiceStatus(inv.id, 'paid')} style={smBtn('#eff6ff', '#2563eb')}>Mark Paid</button>}
                           <button onClick={() => openEditInvoice(inv)} style={smBtn('#f3f4f6', '#374151')}>Edit</button>
                           <button onClick={() => setExpandedInv(expandedInv === inv.id ? null : inv.id)} style={smBtn('#f3f4f6', '#374151')}>
                             {expandedInv === inv.id ? '▲ Hide' : '▼ Lines'}
@@ -641,10 +696,7 @@ export default function FinancesPage() {
                     </div>
                     <div>
                       <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Supplier (optional)</label>
-                      <select value={qForm.supplier} onChange={e => setQForm(f => ({ ...f, supplier: e.target.value }))} style={inp}>
-                        <option value="">— Select Supplier —</option>
-                        {suppliers.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
-                      </select>
+                      <input type="text" placeholder="Supplier name" value={qForm.supplier} onChange={e => setQForm(f => ({ ...f, supplier: e.target.value }))} style={inp} />
                     </div>
                     <div>
                       <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Notes</label>
@@ -771,6 +823,66 @@ export default function FinancesPage() {
               <p style={{ margin: '12px 0 0', fontSize: '12px', color: '#9ca3af', textAlign: 'center' }}>
                 Manage all categories in <a href="/settings" style={{ color: '#1a5c38' }}>Settings → Expense Categories</a>
               </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* GRV Modal */}
+      {showGRV && grvInvoice && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: '16px' }}>
+          <div style={{ background: '#fff', borderRadius: 16, width: '100%', maxWidth: 800, maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 24px 60px rgba(0,0,0,0.2)' }}>
+            <div style={{ padding: '20px 24px 16px', borderBottom: '1px solid #f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div>
+                <h2 style={{ margin: 0, fontSize: 18, fontWeight: 800 }}>📦 Receive Goods — {grvInvoice.supplier}</h2>
+                <p style={{ margin: '4px 0 0', fontSize: 13, color: '#6b7280' }}>Invoice {grvInvoice.invoice_number || '—'} • {grvInvoice.invoice_date} • Enter quantities received</p>
+              </div>
+              <button onClick={() => setShowGRV(false)} style={{ background: '#f3f4f6', border: 'none', borderRadius: 8, width: 32, height: 32, cursor: 'pointer', fontSize: 16 }}>✕</button>
+            </div>
+            <div style={{ padding: '16px 24px' }}>
+              {grvLines.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: 40, color: '#6b7280' }}>
+                  <div style={{ fontSize: 36, marginBottom: 8 }}>📦</div>
+                  <p>No stock items found for <strong>{grvInvoice.supplier}</strong>.</p>
+                  <p style={{ fontSize: 13 }}>Go to Stock Items tab and assign items to this supplier first.</p>
+                </div>
+              ) : (
+                <>
+                  <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr', gap: 8, marginBottom: 8, fontSize: 12, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase' as const }}>
+                    <div>Item</div><div>Unit</div><div>Qty Received</div><div>Unit Cost (R)</div>
+                  </div>
+                  <div style={{ maxHeight: 400, overflowY: 'auto' }}>
+                    {grvLines.map((line, i) => (
+                      <div key={line.stock_item_id} style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr', gap: 8, marginBottom: 8, alignItems: 'center' }}>
+                        <div style={{ fontWeight: 600, fontSize: 14 }}>{line.description}</div>
+                        <div style={{ fontSize: 13, color: '#6b7280' }}>{line.unit}</div>
+                        <input type="number" step="0.1" min="0" placeholder="0"
+                          value={line.qty_received}
+                          onChange={e => setGrvLines(ls => ls.map((l,idx) => idx===i ? {...l, qty_received: e.target.value} : l))}
+                          style={{ padding: '8px 10px', border: '1.5px solid #e5e7eb', borderRadius: 8, fontSize: 14, outline: 'none',
+                            background: parseFloat(line.qty_received) > 0 ? '#f0fdf4' : '#fff',
+                            borderColor: parseFloat(line.qty_received) > 0 ? '#16a34a' : '#e5e7eb' }} />
+                        <input type="number" step="0.01" min="0" placeholder="0.00"
+                          value={line.unit_cost}
+                          onChange={e => setGrvLines(ls => ls.map((l,idx) => idx===i ? {...l, unit_cost: e.target.value} : l))}
+                          style={{ padding: '8px 10px', border: '1.5px solid #e5e7eb', borderRadius: 8, fontSize: 14, outline: 'none' }} />
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ borderTop: '2px solid #e5e7eb', marginTop: 16, paddingTop: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: 13, color: '#6b7280' }}>
+                      {grvLines.filter(l => parseFloat(l.qty_received) > 0).length} of {grvLines.length} items received
+                    </span>
+                    <div style={{ display: 'flex', gap: 10 }}>
+                      <button onClick={() => setShowGRV(false)} style={{ background: '#f3f4f6', color: '#374151', border: 'none', borderRadius: 10, padding: '10px 18px', cursor: 'pointer', fontWeight: 700 }}>Cancel</button>
+                      <button onClick={saveGRV} disabled={savingGRV}
+                        style={{ background: '#1a5c38', color: '#fff', border: 'none', borderRadius: 10, padding: '10px 18px', cursor: 'pointer', fontWeight: 700, fontSize: 14 }}>
+                        {savingGRV ? 'Saving...' : '✓ Confirm Receipt & Update Stock'}
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </div>
