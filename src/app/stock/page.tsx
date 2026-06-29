@@ -7,7 +7,7 @@ import { useRouter } from 'next/navigation'
 const STORE_ID = '05328298-fc27-4c9f-b091-bb7f6598b601'
 
 type StockCategory = { id: string; name: string; color: string; sort_order: number }
-type StockItem = { id: string; category: string | null; name: string; description: string; unit: string; cost_price: number; price: number; par_level: number; is_active: boolean; sort_order: number }
+type StockItem = { id: string; category: string | null; name: string; description: string; unit: string; cost_price: number; price: number; par_level: number; is_active: boolean; sort_order: number; supplier: string | null; on_daily_sheet: boolean }
 type StockCount = { id: string; count_type: string; count_date: string; status: string; notes: string | null }
 type StockCountLine = { id: string; stock_count_id: string; stock_item_id: string; expected_qty: number; actual_qty: number; unit_cost: number }
 type StockPurchase = { id: string; purchase_date: string; supplier_name: string | null; item_name: string | null; quantity: number; unit: string | null; unit_cost: number; total_cost: number; invoice_number: string | null }
@@ -51,6 +51,7 @@ export default function StockPage() {
   const [activeCount, setActiveCount] = useState<StockCount | null>(null)
   const [countLines, setCountLines] = useState<StockCountLine[]>([])
   const [countTypeFilter, setCountTypeFilter] = useState('daily')
+  const [supplierFilter, setSupplierFilter] = useState('All')
   const [showAIImport, setShowAIImport] = useState(false)
   const [aiText, setAIText] = useState('')
   const [aiLoading, setAILoading] = useState(false)
@@ -61,7 +62,7 @@ export default function StockPage() {
   const [showAddOrder, setShowAddOrder] = useState(false)
   const [showAddCategory, setShowAddCategory] = useState(false)
   const [editItem, setEditItem] = useState<StockItem | null>(null)
-  const [itemForm, setItemForm] = useState({ name: '', description: '', category_id: 'goods', unit: 'each', cost_price: '', par_level: '' })
+  const [itemForm, setItemForm] = useState({ name: '', description: '', category_id: 'goods', unit: 'each', cost_price: '', par_level: '', supplier: 'Other', on_daily_sheet: false })
   const [purchaseForm, setPurchaseForm] = useState({ purchase_date: new Date().toISOString().split('T')[0], supplier_name: '', stock_item_id: '', item_name: '', quantity: '', unit: 'each', unit_cost: '', invoice_number: '' })
   const [wastageForm, setWastageForm] = useState({ wastage_date: new Date().toISOString().split('T')[0], stock_item_id: '', item_name: '', quantity: '', unit: 'each', unit_cost: '', reason: 'Expired' })
   const [orderForm, setOrderForm] = useState({ supplier_name: '', order_date: new Date().toISOString().split('T')[0], expected_delivery: '', notes: '' })
@@ -117,14 +118,16 @@ export default function StockPage() {
         .insert({ store_id: STORE_ID, count_date: today, count_type: type, status: 'in_progress' })
         .select().single()
       if (sessionErr) { alert('Could not start count: ' + sessionErr.message); setSaving(false); return }
-      // Insert one line per active stock item
-      if (items.length === 0) {
-        alert('No stock items found. Add items in the Stock Items tab first.')
+      // Filter items based on count type
+      const countItems = type === 'daily' ? items.filter(i => i.on_daily_sheet) : items
+      if (countItems.length === 0) {
+        const msg = type === 'daily' ? 'No daily sheet items set up. Go to Stock Items tab and toggle Daily Sheet on items you buy locally every day.' : 'No stock items found. Add items in the Stock Items tab first.'
+        alert(msg)
         await supabase.from('stock_counts').delete().eq('id', session.id)
         setSaving(false)
         return
       }
-      const lines = items.map(i => ({
+      const lines = countItems.map(i => ({
         stock_count_id: session.id,
         stock_item_id: i.id,
         expected_qty: 0,
@@ -186,7 +189,7 @@ export default function StockPage() {
   async function saveItem() {
     if (!itemForm.name && !itemForm.description) return
     setSaving(true)
-    const payload = { store_id: STORE_ID, name: itemForm.name, description: itemForm.name, category: itemForm.category_id || 'goods', unit: itemForm.unit, price: parseFloat(itemForm.cost_price || '0'), is_active: true }
+    const payload = { store_id: STORE_ID, name: itemForm.name, description: itemForm.name || itemForm.description, category: itemForm.category_id || 'goods', unit: itemForm.unit, price: parseFloat(itemForm.cost_price || '0'), is_active: true, supplier: itemForm.supplier || 'Other', on_daily_sheet: itemForm.on_daily_sheet }
     if (editItem) { await supabase.from('stock_items').update(payload).eq('id', editItem.id) }
     else { await supabase.from('stock_items').insert(payload) }
     setItemForm({ name: '', description: '', category_id: 'goods', unit: 'each', cost_price: '', par_level: '' })
@@ -309,7 +312,42 @@ export default function StockPage() {
                       <button onClick={() => { setActiveCount(null); setCountLines([]) }} style={{ padding: '8px 14px', background: '#f3f4f6', color: '#6b7280', border: 'none', borderRadius: '10px', cursor: 'pointer' }}>✕</button>
                     </div>
                   </div>
-                  {Object.values(groupedItems).map(({ key, label, color, items: catItems }) => (
+                  {/* Group by supplier in count screen */}
+                  {['SAR','Mochachos','Coca Cola','Flor do Tejo','Checkers','Northern Star','Local Grocer','Bakery','Other'].map(supplier => {
+                    const supplierLines = countLines.filter(l => {
+                      const item = items.find(i => i.id === l.stock_item_id)
+                      return (item?.supplier || 'Other') === supplier
+                    })
+                    if (!supplierLines.length) return null
+                    return (
+                  <div key={supplier}>
+                    <div style={{ padding: '10px 24px', background: '#f9fafb', borderTop: '1px solid #e5e7eb', fontWeight: 700, fontSize: '13px', color: '#1a5c38', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#1a5c38' }} />{supplier} ({supplierLines.length} items)
+                    </div>
+                    {supplierLines.map(line => {
+                      const item = items.find(i => i.id === line.stock_item_id)
+                      if (!item) return null
+                      const variance = (line.actual_qty || 0) - (line.expected_qty || 0)
+                      return (
+                        <div key={line.id} style={{ display: 'flex', alignItems: 'center', gap: '16px', padding: '12px 24px', borderTop: '1px solid #f3f4f6' }}>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontWeight: 600, fontSize: '14px', color: '#111' }}>{item.description || item.name}</div>
+                            <div style={{ fontSize: '12px', color: '#9ca3af' }}>{item.unit}</div>
+                          </div>
+                          <div style={{ fontSize: '12px', color: '#9ca3af', minWidth: '80px', textAlign: 'right' }}>Expected: <strong>{line.expected_qty || 0}</strong></div>
+                          <input type="number" min="0" step="0.1" value={line.actual_qty || ''} onChange={e => updateCountLine(line.id, parseFloat(e.target.value) || 0)}
+                            style={{ width: '90px', padding: '8px 10px', border: '1.5px solid #e5e7eb', borderRadius: '10px', fontSize: '16px', textAlign: 'center', outline: 'none' }} />
+                          <div style={{ minWidth: '70px', textAlign: 'right', fontSize: '13px', fontWeight: 700, color: variance < 0 ? '#dc2626' : variance > 0 ? '#16a34a' : '#9ca3af' }}>
+                            {variance > 0 ? '+' : ''}{variance.toFixed(1)}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                    )
+                  })}
+                  {/* OLD groupedItems render replaced */}
+                  {false && Object.values(groupedItems).map(({ key, label, color, items: catItems }) => (
                     <div key={key}>
                       <div style={{ padding: '10px 24px', background: '#f9fafb', borderTop: '1px solid #e5e7eb', fontWeight: 700, fontSize: '13px', color: color, display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: color }} />{label}
@@ -454,16 +492,24 @@ export default function StockPage() {
           {tab === 'items' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div><div style={{ fontSize: '18px', fontWeight: 800, color: '#111' }}>Stock Items</div><div style={{ fontSize: '13px', color: '#9ca3af' }}>Build your stock sheet — add items per category</div></div>
-                <div style={{ display: 'flex', gap: '10px' }}>
-                  <button onClick={() => setShowAddCategory(true)} style={{ padding: '10px 18px', background: 'white', color: '#1a5c38', border: '1.5px solid #1a5c38', borderRadius: '10px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>+ Category</button>
-                  <button onClick={() => { setEditItem(null); setItemForm({ name: '', category_id: 'goods', unit: 'each', cost_price: '', par_level: '' }); setShowAddItem(true) }} style={{ padding: '10px 18px', background: '#1a5c38', color: 'white', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: 800, cursor: 'pointer' }}>+ Add Item</button>
-                </div>
+                <div><div style={{ fontSize: '18px', fontWeight: 800, color: '#111' }}>Stock Items</div><div style={{ fontSize: '13px', color: '#9ca3af' }}>{items.length} items — assign suppliers and daily sheet flags</div></div>
+                <button onClick={() => { setEditItem(null); setItemForm({ name: '', description: '', category_id: 'goods', unit: 'each', cost_price: '', par_level: '', supplier: 'Other', on_daily_sheet: false }); setShowAddItem(true) }} style={{ padding: '10px 18px', background: '#1a5c38', color: 'white', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: 800, cursor: 'pointer' }}>+ Add Item</button>
+              </div>
+              {/* Supplier filter */}
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                {['All', 'SAR', 'Mochachos', 'Coca Cola', 'Flor do Tejo', 'Checkers', 'Northern Star', 'Local Grocer', 'Bakery', 'Other'].map(s => (
+                  <button key={s} onClick={() => setSupplierFilter(s)}
+                    style={{ padding: '6px 14px', borderRadius: '20px', fontSize: '12px', fontWeight: 600, cursor: 'pointer', border: 'none',
+                      background: supplierFilter === s ? '#1a5c38' : '#f3f4f6', color: supplierFilter === s ? '#fff' : '#374151' }}>
+                    {s} {s !== 'All' ? `(${items.filter(i => (i.supplier || 'Other') === s).length})` : `(${items.length})`}
+                  </button>
+                ))}
               </div>
               {['goods','beverages','packaging','basting','other'].map(catKey => {
+                const filteredBySupplier = supplierFilter === 'All' ? items : items.filter(i => (i.supplier || 'Other') === supplierFilter)
                 const catLabels: Record<string,string> = { goods: 'Goods', beverages: 'Beverages', packaging: 'Packaging', basting: 'Basting & Sauces', other: 'Other' }
                 const catColors: Record<string,string> = { goods: '#16a34a', beverages: '#2563eb', packaging: '#d97706', basting: '#dc2626', other: '#6b7280' }
-                const catItems = (items || []).filter(i => i.category === catKey)
+                const catItems = (filteredBySupplier || []).filter(i => i.category === catKey)
                 if (!catItems.length) return null
                 return (
                   <div key={catKey} style={{ background: 'white', borderRadius: '20px', border: '1.5px solid #eef2ee', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
@@ -483,7 +529,7 @@ export default function StockPage() {
                             <td style={{ padding: '12px 16px', fontSize: '13px', color: '#374151' }}>{item.par_level} {item.unit}</td>
                             <td style={{ padding: '12px 16px' }}>
                               <div style={{ display: 'flex', gap: '6px' }}>
-                                <button onClick={() => { setEditItem(item); setItemForm({ name: item.description || item.name || '', category_id: item.category || 'goods', unit: item.unit, cost_price: String(item.cost_price ?? item.price ?? 0), par_level: String(item.par_level ?? 0) }); setShowAddItem(true) }} style={{ fontSize: '12px', color: '#1d4ed8', background: '#eff6ff', border: 'none', borderRadius: '8px', padding: '5px 10px', cursor: 'pointer', fontWeight: 600 }}>Edit</button>
+                                <button onClick={() => { setEditItem(item); setItemForm({ name: item.description || item.name || '', description: item.description || '', category_id: item.category || 'goods', unit: item.unit, cost_price: String(item.cost_price ?? item.price ?? 0), par_level: String(item.par_level ?? 0), supplier: item.supplier || 'Other', on_daily_sheet: item.on_daily_sheet || false }); setShowAddItem(true) }} style={{ fontSize: '12px', color: '#1d4ed8', background: '#eff6ff', border: 'none', borderRadius: '8px', padding: '5px 10px', cursor: 'pointer', fontWeight: 600 }}>Edit</button>
                                 <button onClick={() => deleteItem(item.id)} style={{ fontSize: '12px', color: '#dc2626', background: '#fee2e2', border: 'none', borderRadius: '8px', padding: '5px 8px', cursor: 'pointer', fontWeight: 700 }}>✕</button>
                               </div>
                             </td>
@@ -525,8 +571,31 @@ export default function StockPage() {
       {/* Add/Edit Item Modal */}
       <Modal show={showAddItem} onClose={() => { setShowAddItem(false); setEditItem(null) }} title={editItem ? 'Edit Item' : 'Add Stock Item'}>
         <div style={{ padding: '20px 28px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          <div><label style={LABEL}>Item Name *</label><input value={itemForm.name} onChange={e => setItemForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Chicken Breasts" style={INPUT} /></div>
-          <div><label style={LABEL}>Category</label><select value={itemForm.category_id} onChange={e => setItemForm(f => ({ ...f, category_id: e.target.value }))} style={INPUT}><option value="">No category</option>{categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
+          <div><label style={LABEL}>Item Name *</label><input value={itemForm.name} onChange={e => setItemForm(f => ({ ...f, name: e.target.value, description: e.target.value }))} placeholder="e.g. Chicken Breasts" style={INPUT} /></div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+            <div><label style={LABEL}>Category</label><select value={itemForm.category_id} onChange={e => setItemForm(f => ({ ...f, category_id: e.target.value }))} style={INPUT}>
+              <option value="goods">Goods</option>
+              <option value="beverages">Beverages</option>
+              <option value="packaging">Packaging</option>
+              <option value="basting">Basting & Sauces</option>
+              <option value="other">Other</option>
+            </select></div>
+            <div><label style={LABEL}>Supplier</label><select value={itemForm.supplier} onChange={e => setItemForm(f => ({ ...f, supplier: e.target.value }))} style={INPUT}>
+              <option value="SAR">SAR</option>
+              <option value="Mochachos">Mochachos</option>
+              <option value="Coca Cola">Coca Cola</option>
+              <option value="Flor do Tejo">Flor do Tejo</option>
+              <option value="Checkers">Checkers</option>
+              <option value="Northern Star">Northern Star</option>
+              <option value="Local Grocer">Local Grocer</option>
+              <option value="Bakery">Bakery</option>
+              <option value="Other">Other</option>
+            </select></div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 16px', background: '#f0fdf4', borderRadius: '10px', border: '1.5px solid #bbf7d0' }}>
+            <input type="checkbox" id="dailySheet" checked={itemForm.on_daily_sheet} onChange={e => setItemForm(f => ({ ...f, on_daily_sheet: e.target.checked }))} style={{ width: '18px', height: '18px', cursor: 'pointer' }} />
+            <label htmlFor="dailySheet" style={{ cursor: 'pointer', fontWeight: 600, fontSize: '14px', color: '#166534' }}>📋 Daily Sheet — include in daily buy list</label>
+          </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
             <div><label style={LABEL}>Unit</label><select value={itemForm.unit} onChange={e => setItemForm(f => ({ ...f, unit: e.target.value }))} style={INPUT}>{UNITS.map(u => <option key={u}>{u}</option>)}</select></div>
             <div><label style={LABEL}>Cost Price (R)</label><input type="number" step="0.01" value={itemForm.cost_price} onChange={e => setItemForm(f => ({ ...f, cost_price: e.target.value }))} placeholder="0.00" style={INPUT} /></div>
