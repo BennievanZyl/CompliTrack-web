@@ -258,7 +258,10 @@ export default function FinancesPage() {
         reader.readAsDataURL(file)
       })
 
-      const mediaType = file.type === 'application/pdf' ? 'application/pdf' : 'image/jpeg'
+      const mediaType = file.type === 'application/pdf' ? 'application/pdf' 
+        : file.type === 'image/png' ? 'image/png'
+        : file.type === 'image/webp' ? 'image/webp'
+        : 'image/jpeg'
 
       const response = await fetch('/api/scan-invoice', {
         method: 'POST',
@@ -266,8 +269,8 @@ export default function FinancesPage() {
         body: JSON.stringify({ base64, mediaType })
       })
 
-      if (!response.ok) throw new Error('Scan failed')
       const data = await response.json()
+      if (!response.ok) throw new Error(data.error || 'Scan failed - status ' + response.status)
 
       // Pre-fill the invoice form
       if (data.supplier) setInvForm(f => ({ ...f, supplier: data.supplier }))
