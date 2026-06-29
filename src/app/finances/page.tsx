@@ -555,15 +555,14 @@ export default function FinancesPage() {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                 <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Supplier Bills</h2>
                 <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                  <label style={{ ...btn('#6366f1'), cursor: scanning ? 'wait' : 'pointer', opacity: scanning ? 0.7 : 1, display: 'inline-block' }}>
-                    {scanning ? '⏳ Scanning...' : '📷 Scan Invoice'}
-                    <input type="file" accept="image/*,application/pdf" disabled={scanning}
-                      style={{ display: 'none' }}
-                      onChange={e => {
-                        const f = e.target.files?.[0]
-                        if (f) scanInvoice(f)
-                      }} />
-                  </label>
+                  <div style={{ position: 'relative', display: 'inline-block' }}>
+                    <div style={{ ...btn('#6366f1'), cursor: scanning ? 'wait' : 'pointer', opacity: scanning ? 0.7 : 1 }}>
+                      {scanning ? '⏳ Scanning...' : '📷 Scan Invoice'}
+                    </div>
+                    {!scanning && <input type="file" accept="image/*,application/pdf"
+                      style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer', fontSize: 0 }}
+                      onChange={e => { const f = e.target.files?.[0]; if (f) scanInvoice(f) }} />}
+                  </div>
                   <button style={btn()} onClick={openNewInvoice}>+ New Invoice</button>
                 </div>
               </div>
