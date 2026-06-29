@@ -250,53 +250,52 @@ export default function FinancesPage() {
     setScanning(true)
     setScanError('')
     try {
-      // Convert file to base64
-      const base64 = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader()
-        reader.onload = () => resolve((reader.result as string).split(',')[1])
-        reader.onerror = reject
-        reader.readAsDataURL(file)
-      })
-
-      const mediaType = file.type === 'application/pdf' ? 'application/pdf' 
+      const mediaType = file.type === 'application/pdf' ? 'application/pdf'
         : file.type === 'image/png' ? 'image/png'
         : file.type === 'image/webp' ? 'image/webp'
         : 'image/jpeg'
 
+      // Read file as ArrayBuffer first, then convert to base64
+      const arrayBuffer = await file.arrayBuffer()
+      const uint8Array = new Uint8Array(arrayBuffer)
+      let binary = ''
+      for (let i = 0; i < uint8Array.byteLength; i++) {
+        binary += String.fromCharCode(uint8Array[i])
+      }
+      const b64 = btoa(binary)
+
+      if (!b64) throw new Error('Could not read file')
+
       const response = await fetch('/api/scan-invoice', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ base64, mediaType })
+        body: JSON.stringify({ base64: b64, mediaType })
       })
 
       const data = await response.json()
-      if (!response.ok) throw new Error(data.error || 'Scan failed - status ' + response.status)
+      if (!response.ok) throw new Error(data.error || 'Scan failed')
 
       // Pre-fill the invoice form
+      setShowInvForm(true)
       if (data.supplier) setInvForm(f => ({ ...f, supplier: data.supplier }))
       if (data.invoice_number) setInvForm(f => ({ ...f, invoice_number: data.invoice_number }))
       if (data.invoice_date) setInvForm(f => ({ ...f, invoice_date: data.invoice_date }))
       if (data.due_date) setInvForm(f => ({ ...f, due_date: data.due_date }))
       if (data.notes) setInvForm(f => ({ ...f, notes: data.notes }))
-
-      // Pre-fill line items
       if (data.lines && data.lines.length > 0) {
         setInvLines(data.lines.map((l: {category_key?: string; description?: string; amount?: number; vat_amount?: number}) => ({
-          category_key: l.category_key || 'goods',
+          category_key: l.category_key || 'cost_of_sales',
           description: l.description || '',
-          amount: l.amount || 0,
-          vat_amount: l.vat_amount || 0,
+          amount: Number(l.amount) || 0,
+          vat_amount: Number(l.vat_amount) || 0,
         })))
       }
-
-      // Open the form if not already open
-      setShowInvForm(true)
-    } catch (e) {
-      setScanError('Could not read invoice. Please check the image is clear and try again.')
-      console.error(e)
+    } catch (e: unknown) {
+      setScanError(e instanceof Error ? e.message : 'Could not read invoice. Please try again.')
     }
     setScanning(false)
   }
+
 
   async function saveInvoice() {
     if (!invForm.supplier) { setError('Supplier is required'); return }
