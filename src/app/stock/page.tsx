@@ -329,18 +329,8 @@ export default function StockPage() {
                       })}
                     </div>
                   ))}
-                  {uncategorised.map(item => {
-                    const line = countLines.find(l => l.stock_item_id === item.id)
-                    if (!line) return null
-                    const variance = line.actual_qty - line.expected_qty
-                    return (
-                      <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: '16px', padding: '12px 24px', borderTop: '1px solid #f3f4f6' }}>
-                        <div style={{ flex: 1 }}><div style={{ fontWeight: 600, fontSize: '14px', color: '#111' }}>{(line as {stock_items?: {description:string}}).stock_items?.description || ''}</div><div style={{ fontSize: '12px', color: '#9ca3af' }}>{item.unit}</div></div>
-                        <input type="number" min="0" step="0.1" value={line.actual_qty || ''} onChange={e => updateCountLine(line.id, parseFloat(e.target.value) || 0)} placeholder="0" style={{ width: '100px', border: '1.5px solid #e5e7eb', borderRadius: '8px', padding: '8px 10px', fontSize: '14px', fontWeight: 700, textAlign: 'center', outline: 'none' }} />
-                        <div style={{ minWidth: '70px', textAlign: 'right', fontSize: '13px', fontWeight: 700, color: variance < 0 ? '#dc2626' : variance > 0 ? '#d97706' : '#9ca3af' }}>{variance === 0 ? '—' : `${variance > 0 ? '+' : ''}${variance.toFixed(1)}`}</div>
-                      </div>
-                    )
-                  })}
+                                    {/* uncategorised items */}
+})}
                 </div>
               ) : (<>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px' }}>
