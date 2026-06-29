@@ -23,9 +23,10 @@ const TABS = [
 ]
 
 const COUNT_TYPES = [
-  { key: 'daily', label: 'Daily Count', desc: 'Quick daily check — buy for the day', color: '#16a34a', bg: '#dcfce7' },
-  { key: 'weekly', label: 'Weekly Count', desc: 'Weekly stocktake — calculate food cost', color: '#2563eb', bg: '#dbeafe' },
-  { key: 'monthly', label: 'Monthly Count', desc: 'Full month stocktake — monthly food cost', color: '#7c3aed', bg: '#ede9fe' },
+  { key: 'opening', label: 'Opening Count', desc: 'Perishables & quick items', color: '#16a34a', bg: '#dcfce7' },
+  { key: 'closing', label: 'Closing Count', desc: 'End of day variance check', color: '#2563eb', bg: '#dbeafe' },
+  { key: 'mid_month', label: 'Mid-Month', desc: 'Full stocktake & food cost', color: '#7c3aed', bg: '#ede9fe' },
+  { key: 'spot', label: 'Spot Check', desc: 'Quick spot check on specific items', color: '#d97706', bg: '#fef3c7' },
 ]
 
 const UNITS = ['each', 'kg', 'g', 'L', 'ml', 'pack', 'box', 'bag', 'bottle', 'tin', 'tray', 'dozen']
@@ -50,7 +51,7 @@ export default function StockPage() {
   const [saving, setSaving] = useState(false)
   const [activeCount, setActiveCount] = useState<StockCount | null>(null)
   const [countLines, setCountLines] = useState<StockCountLine[]>([])
-  const [countTypeFilter, setCountTypeFilter] = useState('daily')
+  const [countTypeFilter, setCountTypeFilter] = useState('opening')
   const [showAIImport, setShowAIImport] = useState(false)
   const [aiText, setAIText] = useState('')
   const [aiLoading, setAILoading] = useState(false)
@@ -158,7 +159,7 @@ export default function StockPage() {
   async function savePurchase() {
     setSaving(true)
     const total = parseFloat(purchaseForm.quantity || '0') * parseFloat(purchaseForm.unit_cost || '0')
-    await supabase.from('stock_purchases').insert({ store_id: STORE_ID, purchase_date: purchaseForm.purchase_date, supplier_name: purchaseForm.supplier_name || null, stock_item_id: purchaseForm.stock_item_id || null, item_name: purchaseForm.item_name || (items.find(i => i.id === purchaseForm.stock_item_id)?.name ?? items.find(i => i.id === purchaseForm.stock_item_id)?.description) || null, quantity: parseFloat(purchaseForm.quantity || '0'), unit: purchaseForm.unit, unit_cost: parseFloat(purchaseForm.unit_cost || '0'), total_cost: total, invoice_number: purchaseForm.invoice_number || null })
+    await supabase.from('stock_purchases').insert({ store_id: STORE_ID, purchase_date: purchaseForm.purchase_date, supplier_name: purchaseForm.supplier_name || null, stock_item_id: purchaseForm.stock_item_id || null, item_name: purchaseForm.item_name || items.find(i => i.id === purchaseForm.stock_item_id)?.description || null, quantity: parseFloat(purchaseForm.quantity || '0'), unit: purchaseForm.unit, unit_cost: parseFloat(purchaseForm.unit_cost || '0'), total_cost: total, invoice_number: purchaseForm.invoice_number || null })
     setPurchaseForm({ purchase_date: new Date().toISOString().split('T')[0], supplier_name: '', stock_item_id: '', item_name: '', quantity: '', unit: 'each', unit_cost: '', invoice_number: '' })
     setShowAddPurchase(false); await loadAll(); setSaving(false)
   }
@@ -166,7 +167,7 @@ export default function StockPage() {
   async function saveWastage() {
     setSaving(true)
     const total = parseFloat(wastageForm.quantity || '0') * parseFloat(wastageForm.unit_cost || '0')
-    await supabase.from('stock_wastage').insert({ store_id: STORE_ID, wastage_date: wastageForm.wastage_date, stock_item_id: wastageForm.stock_item_id || null, item_name: wastageForm.item_name || (items.find(i => i.id === wastageForm.stock_item_id)?.name ?? items.find(i => i.id === wastageForm.stock_item_id)?.description) || null, quantity: parseFloat(wastageForm.quantity || '0'), unit: wastageForm.unit, unit_cost: parseFloat(wastageForm.unit_cost || '0'), total_cost: total, reason: wastageForm.reason })
+    await supabase.from('stock_wastage').insert({ store_id: STORE_ID, wastage_date: wastageForm.wastage_date, stock_item_id: wastageForm.stock_item_id || null, item_name: wastageForm.item_name || items.find(i => i.id === wastageForm.stock_item_id)?.description || null, quantity: parseFloat(wastageForm.quantity || '0'), unit: wastageForm.unit, unit_cost: parseFloat(wastageForm.unit_cost || '0'), total_cost: total, reason: wastageForm.reason })
     setWastageForm({ wastage_date: new Date().toISOString().split('T')[0], stock_item_id: '', item_name: '', quantity: '', unit: 'each', unit_cost: '', reason: 'Expired' })
     setShowAddWastage(false); await loadAll(); setSaving(false)
   }
@@ -320,7 +321,7 @@ export default function StockPage() {
                         const variance = (line.actual_qty || 0) - (line.expected_qty || 0)
                         return (
                           <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: '16px', padding: '12px 24px', borderTop: '1px solid #f3f4f6' }}>
-                            <div style={{ flex: 1 }}><div style={{ fontWeight: 600, fontSize: '14px', color: '#111' }}>{(line.stock_items as {description:string; unit:string})?.description || item?.description || ''}</div><div style={{ fontSize: '12px', color: '#9ca3af' }}>{item.unit} • {formatCurrency(item.cost_price ?? item.price ?? 0)}</div></div>
+                            <div style={{ flex: 1 }}><div style={{ fontWeight: 600, fontSize: '14px', color: '#111' }}>{(line as {stock_items?: {description:string}}).stock_items?.description || ''}</div><div style={{ fontSize: '12px', color: '#9ca3af' }}>{item.unit} • {formatCurrency(item.cost_price ?? item.price ?? 0)}</div></div>
                             <div style={{ fontSize: '12px', color: '#9ca3af', minWidth: '80px', textAlign: 'right' }}>Expected: <strong>{line.expected_qty}</strong></div>
                             <input type="number" min="0" step="0.1" value={line.actual_qty || ''} onChange={e => updateCountLine(line.id, parseFloat(e.target.value) || 0)} placeholder="0" style={{ width: '100px', border: '1.5px solid #e5e7eb', borderRadius: '8px', padding: '8px 10px', fontSize: '14px', fontWeight: 700, textAlign: 'center', outline: 'none' }} />
                             <div style={{ minWidth: '70px', textAlign: 'right', fontSize: '13px', fontWeight: 700, color: variance < 0 ? '#dc2626' : variance > 0 ? '#d97706' : '#9ca3af' }}>{variance === 0 ? '—' : `${variance > 0 ? '+' : ''}${variance.toFixed(1)}`}</div>
@@ -335,7 +336,7 @@ export default function StockPage() {
                     const variance = line.actual_qty - line.expected_qty
                     return (
                       <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: '16px', padding: '12px 24px', borderTop: '1px solid #f3f4f6' }}>
-                        <div style={{ flex: 1 }}><div style={{ fontWeight: 600, fontSize: '14px', color: '#111' }}>{(line.stock_items as {description:string; unit:string})?.description || item?.description || ''}</div><div style={{ fontSize: '12px', color: '#9ca3af' }}>{item.unit}</div></div>
+                        <div style={{ flex: 1 }}><div style={{ fontWeight: 600, fontSize: '14px', color: '#111' }}>{(line as {stock_items?: {description:string}}).stock_items?.description || ''}</div><div style={{ fontSize: '12px', color: '#9ca3af' }}>{item.unit}</div></div>
                         <input type="number" min="0" step="0.1" value={line.actual_qty || ''} onChange={e => updateCountLine(line.id, parseFloat(e.target.value) || 0)} placeholder="0" style={{ width: '100px', border: '1.5px solid #e5e7eb', borderRadius: '8px', padding: '8px 10px', fontSize: '14px', fontWeight: 700, textAlign: 'center', outline: 'none' }} />
                         <div style={{ minWidth: '70px', textAlign: 'right', fontSize: '13px', fontWeight: 700, color: variance < 0 ? '#dc2626' : variance > 0 ? '#d97706' : '#9ca3af' }}>{variance === 0 ? '—' : `${variance > 0 ? '+' : ''}${variance.toFixed(1)}`}</div>
                       </div>
@@ -489,13 +490,13 @@ export default function StockPage() {
                       <tbody>
                         {catItems.map(item => (
                           <tr key={item.id} style={{ borderTop: '1px solid #f3f4f6' }}>
-                            <td style={{ padding: '12px 16px', fontWeight: 700, fontSize: '14px', color: '#111' }}>{(line.stock_items as {description:string; unit:string})?.description || item?.description || ''}</td>
+                            <td style={{ padding: '12px 16px', fontWeight: 700, fontSize: '14px', color: '#111' }}>{(line as {stock_items?: {description:string}}).stock_items?.description || ''}</td>
                             <td style={{ padding: '12px 16px', fontSize: '13px', color: '#6b7280' }}>{item.unit}</td>
                             <td style={{ padding: '12px 16px', fontSize: '13px', color: '#374151' }}>{formatCurrency(item.cost_price ?? item.price ?? 0)}</td>
                             <td style={{ padding: '12px 16px', fontSize: '13px', color: '#374151' }}>{item.par_level} {item.unit}</td>
                             <td style={{ padding: '12px 16px' }}>
                               <div style={{ display: 'flex', gap: '6px' }}>
-                                <button onClick={() => { setEditItem(item); setItemForm({ name: item.name, category_id: item.category || 'goods', unit: item.unit, cost_price: (item.cost_price ?? item.price ?? 0).toString(), par_level: (item.par_level ?? 0).toString() }); setShowAddItem(true) }} style={{ fontSize: '12px', color: '#1d4ed8', background: '#eff6ff', border: 'none', borderRadius: '8px', padding: '5px 10px', cursor: 'pointer', fontWeight: 600 }}>Edit</button>
+                                <button onClick={() => { setEditItem(item); setItemForm({ name: item.description || item.name || '', category_id: item.category || 'goods', unit: item.unit, cost_price: String(item.cost_price ?? item.price ?? 0), par_level: String(item.par_level ?? 0) }); setShowAddItem(true) }} style={{ fontSize: '12px', color: '#1d4ed8', background: '#eff6ff', border: 'none', borderRadius: '8px', padding: '5px 10px', cursor: 'pointer', fontWeight: 600 }}>Edit</button>
                                 <button onClick={() => deleteItem(item.id)} style={{ fontSize: '12px', color: '#dc2626', background: '#fee2e2', border: 'none', borderRadius: '8px', padding: '5px 8px', cursor: 'pointer', fontWeight: 700 }}>✕</button>
                               </div>
                             </td>
@@ -568,7 +569,7 @@ export default function StockPage() {
         <div style={{ padding: '20px 28px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
           <div><label style={LABEL}>Date</label><input type="date" value={purchaseForm.purchase_date} onChange={e => setPurchaseForm(f => ({ ...f, purchase_date: e.target.value }))} style={INPUT} /></div>
           <div><label style={LABEL}>Stock Item (optional)</label>
-            <select value={purchaseForm.stock_item_id} onChange={e => { const item = items.find(i => i.id === e.target.value); setPurchaseForm(f => ({ ...f, stock_item_id: e.target.value, item_name: (item?.name || item?.description) || f.item_name, unit: item?.unit || f.unit, unit_cost: (item?.cost_price ?? item?.price ?? 0).toString() || f.unit_cost })) }} style={INPUT}>
+            <select value={purchaseForm.stock_item_id} onChange={e => { const item = items.find(i => i.id === e.target.value); setPurchaseForm(f => ({ ...f, stock_item_id: e.target.value, item_name: (item?.name || item?.description) || f.item_name, unit: item?.unit || f.unit, unit_cost: item ? String(item.cost_price ?? item.price ?? 0) : f.unit_cost })) }} style={INPUT}>
               <option value="">Select from stock list</option>
               {['goods','beverages','packaging','basting','other'].map(cat => <optgroup key={cat} label={cat}>{items.filter(i => i.category === cat).map(i => <option key={i.id} value={i.id}>{i.name || i.description}</option>)}</optgroup>)}
             </select>
@@ -593,7 +594,7 @@ export default function StockPage() {
       <Modal show={showAddWastage} onClose={() => setShowAddWastage(false)} title="Log Wastage">
         <div style={{ padding: '20px 28px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
           <div><label style={LABEL}>Date</label><input type="date" value={wastageForm.wastage_date} onChange={e => setWastageForm(f => ({ ...f, wastage_date: e.target.value }))} style={INPUT} /></div>
-          <div><label style={LABEL}>Stock Item</label><select value={wastageForm.stock_item_id} onChange={e => { const item = items.find(i => i.id === e.target.value); setWastageForm(f => ({ ...f, stock_item_id: e.target.value, item_name: (item?.name || item?.description) || '', unit: item?.unit || 'each', unit_cost: (item?.cost_price ?? item?.price ?? 0).toString() || '' })) }} style={INPUT}><option value="">Select item</option>{items.map(i => <option key={i.id} value={i.id}>{i.name || i.description}</option>)}</select></div>
+          <div><label style={LABEL}>Stock Item</label><select value={wastageForm.stock_item_id} onChange={e => { const item = items.find(i => i.id === e.target.value); setWastageForm(f => ({ ...f, stock_item_id: e.target.value, item_name: (item?.name || item?.description) || '', unit: item?.unit || 'each', unit_cost: item ? String(item.cost_price ?? item.price ?? 0) : '' })) }} style={INPUT}><option value="">Select item</option>{items.map(i => <option key={i.id} value={i.id}>{i.name || i.description}</option>)}</select></div>
           <div><label style={LABEL}>Item Name</label><input value={wastageForm.item_name} onChange={e => setWastageForm(f => ({ ...f, item_name: e.target.value }))} placeholder="or type manually" style={INPUT} /></div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
             <div><label style={LABEL}>Quantity</label><input type="number" step="0.1" value={wastageForm.quantity} onChange={e => setWastageForm(f => ({ ...f, quantity: e.target.value }))} placeholder="0" style={INPUT} /></div>
