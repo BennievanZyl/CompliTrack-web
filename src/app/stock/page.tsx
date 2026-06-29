@@ -91,10 +91,11 @@ export default function StockPage() {
   async function startCount(type: string) {
     setSaving(true)
     const today = new Date().toISOString().split('T')[0]
-    const { data: existing } = await supabase.from('stock_counts').select('*').eq('store_id', STORE_ID).eq('count_type', type).eq('count_date', today).eq('status', 'draft').maybeSingle()
+    const { data: existing } = await supabase.from('stock_counts').select('*').eq('store_id', STORE_ID).eq('count_type', type).eq('count_date', today).eq('status', 'in_progress').maybeSingle()
     let count = existing
     if (!count) {
-      const { data } = await supabase.from('stock_counts').insert({ store_id: STORE_ID, count_type: type, count_date: today, status: 'draft' }).select().single()
+      const { data, error: insertErr } = await supabase.from('stock_counts').insert({ store_id: STORE_ID, count_type: type, count_date: today, status: 'in_progress' }).select().single()
+      if (insertErr) { alert('Could not start count: ' + insertErr.message); setSaving(false); return }
       count = data
     }
     if (count) {
@@ -104,7 +105,8 @@ export default function StockPage() {
       const missingItems = (itemRes: StockItem[]) => itemRes.filter((i: StockItem) => !existingItemIds.includes(i.id))
       const missing = missingItems(items)
       if (missing.length > 0) {
-        await supabase.from('stock_count_lines').insert(missing.map((i: StockItem) => ({ stock_count_id: count.id, stock_item_id: i.id, expected_qty: 0, actual_qty: 0, unit_cost: i.cost_price ?? i.price ?? 0 })))
+        const { error: lineErr } = await supabase.from('stock_count_lines').insert(missing.map((i: StockItem) => ({ stock_count_id: count!.id, stock_item_id: i.id, expected_qty: 0, actual_qty: 0, unit_cost: Number(i.cost_price ?? i.price ?? 0) })))
+        if (lineErr) console.error('count lines error:', lineErr.message)
       }
       const { data: freshLines } = await supabase.from('stock_count_lines').select('*').eq('stock_count_id', count.id)
       setCountLines(freshLines || [])
@@ -120,7 +122,7 @@ export default function StockPage() {
 
   async function completeCount() {
     if (!activeCount) return
-    await supabase.from('stock_counts').update({ status: 'completed', completed_at: new Date().toISOString() }).eq('id', activeCount.id)
+    await supabase.from('stock_counts').update({ status: 'completed' }).eq('id', activeCount.id)
     setActiveCount(null); setCountLines([]); await loadAll()
   }
 
