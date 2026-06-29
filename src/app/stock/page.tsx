@@ -9,7 +9,7 @@ const STORE_ID = '05328298-fc27-4c9f-b091-bb7f6598b601'
 type StockCategory = { id: string; name: string; color: string; sort_order: number }
 type StockItem = { id: string; category: string | null; name: string; description: string; unit: string; cost_price: number; price: number; par_level: number; is_active: boolean; sort_order: number }
 type StockCount = { id: string; count_type: string; count_date: string; status: string; notes: string | null }
-type StockCountLine = { id: string; stock_count_id: string; stock_item_id: string; expected_qty: number; actual_qty: number; unit_cost: number }
+type StockCountLine = { id: string; store_id: string; stock_item_id: string; count_date: string; count_type: string; quantity: number; status: string }
 type StockPurchase = { id: string; purchase_date: string; supplier_name: string | null; item_name: string | null; quantity: number; unit: string | null; unit_cost: number; total_cost: number; invoice_number: string | null }
 type StockWastage = { id: string; wastage_date: string; item_name: string | null; quantity: number; unit: string | null; unit_cost: number; total_cost: number; reason: string | null }
 type StockOrder = { id: string; supplier_name: string; order_date: string; expected_delivery: string | null; status: string; notes: string | null; total_value: number }
@@ -74,7 +74,7 @@ export default function StockPage() {
     const [catRes, itemRes, countRes, purchRes, wastRes, ordRes] = await Promise.all([
       supabase.from('stock_categories').select('*').eq('store_id', STORE_ID).order('sort_order'),
       supabase.from('stock_items').select('*').eq('store_id', STORE_ID).eq('is_active', true).order('sort_order', { nullsFirst: false }),
-      supabase.from('stock_counts').select('*').eq('store_id', STORE_ID).order('count_date', { ascending: false }).limit(30),
+      supabase.from('stock_counts').select('*').eq('store_id', STORE_ID).order('count_date', { ascending: false }).limit(100),
       supabase.from('stock_purchases').select('*').eq('store_id', STORE_ID).order('purchase_date', { ascending: false }).limit(50),
       supabase.from('stock_wastage').select('*').eq('store_id', STORE_ID).order('wastage_date', { ascending: false }).limit(50),
       supabase.from('stock_orders').select('*').eq('store_id', STORE_ID).order('order_date', { ascending: false }).limit(30),
@@ -91,38 +91,38 @@ export default function StockPage() {
   async function startCount(type: string) {
     setSaving(true)
     const today = new Date().toISOString().split('T')[0]
-    const { data: existing } = await supabase.from('stock_counts').select('*').eq('store_id', STORE_ID).eq('count_type', type).eq('count_date', today).eq('status', 'in_progress').maybeSingle()
-    let count = existing
-    if (!count) {
-      const { data, error: insertErr } = await supabase.from('stock_counts').insert({ store_id: STORE_ID, count_type: type, count_date: today, status: 'in_progress' }).select().single()
-      if (insertErr) { alert('Could not start count: ' + insertErr.message); setSaving(false); return }
-      count = data
+    const { data: existing } = await supabase.from('stock_counts')
+      .select('*').eq('store_id', STORE_ID).eq('count_type', type)
+      .eq('count_date', today).eq('status', 'in_progress')
+    if (existing && existing.length > 0) {
+      setActiveCount({ id: today + '_' + type, count_type: type, count_date: today, status: 'in_progress' })
+      setCountLines(existing)
+      setSaving(false)
+      return
     }
-    if (count) {
-      setActiveCount(count)
-      const { data: lines } = await supabase.from('stock_count_lines').select('*').eq('stock_count_id', count.id)
-      const existingItemIds = (lines || []).map((l: StockCountLine) => l.stock_item_id)
-      const missingItems = (itemRes: StockItem[]) => itemRes.filter((i: StockItem) => !existingItemIds.includes(i.id))
-      const missing = missingItems(items)
-      if (missing.length > 0) {
-        const { error: lineErr } = await supabase.from('stock_count_lines').insert(missing.map((i: StockItem) => ({ stock_count_id: count!.id, stock_item_id: i.id, expected_qty: 0, actual_qty: 0, unit_cost: Number(i.cost_price ?? i.price ?? 0) })))
-        if (lineErr) console.error('count lines error:', lineErr.message)
-      }
-      const { data: freshLines } = await supabase.from('stock_count_lines').select('*').eq('stock_count_id', count.id)
-      setCountLines(freshLines || [])
+    if (items.length === 0) {
+      alert('No stock items found. Please add stock items in the Stock Items tab first.')
+      setSaving(false)
+      return
     }
-    setShowAddItem(false)
+    const rows = items.map(i => ({
+      store_id: STORE_ID, stock_item_id: i.id, count_date: today,
+      count_type: type, quantity: 0, status: 'in_progress'
+    }))
+    const { data: inserted, error } = await supabase.from('stock_counts').insert(rows).select()
+    if (error) { alert('Could not start count: ' + error.message); setSaving(false); return }
+    setActiveCount({ id: today + '_' + type, count_type: type, count_date: today, status: 'in_progress' })
+    setCountLines(inserted || [])
     setSaving(false)
   }
-
   async function updateCountLine(lineId: string, qty: number) {
-    setCountLines(prev => prev.map(l => l.id === lineId ? { ...l, actual_qty: qty } : l))
-    await supabase.from('stock_count_lines').update({ actual_qty: qty }).eq('id', lineId)
+    setCountLines(prev => prev.map(l => l.id === lineId ? { ...l, quantity: qty } : l))
+    await supabase.from('stock_counts').update({ quantity: qty }).eq('id', lineId)
   }
 
   async function completeCount() {
     if (!activeCount) return
-    await supabase.from('stock_counts').update({ status: 'completed' }).eq('id', activeCount.id)
+    await supabase.from('stock_counts').update({ status: 'completed', completed_at: new Date().toISOString() }).eq('id', activeCount.id)
     setActiveCount(null); setCountLines([]); await loadAll()
   }
 
@@ -288,12 +288,12 @@ export default function StockPage() {
                       {catItems.map(item => {
                         const line = countLines.find(l => l.stock_item_id === item.id)
                         if (!line) return null
-                        const variance = line.actual_qty - line.expected_qty
+                        const variance = line.quantity - 0
                         return (
                           <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: '16px', padding: '12px 24px', borderTop: '1px solid #f3f4f6' }}>
                             <div style={{ flex: 1 }}><div style={{ fontWeight: 600, fontSize: '14px', color: '#111' }}>{item.name || item.description}</div><div style={{ fontSize: '12px', color: '#9ca3af' }}>{item.unit} • {formatCurrency(item.cost_price ?? item.price ?? 0)}</div></div>
-                            <div style={{ fontSize: '12px', color: '#9ca3af', minWidth: '80px', textAlign: 'right' }}>Expected: <strong>{line.expected_qty}</strong></div>
-                            <input type="number" min="0" step="0.1" value={line.actual_qty || ''} onChange={e => updateCountLine(line.id, parseFloat(e.target.value) || 0)} placeholder="0" style={{ width: '100px', border: '1.5px solid #e5e7eb', borderRadius: '8px', padding: '8px 10px', fontSize: '14px', fontWeight: 700, textAlign: 'center', outline: 'none' }} />
+                            <div style={{ fontSize: '12px', color: '#9ca3af', minWidth: '80px', textAlign: 'right' }}>Expected: <strong>{0}</strong></div>
+                            <input type="number" min="0" step="0.1" value={line.quantity || ''} onChange={e => updateCountLine(line.id, parseFloat(e.target.value) || 0)} placeholder="0" style={{ width: '100px', border: '1.5px solid #e5e7eb', borderRadius: '8px', padding: '8px 10px', fontSize: '14px', fontWeight: 700, textAlign: 'center', outline: 'none' }} />
                             <div style={{ minWidth: '70px', textAlign: 'right', fontSize: '13px', fontWeight: 700, color: variance < 0 ? '#dc2626' : variance > 0 ? '#d97706' : '#9ca3af' }}>{variance === 0 ? '—' : `${variance > 0 ? '+' : ''}${variance.toFixed(1)}`}</div>
                           </div>
                         )
@@ -303,11 +303,11 @@ export default function StockPage() {
                   {uncategorised.map(item => {
                     const line = countLines.find(l => l.stock_item_id === item.id)
                     if (!line) return null
-                    const variance = line.actual_qty - line.expected_qty
+                    const variance = line.quantity - 0
                     return (
                       <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: '16px', padding: '12px 24px', borderTop: '1px solid #f3f4f6' }}>
                         <div style={{ flex: 1 }}><div style={{ fontWeight: 600, fontSize: '14px', color: '#111' }}>{item.name || item.description}</div><div style={{ fontSize: '12px', color: '#9ca3af' }}>{item.unit}</div></div>
-                        <input type="number" min="0" step="0.1" value={line.actual_qty || ''} onChange={e => updateCountLine(line.id, parseFloat(e.target.value) || 0)} placeholder="0" style={{ width: '100px', border: '1.5px solid #e5e7eb', borderRadius: '8px', padding: '8px 10px', fontSize: '14px', fontWeight: 700, textAlign: 'center', outline: 'none' }} />
+                        <input type="number" min="0" step="0.1" value={line.quantity || ''} onChange={e => updateCountLine(line.id, parseFloat(e.target.value) || 0)} placeholder="0" style={{ width: '100px', border: '1.5px solid #e5e7eb', borderRadius: '8px', padding: '8px 10px', fontSize: '14px', fontWeight: 700, textAlign: 'center', outline: 'none' }} />
                         <div style={{ minWidth: '70px', textAlign: 'right', fontSize: '13px', fontWeight: 700, color: variance < 0 ? '#dc2626' : variance > 0 ? '#d97706' : '#9ca3af' }}>{variance === 0 ? '—' : `${variance > 0 ? '+' : ''}${variance.toFixed(1)}`}</div>
                       </div>
                     )
