@@ -375,7 +375,7 @@ export default function StockPage() {
                     </div>
                   </div>
                   {/* Group by supplier in count screen */}
-                  {suppliers.map(s => s.name).concat(items.filter(i => !suppliers.find(s=>s.name===i.supplier) && i.supplier).map(i=>i.supplier!).filter((v,i,a)=>a.indexOf(v)===i)).map(supplier => {
+                  {suppliers.map(s => s.name).map(supplier => {
                     const supplierLines = countLines.filter(l => {
                       const item = items.find(i => i.id === l.stock_item_id)
                       return (item?.supplier || 'Other') === supplier
