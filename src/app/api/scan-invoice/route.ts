@@ -4,11 +4,21 @@ export async function POST(req: NextRequest) {
   try {
     const { base64, mediaType } = await req.json()
 
+    if (!base64 || base64 === 'test') {
+      return NextResponse.json({ error: 'No image provided' }, { status: 400 })
+    }
+
+    const apiKey = process.env.ANTHROPIC_API_KEY
+    if (!apiKey) {
+      console.error('ANTHROPIC_API_KEY not set')
+      return NextResponse.json({ error: 'API key not configured' }, { status: 500 })
+    }
+
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key': process.env.ANTHROPIC_API_KEY || '',
+        'x-api-key': apiKey,
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
@@ -19,47 +29,33 @@ export async function POST(req: NextRequest) {
           content: [
             {
               type: 'image',
-              source: { type: 'base64', media_type: mediaType, data: base64 }
+              source: { type: 'base64', media_type: mediaType || 'image/jpeg', data: base64 }
             },
             {
               type: 'text',
-              text: `Extract invoice details from this image. Return ONLY valid JSON with this exact structure:
-{
-  "supplier": "supplier name or company",
-  "invoice_number": "invoice number if visible",
-  "invoice_date": "YYYY-MM-DD format",
-  "due_date": "YYYY-MM-DD format or null",
-  "notes": "any reference or PO number",
-  "lines": [
-    {
-      "description": "item or service description",
-      "amount": 123.45,
-      "vat_amount": 16.08,
-      "category_key": "one of: cost_of_sales, cleaning, packaging, banking, accounting, franchise_fee, marketing, casual_wages, micros, staff, credit_cards, delivery, gas, insurance, internet, pest_control, rental, repair, salaries, security, stationery, telephone, municipality, fuel, other"
-    }
-  ]
-}
-
-Rules:
-- amounts must be numbers not strings
-- If VAT not shown separately calculate as amount / 1.15 * 0.15
-- Choose the most appropriate category_key for each line
-- If invoice_date not found use today ${new Date().toISOString().split('T')[0]}
-- Return ONLY the JSON no other text`
+              text: 
             }
           ]
         }]
       })
     })
 
+    if (!response.ok) {
+      const errText = await response.text()
+      console.error('Anthropic API error:', response.status, errText)
+      return NextResponse.json({ error:  }, { status: 500 })
+    }
+
     const result = await response.json()
     const text = result.content?.[0]?.text || ''
-    const clean = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
+    const clean = text.replace(/
+?/g, '').trim()
     const data = JSON.parse(clean)
 
     return NextResponse.json(data)
-  } catch (e) {
+  } catch (e: unknown) {
     console.error('Invoice scan error:', e)
-    return NextResponse.json({ error: 'Scan failed' }, { status: 500 })
+    const msg = e instanceof Error ? e.message : 'Unknown error'
+    return NextResponse.json({ error: msg }, { status: 500 })
   }
 }
