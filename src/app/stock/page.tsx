@@ -277,10 +277,10 @@ export default function StockPage() {
                       <button onClick={() => { setActiveCount(null); setCountLines([]) }} style={{ padding: '8px 14px', background: '#f3f4f6', color: '#6b7280', border: 'none', borderRadius: '10px', cursor: 'pointer' }}>✕</button>
                     </div>
                   </div>
-                  {Object.values(groupedItems).map(({ cat, items: catItems }) => (
-                    <div key={cat.id}>
-                      <div style={{ padding: '10px 24px', background: '#f9fafb', borderTop: '1px solid #e5e7eb', fontWeight: 700, fontSize: '13px', color: cat.color, display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: cat.color }} />{cat.name}
+                  {Object.values(groupedItems).map(({ key, label, color, items: catItems }) => (
+                    <div key={key}>
+                      <div style={{ padding: '10px 24px', background: '#f9fafb', borderTop: '1px solid #e5e7eb', fontWeight: 700, fontSize: '13px', color: color, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: color }} />{label}
                       </div>
                       {catItems.map(item => {
                         const line = countLines.find(l => l.stock_item_id === item.id)
