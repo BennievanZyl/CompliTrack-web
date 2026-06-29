@@ -579,7 +579,7 @@ export default function StockPage() {
           {tab === 'items' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div><div style={{ fontSize: '18px', fontWeight: 800, color: '#111' }}>Stock Items</div><div style={{ fontSize: '13px', color: '#9ca3af' }}>{itemSearch ?  : }</div></div>
+                <div><div style={{ fontSize: '18px', fontWeight: 800, color: '#111' }}>Stock Items</div><div style={{ fontSize: '13px', color: '#9ca3af' }}>{itemSearch ? (items.filter(i=>(i.description||i.name||'').toLowerCase().includes(itemSearch.toLowerCase())).length + ' results for ' + itemSearch) : (items.length + ' items')}</div></div>
                 <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
                   <div style={{ position: 'relative' }}>
                     <input type="text" placeholder="Search items..." value={itemSearch} onChange={e => setItemSearch(e.target.value)}
