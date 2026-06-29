@@ -1,4 +1,4 @@
-'use client'
+'use client' // redeploy 2026-06-29T12:04
 
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
