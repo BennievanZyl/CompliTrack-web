@@ -72,6 +72,8 @@ export default function FinancesPage() {
   const [grvItems, setGrvItems] = useState<{id:string;description:string;unit:string;supplier:string|null}[]>([])
   const [grvLines, setGrvLines] = useState<{stock_item_id:string;description:string;unit:string;qty_received:string;unit_cost:string}[]>([])
   const [savingGRV, setSavingGRV] = useState(false)
+  const [scanning, setScanning] = useState(false)
+  const [scanError, setScanError] = useState('')
   const [error, setError] = useState('')
 
   // Category quick-add state
@@ -242,6 +244,55 @@ export default function FinancesPage() {
     setGrvInvoice(null)
     setSavingGRV(false)
     load()
+  }
+
+  async function scanInvoice(file: File) {
+    setScanning(true)
+    setScanError('')
+    try {
+      // Convert file to base64
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve((reader.result as string).split(',')[1])
+        reader.onerror = reject
+        reader.readAsDataURL(file)
+      })
+
+      const mediaType = file.type === 'application/pdf' ? 'application/pdf' : 'image/jpeg'
+
+      const response = await fetch('/api/scan-invoice', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ base64, mediaType })
+      })
+
+      if (!response.ok) throw new Error('Scan failed')
+      const data = await response.json()
+
+      // Pre-fill the invoice form
+      if (data.supplier) setInvForm(f => ({ ...f, supplier: data.supplier }))
+      if (data.invoice_number) setInvForm(f => ({ ...f, invoice_number: data.invoice_number }))
+      if (data.invoice_date) setInvForm(f => ({ ...f, invoice_date: data.invoice_date }))
+      if (data.due_date) setInvForm(f => ({ ...f, due_date: data.due_date }))
+      if (data.notes) setInvForm(f => ({ ...f, notes: data.notes }))
+
+      // Pre-fill line items
+      if (data.lines && data.lines.length > 0) {
+        setInvLines(data.lines.map((l: {category_key?: string; description?: string; amount?: number; vat_amount?: number}) => ({
+          category_key: l.category_key || 'goods',
+          description: l.description || '',
+          amount: l.amount || 0,
+          vat_amount: l.vat_amount || 0,
+        })))
+      }
+
+      // Open the form if not already open
+      setShowInvForm(true)
+    } catch (e) {
+      setScanError('Could not read invoice. Please check the image is clear and try again.')
+      console.error(e)
+    }
+    setScanning(false)
   }
 
   async function saveInvoice() {
@@ -492,7 +543,14 @@ export default function FinancesPage() {
             <div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                 <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Supplier Bills</h2>
-                <button style={btn()} onClick={openNewInvoice}>+ New Invoice</button>
+                <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                  <label style={{ ...btn('#6366f1'), cursor: 'pointer', display: 'inline-block' }}>
+                    {scanning ? '⏳ Scanning...' : '📷 Scan Invoice'}
+                    <input type="file" accept="image/*,application/pdf" style={{ display: 'none' }}
+                      onChange={e => { const f = e.target.files?.[0]; if (f) scanInvoice(f); e.target.value = '' }} />
+                  </label>
+                  <button style={btn()} onClick={openNewInvoice}>+ New Invoice</button>
+                </div>
               </div>
 
               {/* Invoice form */}
