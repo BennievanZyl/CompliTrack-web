@@ -138,6 +138,7 @@ export default function FinancesPage() {
     setInvoices(invRes.data || [])
     const cats = catRes.data || []
     setCategories(cats.length ? cats : [])
+    setSuppliers(suppRes?.data || [])
     setQuickExp(qRes.data || [])
     setLoading(false)
   }, [month])
