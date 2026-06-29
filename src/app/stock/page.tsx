@@ -127,7 +127,7 @@ export default function StockPage() {
   async function savePurchase() {
     setSaving(true)
     const total = parseFloat(purchaseForm.quantity || '0') * parseFloat(purchaseForm.unit_cost || '0')
-    await supabase.from('stock_purchases').insert({ store_id: STORE_ID, purchase_date: purchaseForm.purchase_date, supplier_name: purchaseForm.supplier_name || null, stock_item_id: purchaseForm.stock_item_id || null, item_name: purchaseForm.item_name || items.find(i => i.id === purchaseForm.stock_item_id)?.name ?? items.find(i => i.id === purchaseForm.stock_item_id)?.description || null, quantity: parseFloat(purchaseForm.quantity || '0'), unit: purchaseForm.unit, unit_cost: parseFloat(purchaseForm.unit_cost || '0'), total_cost: total, invoice_number: purchaseForm.invoice_number || null })
+    await supabase.from('stock_purchases').insert({ store_id: STORE_ID, purchase_date: purchaseForm.purchase_date, supplier_name: purchaseForm.supplier_name || null, stock_item_id: purchaseForm.stock_item_id || null, item_name: purchaseForm.item_name || (items.find(i => i.id === purchaseForm.stock_item_id)?.name ?? items.find(i => i.id === purchaseForm.stock_item_id)?.description) || null, quantity: parseFloat(purchaseForm.quantity || '0'), unit: purchaseForm.unit, unit_cost: parseFloat(purchaseForm.unit_cost || '0'), total_cost: total, invoice_number: purchaseForm.invoice_number || null })
     setPurchaseForm({ purchase_date: new Date().toISOString().split('T')[0], supplier_name: '', stock_item_id: '', item_name: '', quantity: '', unit: 'each', unit_cost: '', invoice_number: '' })
     setShowAddPurchase(false); await loadAll(); setSaving(false)
   }
@@ -135,7 +135,7 @@ export default function StockPage() {
   async function saveWastage() {
     setSaving(true)
     const total = parseFloat(wastageForm.quantity || '0') * parseFloat(wastageForm.unit_cost || '0')
-    await supabase.from('stock_wastage').insert({ store_id: STORE_ID, wastage_date: wastageForm.wastage_date, stock_item_id: wastageForm.stock_item_id || null, item_name: wastageForm.item_name || items.find(i => i.id === wastageForm.stock_item_id)?.name ?? items.find(i => i.id === wastageForm.stock_item_id)?.description || null, quantity: parseFloat(wastageForm.quantity || '0'), unit: wastageForm.unit, unit_cost: parseFloat(wastageForm.unit_cost || '0'), total_cost: total, reason: wastageForm.reason })
+    await supabase.from('stock_wastage').insert({ store_id: STORE_ID, wastage_date: wastageForm.wastage_date, stock_item_id: wastageForm.stock_item_id || null, item_name: wastageForm.item_name || (items.find(i => i.id === wastageForm.stock_item_id)?.name ?? items.find(i => i.id === wastageForm.stock_item_id)?.description) || null, quantity: parseFloat(wastageForm.quantity || '0'), unit: wastageForm.unit, unit_cost: parseFloat(wastageForm.unit_cost || '0'), total_cost: total, reason: wastageForm.reason })
     setWastageForm({ wastage_date: new Date().toISOString().split('T')[0], stock_item_id: '', item_name: '', quantity: '', unit: 'each', unit_cost: '', reason: 'Expired' })
     setShowAddWastage(false); await loadAll(); setSaving(false)
   }
