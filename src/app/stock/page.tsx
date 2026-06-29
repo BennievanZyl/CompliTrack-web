@@ -23,9 +23,9 @@ const TABS = [
 ]
 
 const COUNT_TYPES = [
-  { key: 'daily', label: 'Daily Count', desc: 'Quick daily check — buy for the day', color: '#16a34a', bg: '#dcfce7' },
-  { key: 'weekly', label: 'Weekly Count', desc: 'Weekly stocktake — calculate food cost', color: '#2563eb', bg: '#dbeafe' },
-  { key: 'monthly', label: 'Monthly Count', desc: 'Full month stocktake — monthly food cost', color: '#7c3aed', bg: '#ede9fe' },
+  { key: 'daily', label: 'Daily', desc: 'Quick daily check — buy for the day', color: '#16a34a', bg: '#dcfce7' },
+  { key: 'weekly', label: 'Weekly', desc: 'Weekly stocktake — calculate food cost', color: '#2563eb', bg: '#dbeafe' },
+  { key: 'monthly', label: 'Monthly', desc: 'Full month stocktake — monthly food cost', color: '#7c3aed', bg: '#ede9fe' },
 ]
 
 const UNITS = ['each', 'kg', 'g', 'L', 'ml', 'pack', 'box', 'bag', 'bottle', 'tin', 'tray', 'dozen']
