@@ -848,6 +848,7 @@ export default function StockPage() {
             </select></div>
           <div><label style={LABEL}>Item Name *</label><input value={purchaseForm.item_name} onChange={e => setPurchaseForm(f => ({ ...f, item_name: e.target.value }))} placeholder="or type manually" style={INPUT} /></div>
           <div><label style={LABEL}>Supplier</label><select value={purchaseForm.supplier_name} onChange={e => setPurchaseForm(f => ({ ...f, supplier_name: e.target.value }))} style={INPUT}><option value="">— Select Supplier —</option>{suppliers.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}<option value="_other">Other</option></select></div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
             <div><label style={LABEL}>Quantity</label><input type="number" step="0.1" value={purchaseForm.quantity} onChange={e => setPurchaseForm(f => ({ ...f, quantity: e.target.value }))} placeholder="0" style={INPUT} /></div>
             <div><label style={LABEL}>Unit</label><select value={purchaseForm.unit} onChange={e => setPurchaseForm(f => ({ ...f, unit: e.target.value }))} style={INPUT}>{UNITS.map(u => <option key={u}>{u}</option>)}</select></div>
             <div><label style={LABEL}>Unit Cost (R)</label><input type="number" step="0.01" value={purchaseForm.unit_cost} onChange={e => setPurchaseForm(f => ({ ...f, unit_cost: e.target.value }))} placeholder="0.00" style={INPUT} /></div>
