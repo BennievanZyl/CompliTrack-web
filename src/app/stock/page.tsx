@@ -8,6 +8,8 @@ const STORE_ID = '05328298-fc27-4c9f-b091-bb7f6598b601'
 
 type StockCategory = { id: string; name: string; color: string; sort_order: number }
 type StockItem = { id: string; category: string | null; name: string; description: string; unit: string; cost_price: number; price: number; par_level: number; is_active: boolean; sort_order: number; supplier: string | null; on_daily_sheet: boolean; is_catch_weight: boolean; kg_price: number; avg_weight_kg: number }
+type StockSupplier = { id: string; name: string; contact_name: string | null; phone: string | null; email: string | null; order_day: string | null; notes: string | null; is_active: boolean; sort_order: number }
+
 type StockCount = { id: string; count_type: string; count_date: string; status: string; notes: string | null }
 type StockCountLine = { id: string; stock_count_id: string; stock_item_id: string; expected_qty: number; actual_qty: number; unit_cost: number }
 type StockPurchase = { id: string; purchase_date: string; supplier_name: string | null; item_name: string | null; quantity: number; unit: string | null; unit_cost: number; total_cost: number; invoice_number: string | null }
@@ -20,6 +22,7 @@ const TABS = [
   { key: 'wastage', label: '🗑️ Wastage' },
   { key: 'orders', label: '📦 Orders' },
   { key: 'items', label: '⚙️ Stock Items' },
+  { key: 'suppliers', label: '🚛 Suppliers' },
 ]
 
 const COUNT_TYPES = [
@@ -48,6 +51,29 @@ function Modal({ show, onClose, title, children, maxWidth = '480px' }: { show: b
         </div>
         {children}
       </div>
+      {/* Supplier Management Modal */}
+      <Modal show={showSupplierForm} onClose={() => { setShowSupplierForm(false); setEditSupplier(null) }} title={editSupplier ? 'Edit Supplier' : 'Add Supplier'} maxWidth="500px">
+        <div style={{ padding: '20px 28px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+          <div><label style={LABEL}>Supplier Name *</label><input value={supplierForm.name} onChange={e => setSupplierForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. SAR, Mochachos" style={INPUT} /></div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+            <div><label style={LABEL}>Contact Name</label><input value={supplierForm.contact_name} onChange={e => setSupplierForm(f => ({ ...f, contact_name: e.target.value }))} placeholder="Rep name" style={INPUT} /></div>
+            <div><label style={LABEL}>Phone</label><input value={supplierForm.phone} onChange={e => setSupplierForm(f => ({ ...f, phone: e.target.value }))} placeholder="e.g. 082 000 0000" style={INPUT} /></div>
+          </div>
+          <div><label style={LABEL}>Email</label><input type="email" value={supplierForm.email} onChange={e => setSupplierForm(f => ({ ...f, email: e.target.value }))} placeholder="orders@supplier.co.za" style={INPUT} /></div>
+          <div><label style={LABEL}>Order Day</label>
+            <select value={supplierForm.order_day} onChange={e => setSupplierForm(f => ({ ...f, order_day: e.target.value }))} style={INPUT}>
+              <option value="">— Select —</option>
+              {['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'].map(d => <option key={d} value={d}>{d}</option>)}
+            </select>
+          </div>
+          <div><label style={LABEL}>Notes</label><input value={supplierForm.notes} onChange={e => setSupplierForm(f => ({ ...f, notes: e.target.value }))} placeholder="e.g. Order by 10am" style={INPUT} /></div>
+        </div>
+        <div style={{ padding: '16px 28px 24px', display: 'flex', gap: '12px' }}>
+          <button onClick={() => { setShowSupplierForm(false); setEditSupplier(null) }} style={{ flex: 1, border: '1.5px solid #e5e7eb', color: '#374151', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: 700, cursor: 'pointer', background: 'white' }}>Cancel</button>
+          <button onClick={saveSupplier} disabled={saving || !supplierForm.name} style={{ flex: 1, background: !supplierForm.name ? '#d1d5db' : '#1a5c38', color: 'white', border: 'none', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: 800, cursor: 'pointer' }}>{saving ? 'Saving…' : editSupplier ? 'Save Changes' : 'Add Supplier'}</button>
+        </div>
+      </Modal>
+
     </div>
   )
 }
@@ -62,6 +88,10 @@ export default function StockPage() {
   const [wastage, setWastage] = useState<StockWastage[]>([])
   const [orders, setOrders] = useState<StockOrder[]>([])
   const [loading, setLoading] = useState(true)
+  const [suppliers, setSuppliers] = useState<StockSupplier[]>([])
+  const [showSupplierForm, setShowSupplierForm] = useState(false)
+  const [editSupplier, setEditSupplier] = useState<StockSupplier | null>(null)
+  const [supplierForm, setSupplierForm] = useState({ name: '', contact_name: '', phone: '', email: '', order_day: '', notes: '' })
   const [saving, setSaving] = useState(false)
   const [activeCount, setActiveCount] = useState<StockCount | null>(null)
   const [countLines, setCountLines] = useState<StockCountLine[]>([])
@@ -87,13 +117,14 @@ export default function StockPage() {
 
   async function loadAll() {
     setLoading(true)
-    const [catRes, itemRes, countRes, purchRes, wastRes, ordRes] = await Promise.all([
+    const [catRes, itemRes, countRes, purchRes, wastRes, ordRes, suppRes] = await Promise.all([
       supabase.from('stock_categories').select('*').eq('store_id', STORE_ID).order('sort_order'),
       supabase.from('stock_items').select('*').eq('store_id', STORE_ID).eq('is_active', true).order('sort_order', { nullsFirst: false }),
       supabase.from('stock_counts').select('*').eq('store_id', STORE_ID).order('count_date', { ascending: false }).limit(30),
       supabase.from('stock_purchases').select('*').eq('store_id', STORE_ID).order('purchase_date', { ascending: false }).limit(50),
       supabase.from('stock_wastage').select('*').eq('store_id', STORE_ID).order('wastage_date', { ascending: false }).limit(50),
       supabase.from('stock_orders').select('*').eq('store_id', STORE_ID).order('order_date', { ascending: false }).limit(30),
+      supabase.from('stock_suppliers').select('*').eq('store_id', STORE_ID).eq('is_active', true).order('sort_order'),
     ])
     setCategories(catRes.data || [])
     setItems(itemRes.data || [])
@@ -101,7 +132,28 @@ export default function StockPage() {
     setPurchases(purchRes.data || [])
     setWastage(wastRes.data || [])
     setOrders(ordRes.data || [])
+    setSuppliers(suppRes?.data || [])
     setLoading(false)
+  }
+
+  async function saveSupplier() {
+    if (!supplierForm.name) return
+    setSaving(true)
+    const payload = { store_id: STORE_ID, ...supplierForm, is_active: true, sort_order: suppliers.length + 1 }
+    if (editSupplier) {
+      await supabase.from('stock_suppliers').update(payload).eq('id', editSupplier.id)
+    } else {
+      await supabase.from('stock_suppliers').insert(payload)
+    }
+    setShowSupplierForm(false); setEditSupplier(null)
+    setSupplierForm({ name: '', contact_name: '', phone: '', email: '', order_day: '', notes: '' })
+    setSaving(false); await loadAll()
+  }
+
+  async function deleteSupplier(id: string) {
+    if (!confirm('Delete this supplier? Items linked to them will lose their supplier assignment.')) return
+    await supabase.from('stock_suppliers').update({ is_active: false }).eq('id', id)
+    await loadAll()
   }
 
   async function startCount(type: string) {
@@ -317,7 +369,7 @@ export default function StockPage() {
                     </div>
                   </div>
                   {/* Group by supplier in count screen */}
-                  {['SAR','Mochachos','Coca Cola','Flor do Tejo','Checkers','Northern Star','Local Grocer','Bakery','Other'].map(supplier => {
+                  {suppliers.map(s => s.name).concat(items.filter(i => !suppliers.find(s=>s.name===i.supplier) && i.supplier).map(i=>i.supplier!).filter((v,i,a)=>a.indexOf(v)===i)).map(supplier => {
                     const supplierLines = countLines.filter(l => {
                       const item = items.find(i => i.id === l.stock_item_id)
                       return (item?.supplier || 'Other') === supplier
@@ -493,6 +545,52 @@ export default function StockPage() {
           )}
 
           {/* STOCK ITEMS */}
+
+          {tab === 'suppliers' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <div style={{ fontSize: '18px', fontWeight: 800, color: '#111' }}>Suppliers</div>
+                  <div style={{ fontSize: '13px', color: '#9ca3af' }}>Manage your suppliers — used across stock items, orders and counts</div>
+                </div>
+                <button onClick={() => { setEditSupplier(null); setSupplierForm({ name: '', contact_name: '', phone: '', email: '', order_day: '', notes: '' }); setShowSupplierForm(true) }}
+                  style={{ padding: '10px 18px', background: '#1a5c38', color: 'white', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: 800, cursor: 'pointer' }}>+ Add Supplier</button>
+              </div>
+              {suppliers.length === 0 ? (
+                <div style={{ background: 'white', borderRadius: '20px', padding: '48px', textAlign: 'center', color: '#9ca3af' }}>
+                  <div style={{ fontSize: '40px', marginBottom: '12px' }}>🚛</div>
+                  <div style={{ fontWeight: 700, marginBottom: '6px' }}>No suppliers yet</div>
+                  <button onClick={() => setShowSupplierForm(true)} style={{ marginTop: '12px', padding: '10px 20px', background: '#1a5c38', color: 'white', border: 'none', borderRadius: '10px', fontWeight: 700, cursor: 'pointer' }}>+ Add First Supplier</button>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  {suppliers.map(s => (
+                    <div key={s.id} style={{ background: 'white', borderRadius: '16px', padding: '16px 20px', boxShadow: '0 1px 4px rgba(0,0,0,0.06)', display: 'flex', alignItems: 'center', gap: '16px' }}>
+                      <div style={{ width: '42px', height: '42px', borderRadius: '12px', background: '#f0fdf4', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px', flexShrink: 0 }}>🚛</div>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 700, fontSize: '15px', color: '#111' }}>{s.name}</div>
+                        <div style={{ fontSize: '13px', color: '#6b7280', marginTop: '2px' }}>
+                          {s.contact_name && <span style={{ marginRight: '12px' }}>👤 {s.contact_name}</span>}
+                          {s.phone && <span style={{ marginRight: '12px' }}>📞 {s.phone}</span>}
+                          {s.order_day && <span style={{ marginRight: '12px' }}>📅 Orders: {s.order_day}</span>}
+                          {s.email && <span>✉️ {s.email}</span>}
+                        </div>
+                        {s.notes && <div style={{ fontSize: '12px', color: '#9ca3af', marginTop: '4px' }}>{s.notes}</div>}
+                      </div>
+                      <div style={{ fontSize: '12px', color: '#9ca3af' }}>{items.filter(i => i.supplier === s.name).length} items</div>
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <button onClick={() => { setEditSupplier(s); setSupplierForm({ name: s.name, contact_name: s.contact_name||'', phone: s.phone||'', email: s.email||'', order_day: s.order_day||'', notes: s.notes||'' }); setShowSupplierForm(true) }}
+                          style={{ background: '#eff6ff', color: '#2563eb', border: 'none', borderRadius: '8px', padding: '6px 12px', cursor: 'pointer', fontSize: '12px', fontWeight: 600 }}>Edit</button>
+                        <button onClick={() => deleteSupplier(s.id)}
+                          style={{ background: '#fef2f2', color: '#dc2626', border: 'none', borderRadius: '8px', padding: '6px 12px', cursor: 'pointer', fontSize: '12px', fontWeight: 600 }}>Remove</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           {tab === 'items' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -501,7 +599,7 @@ export default function StockPage() {
               </div>
               {/* Supplier filter */}
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                {['All', 'SAR', 'Mochachos', 'Coca Cola', 'Flor do Tejo', 'Checkers', 'Northern Star', 'Local Grocer', 'Bakery', 'Other'].map(s => (
+                {['All', ...suppliers.map(s => s.name)].map(s => (
                   <button key={s} onClick={() => setSupplierFilter(s)}
                     style={{ padding: '6px 14px', borderRadius: '20px', fontSize: '12px', fontWeight: 600, cursor: 'pointer', border: 'none',
                       background: supplierFilter === s ? '#1a5c38' : '#f3f4f6', color: supplierFilter === s ? '#fff' : '#374151' }}>
@@ -591,15 +689,7 @@ export default function StockPage() {
               <option value="other">Other</option>
             </select></div>
             <div><label style={LABEL}>Supplier</label><select value={itemForm.supplier} onChange={e => setItemForm(f => ({ ...f, supplier: e.target.value }))} style={INPUT}>
-              <option value="SAR">SAR</option>
-              <option value="Mochachos">Mochachos</option>
-              <option value="Coca Cola">Coca Cola</option>
-              <option value="Flor do Tejo">Flor do Tejo</option>
-              <option value="Checkers">Checkers</option>
-              <option value="Northern Star">Northern Star</option>
-              <option value="Local Grocer">Local Grocer</option>
-              <option value="Bakery">Bakery</option>
-              <option value="Other">Other</option>
+              {suppliers.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
             </select></div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 16px', background: '#f0fdf4', borderRadius: '10px', border: '1.5px solid #bbf7d0' }}>
