@@ -523,10 +523,16 @@ export default function StockPage() {
                       <tbody>
                         {catItems.map(item => (
                           <tr key={item.id} style={{ borderTop: '1px solid #f3f4f6' }}>
-                            <td style={{ padding: '12px 16px', fontWeight: 700, fontSize: '14px', color: '#111' }}>{(line as {stock_items?: {description:string}}).stock_items?.description || ''}</td>
+                            <td style={{ padding: '12px 16px' }}>
+                              <div style={{ fontWeight: 700, fontSize: '14px', color: '#111' }}>{item.description || item.name}</div>
+                              <div style={{ display: 'flex', gap: '6px', marginTop: '4px' }}>
+                                {item.supplier && <span style={{ fontSize: '11px', fontWeight: 600, background: '#eff6ff', color: '#2563eb', padding: '2px 8px', borderRadius: '20px' }}>{item.supplier}</span>}
+                                {item.on_daily_sheet && <span style={{ fontSize: '11px', fontWeight: 600, background: '#f0fdf4', color: '#16a34a', padding: '2px 8px', borderRadius: '20px' }}>📋 Daily</span>}
+                              </div>
+                            </td>
                             <td style={{ padding: '12px 16px', fontSize: '13px', color: '#6b7280' }}>{item.unit}</td>
                             <td style={{ padding: '12px 16px', fontSize: '13px', color: '#374151' }}>{formatCurrency(item.cost_price ?? item.price ?? 0)}</td>
-                            <td style={{ padding: '12px 16px', fontSize: '13px', color: '#374151' }}>{item.par_level} {item.unit}</td>
+                            <td style={{ padding: '12px 16px', fontSize: '13px', color: '#374151' }}>{formatCurrency(Number(item.cost_price ?? item.price ?? 0))}</td>
                             <td style={{ padding: '12px 16px' }}>
                               <div style={{ display: 'flex', gap: '6px' }}>
                                 <button onClick={() => { setEditItem(item); setItemForm({ name: item.description || item.name || '', description: item.description || '', category_id: item.category || 'goods', unit: item.unit, cost_price: String(item.cost_price ?? item.price ?? 0), par_level: String(item.par_level ?? 0), supplier: item.supplier || 'Other', on_daily_sheet: item.on_daily_sheet || false }); setShowAddItem(true) }} style={{ fontSize: '12px', color: '#1d4ed8', background: '#eff6ff', border: 'none', borderRadius: '8px', padding: '5px 10px', cursor: 'pointer', fontWeight: 600 }}>Edit</button>
