@@ -842,11 +842,10 @@ export default function StockPage() {
         <div style={{ padding: '20px 28px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
           <div><label style={LABEL}>Date</label><input type="date" value={purchaseForm.purchase_date} onChange={e => setPurchaseForm(f => ({ ...f, purchase_date: e.target.value }))} style={INPUT} /></div>
           <div><label style={LABEL}>Stock Item (optional)</label>
-          <div><label style={LABEL}>Stock Item (optional)</label>
             <select value={purchaseForm.stock_item_id} onChange={e => { const item = items.find(i => i.id === e.target.value); setPurchaseForm(f => ({ ...f, stock_item_id: e.target.value, item_name: (item?.description || item?.name) || f.item_name, unit: item?.unit || f.unit, unit_cost: item ? String(Number(item.cost_price) || Number(item.price) || 0) : f.unit_cost })) }} style={INPUT}>
               <option value="">Select from stock list</option>
               {suppliers.map(sup => { const supItems = items.filter(i => (i.supplier||'Other')===sup.name); return supItems.length ? <optgroup key={sup.id} label={sup.name}>{supItems.map(i => <option key={i.id} value={i.id}>{i.description||i.name}</option>)}</optgroup> : null })}
-            </select>
+            </select></div>
           <div><label style={LABEL}>Item Name *</label><input value={purchaseForm.item_name} onChange={e => setPurchaseForm(f => ({ ...f, item_name: e.target.value }))} placeholder="or type manually" style={INPUT} /></div>
           <div><label style={LABEL}>Supplier</label><input value={purchaseForm.supplier_name} onChange={e => setPurchaseForm(f => ({ ...f, supplier_name: e.target.value }))} placeholder="e.g. Makro, Pick n Pay" style={INPUT} /></div>
           <div><label style={LABEL}>Supplier</label><select value={purchaseForm.supplier_name} onChange={e => setPurchaseForm(f => ({ ...f, supplier_name: e.target.value }))} style={INPUT}><option value="">— Select Supplier —</option>{suppliers.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}<option value="_other">Other</option></select></div>
