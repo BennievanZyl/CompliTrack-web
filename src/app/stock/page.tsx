@@ -580,7 +580,14 @@ export default function StockPage() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div><div style={{ fontSize: '18px', fontWeight: 800, color: '#111' }}>Stock Items</div><div style={{ fontSize: '13px', color: '#9ca3af' }}>{itemSearch ?  : }</div></div>
+                <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                  <div style={{ position: 'relative' }}>
+                    <input type="text" placeholder="Search items..." value={itemSearch} onChange={e => setItemSearch(e.target.value)}
+                      style={{ padding: '10px 36px 10px 14px', border: '1.5px solid #e5e7eb', borderRadius: '10px', fontSize: '13px', width: '200px', outline: 'none' }} />
+                    {itemSearch && <button onClick={() => setItemSearch('')} style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#9ca3af', fontSize: '16px' }}>✕</button>}
+                  </div>
                 <button onClick={() => { setEditItem(null); setItemForm({ name: '', description: '', category_id: 'goods', unit: 'each', cost_price: '', par_level: '', supplier: 'Other', on_daily_sheet: false }); setShowAddItem(true) }} style={{ padding: '10px 18px', background: '#1a5c38', color: 'white', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: 800, cursor: 'pointer' }}>+ Add Item</button>
+                </div>
               </div>
               {/* Supplier filter */}
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
