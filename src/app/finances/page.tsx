@@ -115,7 +115,7 @@ export default function FinancesPage() {
     const monthStart = `${month}-01`
     const [mYear, mMonth] = month.split('-').map(Number)
     const monthEnd = new Date(mYear, mMonth, 0).toISOString().split('T')[0]
-    const [cuRes, invRes, catRes, qRes] = await Promise.all([
+    const [cuRes, invRes, catRes, qRes, suppRes] = await Promise.all([
       supabase.from('cash_ups')
         .select('id,cash_up_date,cash_up_total,total_cash,eft_total,payouts,variance,customer_count,average_spend,status,notes')
         .eq('store_id', STORE_ID)
