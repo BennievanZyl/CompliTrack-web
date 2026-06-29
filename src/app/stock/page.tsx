@@ -194,13 +194,15 @@ export default function StockPage() {
     setShowAIImport(false); setAIText(''); setAIResults([])
   }
 
-  const groupedItems = categories.reduce((acc, cat) => {
-                    const catItems = items.filter(i => i.category === catKey)
-    if (catItems.length) acc[cat.id] = { cat, items: catItems }
+  const CAT_LABELS: Record<string,string> = { goods: 'Goods', beverages: 'Beverages', packaging: 'Packaging', basting: 'Basting & Sauces', other: 'Other' }
+  const CAT_COLORS: Record<string,string> = { goods: '#16a34a', beverages: '#2563eb', packaging: '#d97706', basting: '#dc2626', other: '#6b7280' }
+  const FIXED_CATS = ['goods','beverages','packaging','basting','other']
+  const groupedItems = FIXED_CATS.reduce((acc, catKey) => {
+    const catItems = items.filter(i => i.category === catKey)
+    if (catItems.length) acc[catKey] = { key: catKey, label: CAT_LABELS[catKey], color: CAT_COLORS[catKey], items: catItems }
     return acc
-  }, {} as Record<string, { cat: StockCategory; items: StockItem[] }>)
-
-                    // uncategorised items shown under other
+  }, {} as Record<string, { key: string; label: string; color: string; items: StockItem[] }>)
+  // also catch uncategorised
   const todayStr = new Date().toISOString().split('T')[0]
   const todayPurchases = purchases.filter(p => p.purchase_date === todayStr)
   const todayWastage = wastage.filter(w => w.wastage_date === todayStr)
@@ -277,10 +279,10 @@ export default function StockPage() {
                       <button onClick={() => { setActiveCount(null); setCountLines([]) }} style={{ padding: '8px 14px', background: '#f3f4f6', color: '#6b7280', border: 'none', borderRadius: '10px', cursor: 'pointer' }}>✕</button>
                     </div>
                   </div>
-                  {Object.values(groupedItems).map(({ cat, items: catItems }) => (
-                    <div key={cat.id}>
-                      <div style={{ padding: '10px 24px', background: '#f9fafb', borderTop: '1px solid #e5e7eb', fontWeight: 700, fontSize: '13px', color: cat.color, display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: cat.color }} />{cat.name}
+                  {Object.values(groupedItems).map(({ key, label, color, items: catItems }) => (
+                    <div key={key}>
+                      <div style={{ padding: '10px 24px', background: '#f9fafb', borderTop: '1px solid #e5e7eb', fontWeight: 700, fontSize: '13px', color: color, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: color }} />{label}
                       </div>
                       {catItems.map(item => {
                         const line = countLines.find(l => l.stock_item_id === item.id)
@@ -288,7 +290,7 @@ export default function StockPage() {
                         const variance = line.actual_qty - line.expected_qty
                         return (
                           <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: '16px', padding: '12px 24px', borderTop: '1px solid #f3f4f6' }}>
-                            <div style={{ flex: 1 }}><div style={{ fontWeight: 600, fontSize: '14px', color: '#111' }}>{item.name || item.description}</div><div style={{ fontSize: '12px', color: '#9ca3af' }}>{item.unit} • {formatCurrency(item.cost_price ?? item.price ?? 0)}</div></div>
+                            <div style={{ flex: 1 }}><div style={{ fontWeight: 600, fontSize: '14px', color: '#111' }}>{item.name || item.description}</div><div style={{ fontSize: '12px', color: '#9ca3af' }}>{item.unit} • {formatCurrency(Number(item.cost_price ?? item.price ?? 0))}</div></div>
                             <div style={{ fontSize: '12px', color: '#9ca3af', minWidth: '80px', textAlign: 'right' }}>Expected: <strong>{line.expected_qty}</strong></div>
                             <input type="number" min="0" step="0.1" value={line.actual_qty || ''} onChange={e => updateCountLine(line.id, parseFloat(e.target.value) || 0)} placeholder="0" style={{ width: '100px', border: '1.5px solid #e5e7eb', borderRadius: '8px', padding: '8px 10px', fontSize: '14px', fontWeight: 700, textAlign: 'center', outline: 'none' }} />
                             <div style={{ minWidth: '70px', textAlign: 'right', fontSize: '13px', fontWeight: 700, color: variance < 0 ? '#dc2626' : variance > 0 ? '#d97706' : '#9ca3af' }}>{variance === 0 ? '—' : `${variance > 0 ? '+' : ''}${variance.toFixed(1)}`}</div>
