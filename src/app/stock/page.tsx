@@ -75,6 +75,7 @@ export default function StockPage() {
   const [countLines, setCountLines] = useState<StockCountLine[]>([])
   const [countTypeFilter, setCountTypeFilter] = useState('daily')
   const [supplierFilter, setSupplierFilter] = useState('All')
+  const [itemSearch, setItemSearch] = useState('')
   const [showAIImport, setShowAIImport] = useState(false)
   const [aiText, setAIText] = useState('')
   const [aiLoading, setAILoading] = useState(false)
@@ -578,7 +579,7 @@ export default function StockPage() {
           {tab === 'items' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div><div style={{ fontSize: '18px', fontWeight: 800, color: '#111' }}>Stock Items</div><div style={{ fontSize: '13px', color: '#9ca3af' }}>{items.length} items — assign suppliers and daily sheet flags</div></div>
+                <div><div style={{ fontSize: '18px', fontWeight: 800, color: '#111' }}>Stock Items</div><div style={{ fontSize: '13px', color: '#9ca3af' }}>{itemSearch ?  : }</div></div>
                 <button onClick={() => { setEditItem(null); setItemForm({ name: '', description: '', category_id: 'goods', unit: 'each', cost_price: '', par_level: '', supplier: 'Other', on_daily_sheet: false }); setShowAddItem(true) }} style={{ padding: '10px 18px', background: '#1a5c38', color: 'white', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: 800, cursor: 'pointer' }}>+ Add Item</button>
               </div>
               {/* Supplier filter */}
@@ -595,7 +596,8 @@ export default function StockPage() {
                 const filteredBySupplier = supplierFilter === 'All' ? items : items.filter(i => (i.supplier || 'Other') === supplierFilter)
                 const catLabels: Record<string,string> = { goods: 'Goods', beverages: 'Beverages', packaging: 'Packaging', basting: 'Basting & Sauces', other: 'Other' }
                 const catColors: Record<string,string> = { goods: '#16a34a', beverages: '#2563eb', packaging: '#d97706', basting: '#dc2626', other: '#6b7280' }
-                const catItems = (filteredBySupplier || []).filter(i => i.category === catKey)
+                const searchFiltered = itemSearch ? (filteredBySupplier || []).filter(i => (i.description || i.name || '').toLowerCase().includes(itemSearch.toLowerCase())) : (filteredBySupplier || [])
+                const catItems = searchFiltered.filter(i => i.category === catKey)
                 if (!catItems.length) return null
                 return (
                   <div key={catKey} style={{ background: 'white', borderRadius: '20px', border: '1.5px solid #eef2ee', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
