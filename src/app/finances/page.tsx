@@ -329,6 +329,7 @@ export default function FinancesPage() {
     const lines = invLines.filter(l => Number(l.amount) > 0).map(l => ({
       invoice_id: invoiceId, store_id: STORE_ID,
       category_key: l.category_key, description: l.description,
+      qty: Number(l.qty) || 1, uom: l.uom || 'each', unit_price: Number(l.unit_price) || 0,
       amount: Number(l.amount), vat_amount: Number(l.vat_amount || 0),
     }))
     if (lines.length) {
