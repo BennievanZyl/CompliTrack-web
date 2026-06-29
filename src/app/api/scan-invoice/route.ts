@@ -10,28 +10,11 @@ export async function POST(req: NextRequest) {
 
     const apiKey = process.env.ANTHROPIC_API_KEY
     if (!apiKey) {
-      console.error('ANTHROPIC_API_KEY not set')
       return NextResponse.json({ error: 'API key not configured' }, { status: 500 })
     }
 
     const today = new Date().toISOString().split('T')[0]
-    const prompt = `Extract invoice details from this image. Return ONLY valid JSON:
-{
-  "supplier": "supplier company name",
-  "invoice_number": "invoice number",
-  "invoice_date": "YYYY-MM-DD",
-  "due_date": "YYYY-MM-DD or null",
-  "notes": "reference or PO number if any",
-  "lines": [
-    {
-      "description": "item description",
-      "amount": 123.45,
-      "vat_amount": 16.08,
-      "category_key": "cost_of_sales"
-    }
-  ]
-}
-Rules: amounts are numbers. Use Total (Incl) column for amount. VAT column for vat_amount. For food/meat/frozen use cost_of_sales. If no date found use ${today}. Return ONLY JSON.`
+    const prompt = 'Extract invoice details from this image. Return ONLY a raw JSON object (no markdown, no backticks, no explanation) with these fields: supplier (string), invoice_number (string), invoice_date (YYYY-MM-DD string), due_date (YYYY-MM-DD or null), notes (string), lines (array of objects with: description string, amount number, vat_amount number, category_key string). For category_key use: cost_of_sales for food/meat/frozen items, other for everything else. Use Total Incl column for amount. If no date found use ' + today + '. IMPORTANT: Return raw JSON only, no other text.'
 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -42,7 +25,7 @@ Rules: amounts are numbers. Use Total (Incl) column for amount. VAT column for v
       },
       body: JSON.stringify({
         model: 'claude-haiku-4-5-20251001',
-        max_tokens: 1024,
+        max_tokens: 2048,
         messages: [{
           role: 'user',
           content: [
@@ -58,14 +41,26 @@ Rules: amounts are numbers. Use Total (Incl) column for amount. VAT column for v
 
     if (!response.ok) {
       const errText = await response.text()
-      console.error('Anthropic API error:', response.status, errText)
-      return NextResponse.json({ error: 'AI service error: ' + response.status }, { status: 500 })
+      console.error('Anthropic error:', response.status, errText)
+      return NextResponse.json({ error: 'AI error ' + response.status }, { status: 500 })
     }
 
     const result = await response.json()
-    const text = result.content?.[0]?.text || ''
-    const clean = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
-    const data = JSON.parse(clean)
+    let text = result.content?.[0]?.text || ''
+    
+    // Strip markdown code blocks if present
+    text = text.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '').trim()
+    
+    // Extract JSON from response - find first { to last }
+    const jsonStart = text.indexOf('{')
+    const jsonEnd = text.lastIndexOf('}')
+    if (jsonStart === -1 || jsonEnd === -1) {
+      console.error('No JSON found in response:', text)
+      return NextResponse.json({ error: 'Could not extract data from invoice' }, { status: 500 })
+    }
+    
+    const jsonStr = text.substring(jsonStart, jsonEnd + 1)
+    const data = JSON.parse(jsonStr)
 
     return NextResponse.json(data)
   } catch (e: unknown) {
