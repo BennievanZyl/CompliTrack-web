@@ -5,6 +5,8 @@ import { supabase } from '@/lib/supabase'
 
 const STORE_ID = '05328298-fc27-4c9f-b091-bb7f6598b601'
 const ORG_ID = 'e903386b-133a-4bad-b054-ef7ef616a3ff'
+
+type StockSupplier = { id: string; name: string }
 const VAT_RATE = 0.15
 
 const TABS = ['Summary', 'Cash-Ups / Sales', 'Supplier Bills', 'Quick Expenses', 'Food Cost']
@@ -62,6 +64,7 @@ export default function FinancesPage() {
   const [month, setMonth] = useState(thisMonth())
 
   const [categories, setCategories] = useState<{id:string;name:string;key:string;colour:string}[]>([])
+  const [suppliers, setSuppliers] = useState<StockSupplier[]>([])
   const [cashUps, setCashUps] = useState<CashUp[]>([])
   const [invoices, setInvoices] = useState<Invoice[]>([])
   const [quickExp, setQuickExp] = useState<QuickExpense[]>([])
@@ -107,7 +110,7 @@ export default function FinancesPage() {
     const monthStart = `${month}-01`
     const [mYear, mMonth] = month.split('-').map(Number)
     const monthEnd = new Date(mYear, mMonth, 0).toISOString().split('T')[0]
-    const [cuRes, invRes, catRes, qRes] = await Promise.all([
+    const [cuRes, invRes, catRes, suppRes, qRes] = await Promise.all([
       supabase.from('cash_ups')
         .select('id,cash_up_date,cash_up_total,total_cash,eft_total,payouts,variance,customer_count,average_spend,status,notes')
         .eq('store_id', STORE_ID)
@@ -120,6 +123,7 @@ export default function FinancesPage() {
         .gte('invoice_date', monthStart).lte('invoice_date', monthEnd)
         .order('invoice_date', { ascending: false }),
       supabase.from('expense_categories').select('id, name, key, colour, sort_order').eq('organisation_id', ORG_ID).eq('is_active', true).order('sort_order'),
+      supabase.from('stock_suppliers').select('id, name').eq('store_id', STORE_ID).eq('is_active', true).order('sort_order'),
       supabase.from('expenses')
         .select('*').eq('store_id', STORE_ID)
         .gte('expense_date', monthStart).lte('expense_date', monthEnd)
@@ -130,6 +134,7 @@ export default function FinancesPage() {
     const cats = catRes.data || []
     setCategories(cats.length ? cats : [])
     setQuickExp(qRes.data || [])
+    setSuppliers(suppRes?.data || [])
     setLoading(false)
   }, [month])
 
@@ -444,7 +449,10 @@ export default function FinancesPage() {
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 20 }}>
                     <div>
                       <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Supplier *</label>
-                      <input type="text" placeholder="e.g. SAR, Mochachos, Municipality" value={invForm.supplier} onChange={e => setInvForm(f => ({ ...f, supplier: e.target.value }))} style={inp} />
+                      <select value={invForm.supplier} onChange={e => setInvForm(f => ({ ...f, supplier: e.target.value }))} style={inp}>
+                        <option value="">— Select Supplier —</option>
+                        {suppliers.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
+                      </select>
                     </div>
                     <div>
                       <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Invoice Number</label>
@@ -633,7 +641,10 @@ export default function FinancesPage() {
                     </div>
                     <div>
                       <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Supplier (optional)</label>
-                      <input type="text" placeholder="Supplier name" value={qForm.supplier} onChange={e => setQForm(f => ({ ...f, supplier: e.target.value }))} style={inp} />
+                      <select value={qForm.supplier} onChange={e => setQForm(f => ({ ...f, supplier: e.target.value }))} style={inp}>
+                        <option value="">— Select Supplier —</option>
+                        {suppliers.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
+                      </select>
                     </div>
                     <div>
                       <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Notes</label>
