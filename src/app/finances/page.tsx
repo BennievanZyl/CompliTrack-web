@@ -563,7 +563,14 @@ export default function FinancesPage() {
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 20 }}>
                     <div>
                       <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Supplier *</label>
-                      <input type="text" placeholder="e.g. SAR, Mochachos, Municipality" value={invForm.supplier} onChange={e => setInvForm(f => ({ ...f, supplier: e.target.value }))} style={inp} />
+                      <select onChange={e => setInvForm(f => ({ ...f, supplier: e.target.value === '_other' ? '' : e.target.value }))} value={suppliers.some(s => s.name === invForm.supplier) ? invForm.supplier : (invForm.supplier ? '_other' : '')} style={inp}>
+                        <option value="">— Select Supplier —</option>
+                        {suppliers.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
+                        <option value="_other">+ Other (type name below)</option>
+                      </select>
+                      {!suppliers.some(s => s.name === invForm.supplier) && (
+                        <input type="text" placeholder="Type supplier name" value={invForm.supplier} onChange={e => setInvForm(f => ({ ...f, supplier: e.target.value }))} style={{ ...inp, marginTop: 8 }} />
+                      )}
                     </div>
                     <div>
                       <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Invoice Number</label>
