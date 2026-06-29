@@ -347,7 +347,7 @@ export default function StockPage() {
                   {COUNT_TYPES.map(ct => (
                     <button key={ct.key} onClick={() => startCount(ct.key)} style={{ background: 'white', borderRadius: '20px', border: `2px solid ${ct.color}30`, padding: '24px', textAlign: 'left', cursor: 'pointer', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
                       <div style={{ fontSize: '28px', marginBottom: '10px' }}>{ct.key === 'daily' ? '🌅' : ct.key === 'weekly' ? '📅' : '📊'}</div>
-                      <div style={{ fontWeight: 800, fontSize: '16px', color: ct.color }}>{ct.label} Count</div>
+                      <div style={{ fontWeight: 800, fontSize: '16px', color: ct.color }}>{ct.label}</div>
                       <div style={{ fontSize: '13px', color: '#9ca3af', marginTop: '4px' }}>{ct.desc}</div>
                       <div style={{ marginTop: '14px', padding: '8px 14px', background: ct.bg, color: ct.color, borderRadius: '8px', fontSize: '12px', fontWeight: 700, display: 'inline-block' }}>Start Count →</div>
                     </button>
