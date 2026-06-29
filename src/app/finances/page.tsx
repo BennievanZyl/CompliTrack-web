@@ -551,15 +551,10 @@ export default function FinancesPage() {
                     <input id="scan-file-input" type="file" accept="image/*,application/pdf"
                       style={{ position: 'absolute', opacity: 0, width: 0, height: 0, overflow: 'hidden' }}
                       onChange={e => {
-                      const f = e.target.files?.[0]
-                      if (f) {
-                        // Copy file data before clearing input
-                        const blob = new Blob([f], { type: f.type || 'image/jpeg' })
-                        const file = new File([blob], f.name, { type: f.type || 'image/jpeg' })
-                        scanInvoice(file).then(() => {
-                          const el = document.getElementById('scan-file-input') as HTMLInputElement
-                          if (el) el.value = ''
-                        })
+                      const files = e.target.files
+                      if (files && files.length > 0) {
+                        const f = files[0]
+                        scanInvoice(f)
                       }
                     }} />
                     <button disabled={scanning} onClick={() => { const el = document.getElementById('scan-file-input') as HTMLInputElement; if (el) el.click() }}
