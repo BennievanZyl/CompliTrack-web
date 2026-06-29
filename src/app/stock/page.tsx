@@ -256,7 +256,10 @@ export default function StockPage() {
   async function saveItem() {
     if (!itemForm.name && !itemForm.description) return
     setSaving(true)
-    const payload = { store_id: STORE_ID, name: itemForm.name, description: itemForm.name || itemForm.description, category: itemForm.category_id || 'goods', unit: itemForm.unit, price: parseFloat(itemForm.cost_price || '0'), is_active: true, supplier: itemForm.supplier || 'Other', on_daily_sheet: itemForm.on_daily_sheet, is_catch_weight: itemForm.is_catch_weight, kg_price: parseFloat(itemForm.kg_price || '0'), avg_weight_kg: parseFloat(itemForm.avg_weight_kg || '0') }
+    const calcPrice = itemForm.is_catch_weight
+      ? parseFloat(itemForm.kg_price || '0') * parseFloat(itemForm.avg_weight_kg || '0')
+      : parseFloat(itemForm.cost_price || '0')
+    const payload = { store_id: STORE_ID, name: itemForm.name, description: itemForm.name || itemForm.description, category: itemForm.category_id || 'goods', unit: itemForm.unit, price: calcPrice, is_active: true, supplier: itemForm.supplier || 'Other', on_daily_sheet: itemForm.on_daily_sheet, is_catch_weight: itemForm.is_catch_weight, kg_price: parseFloat(itemForm.kg_price || '0'), avg_weight_kg: parseFloat(itemForm.avg_weight_kg || '0') }
     if (editItem) { await supabase.from('stock_items').update(payload).eq('id', editItem.id) }
     else { await supabase.from('stock_items').insert(payload) }
     setItemForm({ name: '', description: '', category_id: 'goods', unit: 'each', cost_price: '', par_level: '' })
@@ -634,10 +637,14 @@ export default function StockPage() {
                             </td>
                             <td style={{ padding: '12px 16px', fontSize: '13px', color: '#6b7280' }}>{item.unit}</td>
                             <td style={{ padding: '12px 16px', fontSize: '13px', color: '#374151' }}>{formatCurrency(item.cost_price ?? item.price ?? 0)}</td>
-                            <td style={{ padding: '12px 16px', fontSize: '13px', color: '#374151' }}>{formatCurrency(Number(item.cost_price ?? item.price ?? 0))}</td>
+                            <td style={{ padding: '12px 16px', fontSize: '13px', color: '#374151' }}>
+                              {item.is_catch_weight
+                                ? <span title={`R${item.kg_price ?? 0}/kg × ${item.avg_weight_kg ?? 0}kg`} style={{ cursor: 'help' }}>{formatCurrency(Number(item.price ?? 0))} ⚖️</span>
+                                : formatCurrency(Number(item.price ?? 0))}
+                            </td>
                             <td style={{ padding: '12px 16px' }}>
                               <div style={{ display: 'flex', gap: '6px' }}>
-                                <button onClick={() => { setEditItem(item); setItemForm({ name: item.description || item.name || '', description: item.description || '', category_id: item.category || 'goods', unit: item.unit, cost_price: String(item.cost_price ?? item.price ?? 0), par_level: String(item.par_level ?? 0), supplier: item.supplier || 'Other', on_daily_sheet: item.on_daily_sheet || false, is_catch_weight: item.is_catch_weight || false, kg_price: String(item.kg_price || ''), avg_weight_kg: String(item.avg_weight_kg || '') }); setShowAddItem(true) }} style={{ fontSize: '12px', color: '#1d4ed8', background: '#eff6ff', border: 'none', borderRadius: '8px', padding: '5px 10px', cursor: 'pointer', fontWeight: 600 }}>Edit</button>
+                                <button onClick={() => { setEditItem(item); setItemForm({ name: item.description || item.name || '', description: item.description || '', category_id: item.category || 'goods', unit: item.unit, cost_price: String(item.is_catch_weight ? ((item.kg_price ?? 0) * (item.avg_weight_kg ?? 0)).toFixed(2) : (item.price ?? 0)), par_level: String(item.par_level ?? 0), supplier: item.supplier || 'Other', on_daily_sheet: item.on_daily_sheet || false, is_catch_weight: item.is_catch_weight || false, kg_price: String(item.kg_price || ''), avg_weight_kg: String(item.avg_weight_kg || '') }); setShowAddItem(true) }} style={{ fontSize: '12px', color: '#1d4ed8', background: '#eff6ff', border: 'none', borderRadius: '8px', padding: '5px 10px', cursor: 'pointer', fontWeight: 600 }}>Edit</button>
                                 <button onClick={() => deleteItem(item.id)} style={{ fontSize: '12px', color: '#dc2626', background: '#fee2e2', border: 'none', borderRadius: '8px', padding: '5px 8px', cursor: 'pointer', fontWeight: 700 }}>✕</button>
                               </div>
                             </td>
