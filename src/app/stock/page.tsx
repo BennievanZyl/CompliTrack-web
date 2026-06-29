@@ -37,6 +37,21 @@ const LABEL: React.CSSProperties = { display: 'block', fontSize: '12px', fontWei
 function formatCurrency(v: number) { return `R ${v.toFixed(2)}` }
 function formatDate(d: string) { return new Date(d).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' }) }
 
+function Modal({ show, onClose, title, children, maxWidth = '480px' }: { show: boolean; onClose: () => void; title: string; children: React.ReactNode; maxWidth?: string }) {
+  if (!show) return null
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: '16px' }}>
+      <div style={{ background: 'white', borderRadius: '24px', width: '100%', maxWidth, maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 24px 60px rgba(0,0,0,0.2)' }}>
+        <div style={{ padding: '24px 28px 16px', borderBottom: '1px solid #f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <h2 style={{ fontSize: '18px', fontWeight: 800, color: '#111', margin: 0 }}>{title}</h2>
+          <button onClick={onClose} style={{ background: '#f3f4f6', border: 'none', borderRadius: '8px', width: '32px', height: '32px', cursor: 'pointer', fontSize: '16px' }}>✕</button>
+        </div>
+        {children}
+      </div>
+    </div>
+  )
+}
+
 export default function StockPage() {
   const router = useRouter()
   const [tab, setTab] = useState('counts')
@@ -242,17 +257,6 @@ export default function StockPage() {
   const pendingOrders = (orders || []).filter(o => o.status === 'pending')
   const sc = (s: string) => s === 'delivered' ? { bg: '#dcfce7', color: '#166534' } : s === 'pending' ? { bg: '#fef3c7', color: '#92400e' } : s === 'partial' ? { bg: '#dbeafe', color: '#1e40af' } : { bg: '#fee2e2', color: '#dc2626' }
 
-  const Modal = ({ show, onClose, title, children, maxWidth = '480px' }: { show: boolean; onClose: () => void; title: string; children: React.ReactNode; maxWidth?: string }) => !show ? null : (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: '16px' }}>
-      <div style={{ background: 'white', borderRadius: '24px', width: '100%', maxWidth, maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 24px 60px rgba(0,0,0,0.2)' }}>
-        <div style={{ padding: '24px 28px 16px', borderBottom: '1px solid #f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <h2 style={{ fontSize: '18px', fontWeight: 800, color: '#111', margin: 0 }}>{title}</h2>
-          <button onClick={onClose} style={{ background: '#f3f4f6', border: 'none', borderRadius: '8px', width: '32px', height: '32px', cursor: 'pointer', fontSize: '16px' }}>✕</button>
-        </div>
-        {children}
-      </div>
-    </div>
-  )
 
   return (
     <div style={{ minHeight: '100vh', background: '#f0f4f0', fontFamily: 'system-ui, sans-serif' }}>
