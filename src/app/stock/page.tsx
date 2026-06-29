@@ -7,7 +7,7 @@ import { useRouter } from 'next/navigation'
 const STORE_ID = '05328298-fc27-4c9f-b091-bb7f6598b601'
 
 type StockCategory = { id: string; name: string; color: string; sort_order: number }
-type StockItem = { id: string; category: string | null; name: string; description: string; unit: string; cost_price: number; price: number; par_level: number; is_active: boolean; sort_order: number; supplier: string | null; on_daily_sheet: boolean }
+type StockItem = { id: string; category: string | null; name: string; description: string; unit: string; cost_price: number; price: number; par_level: number; is_active: boolean; sort_order: number; supplier: string | null; on_daily_sheet: boolean; is_catch_weight: boolean; kg_price: number; avg_weight_kg: number }
 type StockCount = { id: string; count_type: string; count_date: string; status: string; notes: string | null }
 type StockCountLine = { id: string; stock_count_id: string; stock_item_id: string; expected_qty: number; actual_qty: number; unit_cost: number }
 type StockPurchase = { id: string; purchase_date: string; supplier_name: string | null; item_name: string | null; quantity: number; unit: string | null; unit_cost: number; total_cost: number; invoice_number: string | null }
@@ -62,7 +62,7 @@ export default function StockPage() {
   const [showAddOrder, setShowAddOrder] = useState(false)
   const [showAddCategory, setShowAddCategory] = useState(false)
   const [editItem, setEditItem] = useState<StockItem | null>(null)
-  const [itemForm, setItemForm] = useState({ name: '', description: '', category_id: 'goods', unit: 'each', cost_price: '', par_level: '', supplier: 'Other', on_daily_sheet: false })
+  const [itemForm, setItemForm] = useState({ name: '', description: '', category_id: 'goods', unit: 'each', cost_price: '', par_level: '', supplier: 'Other', on_daily_sheet: false, is_catch_weight: false, kg_price: '', avg_weight_kg: '' })
   const [purchaseForm, setPurchaseForm] = useState({ purchase_date: new Date().toISOString().split('T')[0], supplier_name: '', stock_item_id: '', item_name: '', quantity: '', unit: 'each', unit_cost: '', invoice_number: '' })
   const [wastageForm, setWastageForm] = useState({ wastage_date: new Date().toISOString().split('T')[0], stock_item_id: '', item_name: '', quantity: '', unit: 'each', unit_cost: '', reason: 'Expired' })
   const [orderForm, setOrderForm] = useState({ supplier_name: '', order_date: new Date().toISOString().split('T')[0], expected_delivery: '', notes: '' })
@@ -189,7 +189,7 @@ export default function StockPage() {
   async function saveItem() {
     if (!itemForm.name && !itemForm.description) return
     setSaving(true)
-    const payload = { store_id: STORE_ID, name: itemForm.name, description: itemForm.name || itemForm.description, category: itemForm.category_id || 'goods', unit: itemForm.unit, price: parseFloat(itemForm.cost_price || '0'), is_active: true, supplier: itemForm.supplier || 'Other', on_daily_sheet: itemForm.on_daily_sheet }
+    const payload = { store_id: STORE_ID, name: itemForm.name, description: itemForm.name || itemForm.description, category: itemForm.category_id || 'goods', unit: itemForm.unit, price: parseFloat(itemForm.cost_price || '0'), is_active: true, supplier: itemForm.supplier || 'Other', on_daily_sheet: itemForm.on_daily_sheet, is_catch_weight: itemForm.is_catch_weight, kg_price: parseFloat(itemForm.kg_price || '0'), avg_weight_kg: parseFloat(itemForm.avg_weight_kg || '0') }
     if (editItem) { await supabase.from('stock_items').update(payload).eq('id', editItem.id) }
     else { await supabase.from('stock_items').insert(payload) }
     setItemForm({ name: '', description: '', category_id: 'goods', unit: 'each', cost_price: '', par_level: '' })
@@ -358,7 +358,7 @@ export default function StockPage() {
                         const variance = (line.actual_qty || 0) - (line.expected_qty || 0)
                         return (
                           <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: '16px', padding: '12px 24px', borderTop: '1px solid #f3f4f6' }}>
-                            <td style={{ padding: '12px 16px' }}><div style={{ fontWeight: 700, fontSize: '14px', color: '#111' }}>{item.description || item.name}</div>{item.supplier && <span style={{ fontSize: '11px', fontWeight: 600, background: '#eff6ff', color: '#2563eb', padding: '2px 8px', borderRadius: '20px', marginTop: '4px', display: 'inline-block' }}>{item.supplier}</span>}{item.on_daily_sheet && <span style={{ fontSize: '11px', fontWeight: 600, background: '#f0fdf4', color: '#16a34a', padding: '2px 8px', borderRadius: '20px', marginLeft: '4px', display: 'inline-block' }}>📋 Daily</span>}</td>
+                            <td style={{ padding: '12px 16px' }}><div style={{ fontWeight: 700, fontSize: '14px', color: '#111' }}>{item.description || item.name}</div>{item.supplier && <span style={{ fontSize: '11px', fontWeight: 600, background: '#eff6ff', color: '#2563eb', padding: '2px 8px', borderRadius: '20px', marginTop: '4px', display: 'inline-block' }}>{item.supplier}</span>}{item.on_daily_sheet && <span style={{ fontSize: '11px', fontWeight: 600, background: '#f0fdf4', color: '#16a34a', padding: '2px 8px', borderRadius: '20px', marginLeft: '4px', display: 'inline-block' }}>📋 Daily</span>}{item.is_catch_weight && <span style={{ fontSize: '11px', fontWeight: 600, background: '#fefce8', color: '#92400e', padding: '2px 8px', borderRadius: '20px', marginLeft: '4px', display: 'inline-block' }}>⚖️ Catch Wt</span>}</td>
                             <div style={{ fontSize: '12px', color: '#9ca3af', minWidth: '80px', textAlign: 'right' }}>Expected: <strong>{line.expected_qty}</strong></div>
                             <input type="number" min="0" step="0.1" value={line.actual_qty || ''} onChange={e => updateCountLine(line.id, parseFloat(e.target.value) || 0)} placeholder="0" style={{ width: '100px', border: '1.5px solid #e5e7eb', borderRadius: '8px', padding: '8px 10px', fontSize: '14px', fontWeight: 700, textAlign: 'center', outline: 'none' }} />
                             <div style={{ minWidth: '70px', textAlign: 'right', fontSize: '13px', fontWeight: 700, color: variance < 0 ? '#dc2626' : variance > 0 ? '#d97706' : '#9ca3af' }}>{variance === 0 ? '—' : `${variance > 0 ? '+' : ''}${variance.toFixed(1)}`}</div>
@@ -535,7 +535,7 @@ export default function StockPage() {
                             <td style={{ padding: '12px 16px', fontSize: '13px', color: '#374151' }}>{formatCurrency(Number(item.cost_price ?? item.price ?? 0))}</td>
                             <td style={{ padding: '12px 16px' }}>
                               <div style={{ display: 'flex', gap: '6px' }}>
-                                <button onClick={() => { setEditItem(item); setItemForm({ name: item.description || item.name || '', description: item.description || '', category_id: item.category || 'goods', unit: item.unit, cost_price: String(item.cost_price ?? item.price ?? 0), par_level: String(item.par_level ?? 0), supplier: item.supplier || 'Other', on_daily_sheet: item.on_daily_sheet || false }); setShowAddItem(true) }} style={{ fontSize: '12px', color: '#1d4ed8', background: '#eff6ff', border: 'none', borderRadius: '8px', padding: '5px 10px', cursor: 'pointer', fontWeight: 600 }}>Edit</button>
+                                <button onClick={() => { setEditItem(item); setItemForm({ name: item.description || item.name || '', description: item.description || '', category_id: item.category || 'goods', unit: item.unit, cost_price: String(item.cost_price ?? item.price ?? 0), par_level: String(item.par_level ?? 0), supplier: item.supplier || 'Other', on_daily_sheet: item.on_daily_sheet || false, is_catch_weight: item.is_catch_weight || false, kg_price: String(item.kg_price || ''), avg_weight_kg: String(item.avg_weight_kg || '') }); setShowAddItem(true) }} style={{ fontSize: '12px', color: '#1d4ed8', background: '#eff6ff', border: 'none', borderRadius: '8px', padding: '5px 10px', cursor: 'pointer', fontWeight: 600 }}>Edit</button>
                                 <button onClick={() => deleteItem(item.id)} style={{ fontSize: '12px', color: '#dc2626', background: '#fee2e2', border: 'none', borderRadius: '8px', padding: '5px 8px', cursor: 'pointer', fontWeight: 700 }}>✕</button>
                               </div>
                             </td>
@@ -604,8 +604,40 @@ export default function StockPage() {
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
             <div><label style={LABEL}>Unit</label><select value={itemForm.unit} onChange={e => setItemForm(f => ({ ...f, unit: e.target.value }))} style={INPUT}>{UNITS.map(u => <option key={u}>{u}</option>)}</select></div>
-            <div><label style={LABEL}>Cost Price (R)</label><input type="number" step="0.01" value={itemForm.cost_price} onChange={e => setItemForm(f => ({ ...f, cost_price: e.target.value }))} placeholder="0.00" style={INPUT} /></div>
+            <div>
+              <label style={LABEL}>Unit Cost (R)</label>
+              <input type="number" step="0.01" value={itemForm.cost_price} onChange={e => setItemForm(f => ({ ...f, cost_price: e.target.value }))} placeholder="0.00" style={INPUT} disabled={itemForm.is_catch_weight} />
+              {itemForm.is_catch_weight && <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px' }}>Auto-calculated from kg price × avg weight</div>}
+            </div>
             <div><label style={LABEL}>Par Level</label><input type="number" step="0.1" value={itemForm.par_level} onChange={e => setItemForm(f => ({ ...f, par_level: e.target.value }))} placeholder="0" style={INPUT} /></div>
+          </div>
+          {/* Catch Weight */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 16px', background: '#fefce8', borderRadius: '10px', border: '1.5px solid #fde68a' }}>
+            <input type="checkbox" id="catchWeight" checked={itemForm.is_catch_weight} onChange={e => setItemForm(f => ({ ...f, is_catch_weight: e.target.checked, cost_price: e.target.checked ? String((parseFloat(f.kg_price||'0') * parseFloat(f.avg_weight_kg||'0')).toFixed(2)) : f.cost_price }))} style={{ width: '18px', height: '18px', cursor: 'pointer' }} />
+            <label htmlFor="catchWeight" style={{ cursor: 'pointer', fontWeight: 600, fontSize: '14px', color: '#92400e' }}>⚖️ Catch Weight — bought by kg, counted by unit</label>
+          </div>
+          {itemForm.is_catch_weight && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px', padding: '14px 16px', background: '#fefce8', borderRadius: '10px', border: '1px solid #fde68a' }}>
+              <div>
+                <label style={LABEL}>Supplier Kg Price (R)</label>
+                <input type="number" step="0.01" placeholder="45.00" value={itemForm.kg_price} onChange={e => { const kg=e.target.value; const avg=itemForm.avg_weight_kg; setItemForm(f => ({ ...f, kg_price: kg, cost_price: kg && avg ? String((parseFloat(kg)*parseFloat(avg)).toFixed(2)) : f.cost_price })) }} style={INPUT} />
+              </div>
+              <div>
+                <label style={LABEL}>Avg Weight (kg)</label>
+                <input type="number" step="0.001" placeholder="1.425" value={itemForm.avg_weight_kg} onChange={e => { const avg=e.target.value; const kg=itemForm.kg_price; setItemForm(f => ({ ...f, avg_weight_kg: avg, cost_price: kg && avg ? String((parseFloat(kg)*parseFloat(avg)).toFixed(2)) : f.cost_price })) }} style={INPUT} />
+              </div>
+              <div>
+                <label style={LABEL}>Calculated Unit Cost</label>
+                <div style={{ padding: '10px 12px', background: '#fff', border: '1.5px solid #fde68a', borderRadius: '10px', fontWeight: 800, fontSize: '16px', color: '#92400e' }}>
+                  R {itemForm.kg_price && itemForm.avg_weight_kg ? (parseFloat(itemForm.kg_price)*parseFloat(itemForm.avg_weight_kg)).toFixed(2) : '0.00'}
+                </div>
+              </div>
+              <div style={{ gridColumn: 'span 3', fontSize: '12px', color: '#92400e', background: '#fef3c7', padding: '8px 12px', borderRadius: '8px' }}>
+                💡 Unit cost auto-updates when you change kg price or avg weight. Update quarterly when supplier rates change.
+              </div>
+            </div>
+          )}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
           </div>
         </div>
         <div style={{ padding: '16px 28px 24px', display: 'flex', gap: '12px' }}>
