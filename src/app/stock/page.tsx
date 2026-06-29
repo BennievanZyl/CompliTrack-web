@@ -1,4 +1,4 @@
-'use client' // redeploy 2026-06-29T12:04
+'use client'
 
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
@@ -51,28 +51,6 @@ function Modal({ show, onClose, title, children, maxWidth = '480px' }: { show: b
         </div>
         {children}
       </div>
-      {/* Supplier Management Modal */}
-      <Modal show={showSupplierForm} onClose={() => { setShowSupplierForm(false); setEditSupplier(null) }} title={editSupplier ? 'Edit Supplier' : 'Add Supplier'} maxWidth="500px">
-        <div style={{ padding: '20px 28px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-          <div><label style={LABEL}>Supplier Name *</label><input value={supplierForm.name} onChange={e => setSupplierForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. SAR, Mochachos" style={INPUT} /></div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-            <div><label style={LABEL}>Contact Name</label><input value={supplierForm.contact_name} onChange={e => setSupplierForm(f => ({ ...f, contact_name: e.target.value }))} placeholder="Rep name" style={INPUT} /></div>
-            <div><label style={LABEL}>Phone</label><input value={supplierForm.phone} onChange={e => setSupplierForm(f => ({ ...f, phone: e.target.value }))} placeholder="e.g. 082 000 0000" style={INPUT} /></div>
-          </div>
-          <div><label style={LABEL}>Email</label><input type="email" value={supplierForm.email} onChange={e => setSupplierForm(f => ({ ...f, email: e.target.value }))} placeholder="orders@supplier.co.za" style={INPUT} /></div>
-          <div><label style={LABEL}>Order Day</label>
-            <select value={supplierForm.order_day} onChange={e => setSupplierForm(f => ({ ...f, order_day: e.target.value }))} style={INPUT}>
-              <option value="">— Select —</option>
-              {['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'].map(d => <option key={d} value={d}>{d}</option>)}
-            </select>
-          </div>
-          <div><label style={LABEL}>Notes</label><input value={supplierForm.notes} onChange={e => setSupplierForm(f => ({ ...f, notes: e.target.value }))} placeholder="e.g. Order by 10am" style={INPUT} /></div>
-        </div>
-        <div style={{ padding: '16px 28px 24px', display: 'flex', gap: '12px' }}>
-          <button onClick={() => { setShowSupplierForm(false); setEditSupplier(null) }} style={{ flex: 1, border: '1.5px solid #e5e7eb', color: '#374151', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: 700, cursor: 'pointer', background: 'white' }}>Cancel</button>
-          <button onClick={saveSupplier} disabled={saving || !supplierForm.name} style={{ flex: 1, background: !supplierForm.name ? '#d1d5db' : '#1a5c38', color: 'white', border: 'none', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: 800, cursor: 'pointer' }}>{saving ? 'Saving…' : editSupplier ? 'Save Changes' : 'Add Supplier'}</button>
-        </div>
-      </Modal>
 
     </div>
   )
@@ -834,6 +812,28 @@ export default function StockPage() {
         <div style={{ padding: '16px 28px 24px', display: 'flex', gap: '12px' }}>
           <button onClick={() => setShowAddOrder(false)} style={{ flex: 1, border: '1.5px solid #e5e7eb', color: '#374151', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: 700, cursor: 'pointer', background: 'white' }}>Cancel</button>
           <button onClick={saveOrder} disabled={saving || !orderForm.supplier_name} style={{ flex: 1, background: !orderForm.supplier_name ? '#d1d5db' : '#1a5c38', color: 'white', border: 'none', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: 800, cursor: 'pointer' }}>Create Order</button>
+        </div>
+      </Modal>
+      {/* Supplier Management Modal */}
+      <Modal show={showSupplierForm} onClose={() => { setShowSupplierForm(false); setEditSupplier(null) }} title={editSupplier ? 'Edit Supplier' : 'Add Supplier'} maxWidth="500px">
+        <div style={{ padding: '20px 28px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+          <div><label style={LABEL}>Supplier Name *</label><input value={supplierForm.name} onChange={e => setSupplierForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. SAR, Mochachos" style={INPUT} /></div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+            <div><label style={LABEL}>Contact Name</label><input value={supplierForm.contact_name} onChange={e => setSupplierForm(f => ({ ...f, contact_name: e.target.value }))} placeholder="Rep name" style={INPUT} /></div>
+            <div><label style={LABEL}>Phone</label><input value={supplierForm.phone} onChange={e => setSupplierForm(f => ({ ...f, phone: e.target.value }))} placeholder="e.g. 082 000 0000" style={INPUT} /></div>
+          </div>
+          <div><label style={LABEL}>Email</label><input type="email" value={supplierForm.email} onChange={e => setSupplierForm(f => ({ ...f, email: e.target.value }))} placeholder="orders@supplier.co.za" style={INPUT} /></div>
+          <div><label style={LABEL}>Order Day</label>
+            <select value={supplierForm.order_day} onChange={e => setSupplierForm(f => ({ ...f, order_day: e.target.value }))} style={INPUT}>
+              <option value="">— Select —</option>
+              {['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'].map(d => <option key={d} value={d}>{d}</option>)}
+            </select>
+          </div>
+          <div><label style={LABEL}>Notes</label><input value={supplierForm.notes} onChange={e => setSupplierForm(f => ({ ...f, notes: e.target.value }))} placeholder="e.g. Order by 10am" style={INPUT} /></div>
+        </div>
+        <div style={{ padding: '16px 28px 24px', display: 'flex', gap: '12px' }}>
+          <button onClick={() => { setShowSupplierForm(false); setEditSupplier(null) }} style={{ flex: 1, border: '1.5px solid #e5e7eb', color: '#374151', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: 700, cursor: 'pointer', background: 'white' }}>Cancel</button>
+          <button onClick={saveSupplier} disabled={saving || !supplierForm.name} style={{ flex: 1, background: !supplierForm.name ? '#d1d5db' : '#1a5c38', color: 'white', border: 'none', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: 800, cursor: 'pointer' }}>{saving ? 'Saving…' : editSupplier ? 'Save Changes' : 'Add Supplier'}</button>
         </div>
       </Modal>
     </div>
