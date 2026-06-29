@@ -127,7 +127,7 @@ export default function StockPage() {
   async function savePurchase() {
     setSaving(true)
     const total = parseFloat(purchaseForm.quantity || '0') * parseFloat(purchaseForm.unit_cost || '0')
-    await supabase.from('stock_purchases').insert({ store_id: STORE_ID, purchase_date: purchaseForm.purchase_date, supplier_name: purchaseForm.supplier_name || null, stock_item_id: purchaseForm.stock_item_id || null, item_name: purchaseForm.item_name || (items.find(i => i.id === purchaseForm.stock_item_id)?.name ?? items.find(i => i.id === purchaseForm.stock_item_id)?.description) || null, quantity: parseFloat(purchaseForm.quantity || '0'), unit: purchaseForm.unit, unit_cost: parseFloat(purchaseForm.unit_cost || '0'), total_cost: total, invoice_number: purchaseForm.invoice_number || null })
+    await supabase.from('stock_purchases').insert({ store_id: STORE_ID, purchase_date: purchaseForm.purchase_date, supplier_name: purchaseForm.supplier_name || null, stock_item_id: purchaseForm.stock_item_id || null, item_name: purchaseForm.item_name || items.find(i => i.id === purchaseForm.stock_item_id)?.name ?? items.find(i => i.id === purchaseForm.stock_item_id)?.description || null, quantity: parseFloat(purchaseForm.quantity || '0'), unit: purchaseForm.unit, unit_cost: parseFloat(purchaseForm.unit_cost || '0'), total_cost: total, invoice_number: purchaseForm.invoice_number || null })
     setPurchaseForm({ purchase_date: new Date().toISOString().split('T')[0], supplier_name: '', stock_item_id: '', item_name: '', quantity: '', unit: 'each', unit_cost: '', invoice_number: '' })
     setShowAddPurchase(false); await loadAll(); setSaving(false)
   }
@@ -135,7 +135,7 @@ export default function StockPage() {
   async function saveWastage() {
     setSaving(true)
     const total = parseFloat(wastageForm.quantity || '0') * parseFloat(wastageForm.unit_cost || '0')
-    await supabase.from('stock_wastage').insert({ store_id: STORE_ID, wastage_date: wastageForm.wastage_date, stock_item_id: wastageForm.stock_item_id || null, item_name: wastageForm.item_name || (items.find(i => i.id === wastageForm.stock_item_id)?.name ?? items.find(i => i.id === wastageForm.stock_item_id)?.description) || null, quantity: parseFloat(wastageForm.quantity || '0'), unit: wastageForm.unit, unit_cost: parseFloat(wastageForm.unit_cost || '0'), total_cost: total, reason: wastageForm.reason })
+    await supabase.from('stock_wastage').insert({ store_id: STORE_ID, wastage_date: wastageForm.wastage_date, stock_item_id: wastageForm.stock_item_id || null, item_name: wastageForm.item_name || items.find(i => i.id === wastageForm.stock_item_id)?.name ?? items.find(i => i.id === wastageForm.stock_item_id)?.description || null, quantity: parseFloat(wastageForm.quantity || '0'), unit: wastageForm.unit, unit_cost: parseFloat(wastageForm.unit_cost || '0'), total_cost: total, reason: wastageForm.reason })
     setWastageForm({ wastage_date: new Date().toISOString().split('T')[0], stock_item_id: '', item_name: '', quantity: '', unit: 'each', unit_cost: '', reason: 'Expired' })
     setShowAddWastage(false); await loadAll(); setSaving(false)
   }
@@ -200,7 +200,7 @@ export default function StockPage() {
     return acc
   }, {} as Record<string, { cat: StockCategory; items: StockItem[] }>)
 
-                    const uncategorised = items.filter(i => !i.category)
+                    // uncategorised items shown under other
   const todayStr = new Date().toISOString().split('T')[0]
   const todayPurchases = purchases.filter(p => p.purchase_date === todayStr)
   const todayWastage = wastage.filter(w => w.wastage_date === todayStr)
@@ -440,28 +440,30 @@ export default function StockPage() {
                   <button onClick={() => { setEditItem(null); setItemForm({ name: '', category_id: 'goods', unit: 'each', cost_price: '', par_level: '' }); setShowAddItem(true) }} style={{ padding: '10px 18px', background: '#1a5c38', color: 'white', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: 800, cursor: 'pointer' }}>+ Add Item</button>
                 </div>
               </div>
-              {categories.map(cat => {
+              {['goods','beverages','packaging','basting','other'].map(catKey => {
+                const catLabels: Record<string,string> = { goods: 'Goods', beverages: 'Beverages', packaging: 'Packaging', basting: 'Basting & Sauces', other: 'Other' }
+                const catColors: Record<string,string> = { goods: '#16a34a', beverages: '#2563eb', packaging: '#d97706', basting: '#dc2626', other: '#6b7280' }
                 const catItems = items.filter(i => i.category === catKey)
                 if (!catItems.length) return null
                 return (
-                  <div key={cat.id} style={{ background: 'white', borderRadius: '20px', border: '1.5px solid #eef2ee', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
+                  <div key={catKey} style={{ background: 'white', borderRadius: '20px', border: '1.5px solid #eef2ee', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
                     <div style={{ padding: '12px 20px', background: '#f9fafb', display: 'flex', alignItems: 'center', gap: '10px', borderBottom: '1px solid #e5e7eb' }}>
-                      <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: cat.color }} />
-                      <div style={{ fontWeight: 700, fontSize: '14px', color: '#111' }}>{cat.name}</div>
-                      <span style={{ fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '100px', background: `${cat.color}20`, color: cat.color }}>{catItems.length}</span>
+                      <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: catColors[catKey] }} />
+                      <div style={{ fontWeight: 700, fontSize: '14px', color: '#111' }}>{catLabels[catKey]}</div>
+                      <span style={{ fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '100px', background: catColors[catKey] + '20', color: catColors[catKey] }}>{catItems.length}</span>
                     </div>
                     <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                       <thead><tr style={{ background: '#fafafa' }}>{['Item', 'Unit', 'Cost Price', 'Par Level', ''].map(h => <th key={h} style={{ padding: '10px 16px', textAlign: 'left', fontSize: '11px', fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{h}</th>)}</tr></thead>
                       <tbody>
                         {catItems.map(item => (
                           <tr key={item.id} style={{ borderTop: '1px solid #f3f4f6' }}>
-                            <td style={{ padding: '12px 16px', fontWeight: 700, fontSize: '14px', color: '#111' }}>{item.name}</td>
+                            <td style={{ padding: '12px 16px', fontWeight: 700, fontSize: '14px', color: '#111' }}>{item.name || item.description}</td>
                             <td style={{ padding: '12px 16px', fontSize: '13px', color: '#6b7280' }}>{item.unit}</td>
                             <td style={{ padding: '12px 16px', fontSize: '13px', color: '#374151' }}>{formatCurrency(item.cost_price ?? item.price ?? 0)}</td>
                             <td style={{ padding: '12px 16px', fontSize: '13px', color: '#374151' }}>{item.par_level} {item.unit}</td>
                             <td style={{ padding: '12px 16px' }}>
                               <div style={{ display: 'flex', gap: '6px' }}>
-                                <button onClick={() => { setEditItem(item); setItemForm({ name: item.name, category_id: item.category || 'goods', unit: item.unit, cost_price: item.cost_price.toString(), par_level: item.par_level.toString() }); setShowAddItem(true) }} style={{ fontSize: '12px', color: '#1d4ed8', background: '#eff6ff', border: 'none', borderRadius: '8px', padding: '5px 10px', cursor: 'pointer', fontWeight: 600 }}>Edit</button>
+                                <button onClick={() => { setEditItem(item); setItemForm({ name: item.name, category_id: item.category || 'goods', unit: item.unit, cost_price: (item.cost_price ?? item.price ?? 0).toString(), par_level: (item.par_level ?? 0).toString() }); setShowAddItem(true) }} style={{ fontSize: '12px', color: '#1d4ed8', background: '#eff6ff', border: 'none', borderRadius: '8px', padding: '5px 10px', cursor: 'pointer', fontWeight: 600 }}>Edit</button>
                                 <button onClick={() => deleteItem(item.id)} style={{ fontSize: '12px', color: '#dc2626', background: '#fee2e2', border: 'none', borderRadius: '8px', padding: '5px 8px', cursor: 'pointer', fontWeight: 700 }}>✕</button>
                               </div>
                             </td>
@@ -534,9 +536,9 @@ export default function StockPage() {
         <div style={{ padding: '20px 28px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
           <div><label style={LABEL}>Date</label><input type="date" value={purchaseForm.purchase_date} onChange={e => setPurchaseForm(f => ({ ...f, purchase_date: e.target.value }))} style={INPUT} /></div>
           <div><label style={LABEL}>Stock Item (optional)</label>
-            <select value={purchaseForm.stock_item_id} onChange={e => { const item = items.find(i => i.id === e.target.value); setPurchaseForm(f => ({ ...f, stock_item_id: e.target.value, item_name: item?.name || f.item_name, unit: item?.unit || f.unit, unit_cost: item?.cost_price?.toString() || f.unit_cost })) }} style={INPUT}>
+            <select value={purchaseForm.stock_item_id} onChange={e => { const item = items.find(i => i.id === e.target.value); setPurchaseForm(f => ({ ...f, stock_item_id: e.target.value, item_name: (item?.name || item?.description) || f.item_name, unit: item?.unit || f.unit, unit_cost: (item?.cost_price ?? item?.price ?? 0).toString() || f.unit_cost })) }} style={INPUT}>
               <option value="">Select from stock list</option>
-              {['goods','beverages','packaging','basting','other'].map(cat => <optgroup key={cat} label={cat}>{items.filter(i => i.category === cat).map(i => <option key={i.id} value={i.id}>{i.name}</option>)}</optgroup>)}
+              {['goods','beverages','packaging','basting','other'].map(cat => <optgroup key={cat} label={cat}>{items.filter(i => i.category === cat).map(i => <option key={i.id} value={i.id}>{i.name || i.description}</option>)}</optgroup>)}
             </select>
           </div>
           <div><label style={LABEL}>Item Name *</label><input value={purchaseForm.item_name} onChange={e => setPurchaseForm(f => ({ ...f, item_name: e.target.value }))} placeholder="or type manually" style={INPUT} /></div>
@@ -559,7 +561,7 @@ export default function StockPage() {
       <Modal show={showAddWastage} onClose={() => setShowAddWastage(false)} title="Log Wastage">
         <div style={{ padding: '20px 28px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
           <div><label style={LABEL}>Date</label><input type="date" value={wastageForm.wastage_date} onChange={e => setWastageForm(f => ({ ...f, wastage_date: e.target.value }))} style={INPUT} /></div>
-          <div><label style={LABEL}>Stock Item</label><select value={wastageForm.stock_item_id} onChange={e => { const item = items.find(i => i.id === e.target.value); setWastageForm(f => ({ ...f, stock_item_id: e.target.value, item_name: item?.name || '', unit: item?.unit || 'each', unit_cost: item?.cost_price?.toString() || '' })) }} style={INPUT}><option value="">Select item</option>{items.map(i => <option key={i.id} value={i.id}>{i.name || i.description}</option>)}</select></div>
+          <div><label style={LABEL}>Stock Item</label><select value={wastageForm.stock_item_id} onChange={e => { const item = items.find(i => i.id === e.target.value); setWastageForm(f => ({ ...f, stock_item_id: e.target.value, item_name: (item?.name || item?.description) || '', unit: item?.unit || 'each', unit_cost: (item?.cost_price ?? item?.price ?? 0).toString() || '' })) }} style={INPUT}><option value="">Select item</option>{items.map(i => <option key={i.id} value={i.id}>{i.name || i.description}</option>)}</select></div>
           <div><label style={LABEL}>Item Name</label><input value={wastageForm.item_name} onChange={e => setWastageForm(f => ({ ...f, item_name: e.target.value }))} placeholder="or type manually" style={INPUT} /></div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
             <div><label style={LABEL}>Quantity</label><input type="number" step="0.1" value={wastageForm.quantity} onChange={e => setWastageForm(f => ({ ...f, quantity: e.target.value }))} placeholder="0" style={INPUT} /></div>
