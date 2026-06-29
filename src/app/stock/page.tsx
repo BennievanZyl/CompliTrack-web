@@ -881,19 +881,60 @@ export default function StockPage() {
         </div>
       </Modal>
 
-      {/* New Order Modal */}
-      <Modal show={showAddOrder} onClose={() => setShowAddOrder(false)} title="New Order" maxWidth="440px">
+      {/* New Order Modal - Purchase Order */}
+      <Modal show={showAddOrder} onClose={() => setShowAddOrder(false)} title="New Purchase Order" maxWidth="700px">
         <div style={{ padding: '20px 28px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-          <div><label style={LABEL}>Supplier *</label><input value={orderForm.supplier_name} onChange={e => setOrderForm(f => ({ ...f, supplier_name: e.target.value }))} placeholder="e.g. Makro, Rainbow Chicken" style={INPUT} /></div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
+            <div><label style={LABEL}>Supplier *</label>
+              <select value={orderForm.supplier_name} onChange={e => setOrderForm(f => ({ ...f, supplier_name: e.target.value }))} style={INPUT}>
+                <option value="">— Select Supplier —</option>
+                {suppliers.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
+              </select>
+            </div>
             <div><label style={LABEL}>Order Date</label><input type="date" value={orderForm.order_date} onChange={e => setOrderForm(f => ({ ...f, order_date: e.target.value }))} style={INPUT} /></div>
             <div><label style={LABEL}>Expected Delivery</label><input type="date" value={orderForm.expected_delivery} onChange={e => setOrderForm(f => ({ ...f, expected_delivery: e.target.value }))} style={INPUT} /></div>
           </div>
-          <div><label style={LABEL}>Notes</label><textarea value={orderForm.notes} onChange={e => setOrderForm(f => ({ ...f, notes: e.target.value }))} rows={3} style={{ ...INPUT, resize: 'vertical' }} /></div>
+          {orderForm.supplier_name && (
+            <div style={{ background: '#f9fafb', borderRadius: '12px', padding: '16px' }}>
+              <div style={{ fontWeight: 700, fontSize: '14px', marginBottom: '12px', color: '#1a5c38' }}>
+                Order Items — {orderForm.supplier_name}
+                <span style={{ fontWeight: 400, fontSize: '12px', color: '#6b7280', marginLeft: '8px' }}>
+                  {items.filter(i => (i.supplier || 'Other') === orderForm.supplier_name).length} items
+                </span>
+              </div>
+              {items.filter(i => (i.supplier || 'Other') === orderForm.supplier_name).length === 0 ? (
+                <p style={{ color: '#6b7280', fontSize: '13px', margin: 0 }}>No items assigned to this supplier. Go to Stock Items tab to assign items to suppliers.</p>
+              ) : (
+                <div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: '8px', marginBottom: '8px', fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase' as const }}>
+                    <div>Item</div><div>Unit</div><div>Order Qty</div>
+                  </div>
+                  <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
+                    {items.filter(i => (i.supplier || 'Other') === orderForm.supplier_name).map(item => (
+                      <div key={item.id} style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: '8px', marginBottom: '8px', alignItems: 'center' }}>
+                        <div style={{ fontSize: '13px', fontWeight: 600 }}>{item.description || item.name}</div>
+                        <div style={{ fontSize: '12px', color: '#6b7280' }}>{item.unit}</div>
+                        <input type="number" min="0" step="0.1" placeholder="0"
+                          value={(orderForm as Record<string,string>)[`qty_${item.id}`] || ''}
+                          onChange={e => setOrderForm(f => ({ ...f, [`qty_${item.id}`]: e.target.value }))}
+                          style={{ padding: '6px 10px', border: `1.5px solid ${parseFloat((orderForm as Record<string,string>)[`qty_${item.id}`] || '0') > 0 ? '#16a34a' : '#e5e7eb'}`, borderRadius: '8px', fontSize: '14px', outline: 'none', background: parseFloat((orderForm as Record<string,string>)[`qty_${item.id}`] || '0') > 0 ? '#f0fdf4' : '#fff' }} />
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ marginTop: '8px', fontSize: '12px', color: '#6b7280', textAlign: 'right' as const }}>
+                    {items.filter(i => (i.supplier||'Other')===orderForm.supplier_name && parseFloat((orderForm as Record<string,string>)[`qty_${i.id}`]||'0')>0).length} of {items.filter(i => (i.supplier||'Other')===orderForm.supplier_name).length} items ordered
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          <div><label style={LABEL}>Notes</label><textarea value={orderForm.notes} onChange={e => setOrderForm(f => ({ ...f, notes: e.target.value }))} placeholder="Special instructions..." style={{ ...INPUT, height: '60px', resize: 'vertical' as const }} /></div>
         </div>
         <div style={{ padding: '16px 28px 24px', display: 'flex', gap: '12px' }}>
           <button onClick={() => setShowAddOrder(false)} style={{ flex: 1, border: '1.5px solid #e5e7eb', color: '#374151', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: 700, cursor: 'pointer', background: 'white' }}>Cancel</button>
-          <button onClick={saveOrder} disabled={saving || !orderForm.supplier_name} style={{ flex: 1, background: !orderForm.supplier_name ? '#d1d5db' : '#1a5c38', color: 'white', border: 'none', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: 800, cursor: 'pointer' }}>Create Order</button>
+          <button onClick={printOrder} disabled={!orderForm.supplier_name} style={{ flex: 1, background: !orderForm.supplier_name ? '#d1d5db' : '#f0fdf4', color: '#16a34a', border: '1.5px solid #16a34a', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: 700, cursor: 'pointer' }}>🖨️ Print</button>
+          <button onClick={shareOrderWhatsApp} disabled={!orderForm.supplier_name} style={{ flex: 1, background: !orderForm.supplier_name ? '#d1d5db' : '#dcfce7', color: '#16a34a', border: '1.5px solid #16a34a', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: 700, cursor: 'pointer' }}>💬 WhatsApp</button>
+          <button onClick={saveOrder} disabled={saving || !orderForm.supplier_name} style={{ flex: 1, background: !orderForm.supplier_name ? '#d1d5db' : '#1a5c38', color: 'white', border: 'none', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: 800, cursor: 'pointer' }}>{saving ? 'Saving…' : '✓ Save Order'}</button>
         </div>
       </Modal>
       {/* Supplier Management Modal */}
