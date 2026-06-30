@@ -31,6 +31,36 @@ export default function OrgPage() {
   const [distSending, setDistSending] = useState(false);
   const [distResult, setDistResult] = useState('');
 
+  const [loginStore, setLoginStore] = useState<Store | null>(null);
+  const [loginForm, setLoginForm] = useState({ full_name: '', email: '', password: '', role: 'store_manager' });
+  const [loginSending, setLoginSending] = useState(false);
+  const [loginError, setLoginError] = useState('');
+  const [loginSuccess, setLoginSuccess] = useState('');
+
+  function generatePassword() {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+    let pw = '';
+    for (let i = 0; i < 10; i++) pw += chars[Math.floor(Math.random() * chars.length)];
+    return pw;
+  }
+
+  async function createStoreLogin() {
+    if (!loginStore) return;
+    setLoginError(''); setLoginSuccess(''); setLoginSending(true);
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) { setLoginError('Session expired — please refresh and try again.'); setLoginSending(false); return; }
+
+    const res = await fetch('/api/admin/create-store-login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+      body: JSON.stringify({ ...loginForm, store_id: loginStore.id }),
+    });
+    const result = await res.json();
+    setLoginSending(false);
+    if (!res.ok) { setLoginError(result.error || 'Could not create login'); return; }
+    setLoginSuccess(`Login created. Email: ${loginForm.email} — Password: ${loginForm.password} (share this securely, they can change it once logged in).`);
+  }
+
   useEffect(() => { checkAuthAndLoad(); }, []);
 
   useEffect(() => {
@@ -337,8 +367,9 @@ export default function OrgPage() {
                       </div>
                     )}
 
-                    <div style={{ marginTop: 12, textAlign: 'center' as const, fontSize: 11, color: '#ccc' }}>
-                      Click to open full store dashboard →
+                    <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <button onClick={e => { e.stopPropagation(); setLoginStore(store); setLoginForm({ full_name: '', email: '', password: generatePassword(), role: 'store_manager' }); setLoginError(''); setLoginSuccess(''); }} style={{ fontSize: 11, fontWeight: 700, color: PRIMARY, background: '#f0f7f4', border: 'none', borderRadius: 8, padding: '6px 12px', cursor: 'pointer' }}>+ Create Login</button>
+                      <span style={{ fontSize: 11, color: '#ccc' }}>Click card to open dashboard →</span>
                     </div>
                   </div>
                 );
@@ -381,6 +412,54 @@ export default function OrgPage() {
               <button onClick={runDistribute} disabled={distSending || distTargets.length === 0} style={{ flex: 1, padding: '12px', background: distSending || distTargets.length === 0 ? '#ccc' : PRIMARY, color: '#fff', border: 'none', borderRadius: 10, fontWeight: 700, cursor: distSending || distTargets.length === 0 ? 'not-allowed' : 'pointer' }}>
                 {distSending ? 'Sending…' : `Send to ${distTargets.length || ''} Store${distTargets.length === 1 ? '' : 's'}`}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {loginStore && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 20 }} onClick={() => setLoginStore(null)}>
+          <div style={{ background: '#fff', borderRadius: 20, padding: 28, width: 440, maxWidth: '100%' }} onClick={e => e.stopPropagation()}>
+            <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 4 }}>Create Login — {loginStore.name}</div>
+            <p style={{ fontSize: 13, color: '#888', margin: '0 0 20px' }}>This account can log in immediately with the password below. They can change it themselves once logged in, under Settings.</p>
+
+            {loginError && <div style={{ background: '#fdecea', border: '1px solid #f5c6c6', borderRadius: 10, padding: '10px 14px', fontSize: 13, color: '#c62828', marginBottom: 16 }}>{loginError}</div>}
+            {loginSuccess ? (
+              <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, padding: '14px', fontSize: 13, color: '#166534', marginBottom: 16, lineHeight: 1.6 }}>{loginSuccess}</div>
+            ) : (
+              <>
+                <div style={{ marginBottom: 14 }}>
+                  <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 6 }}>Name</label>
+                  <input value={loginForm.full_name} onChange={e => setLoginForm(f => ({ ...f, full_name: e.target.value }))} placeholder="Store manager's name" style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1.5px solid #e5e7eb', fontSize: 14, boxSizing: 'border-box' as const }} />
+                </div>
+                <div style={{ marginBottom: 14 }}>
+                  <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 6 }}>Email</label>
+                  <input type="email" value={loginForm.email} onChange={e => setLoginForm(f => ({ ...f, email: e.target.value }))} placeholder="store@business.com" style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1.5px solid #e5e7eb', fontSize: 14, boxSizing: 'border-box' as const }} />
+                </div>
+                <div style={{ marginBottom: 14 }}>
+                  <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 6 }}>Role</label>
+                  <select value={loginForm.role} onChange={e => setLoginForm(f => ({ ...f, role: e.target.value }))} style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1.5px solid #e5e7eb', fontSize: 14 }}>
+                    <option value="store_manager">Store Manager</option>
+                    <option value="staff">Staff</option>
+                  </select>
+                </div>
+                <div style={{ marginBottom: 20 }}>
+                  <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 6 }}>Temporary Password</label>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <input value={loginForm.password} onChange={e => setLoginForm(f => ({ ...f, password: e.target.value }))} style={{ flex: 1, padding: '10px 12px', borderRadius: 10, border: '1.5px solid #e5e7eb', fontSize: 14, fontFamily: 'monospace', boxSizing: 'border-box' as const }} />
+                    <button onClick={() => setLoginForm(f => ({ ...f, password: generatePassword() }))} style={{ padding: '10px 14px', background: '#f0f0f0', border: 'none', borderRadius: 10, cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>↻</button>
+                  </div>
+                </div>
+              </>
+            )}
+
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button onClick={() => setLoginStore(null)} style={{ padding: '12px 18px', background: '#f0f0f0', color: '#333', border: 'none', borderRadius: 10, fontWeight: 700, cursor: 'pointer' }}>{loginSuccess ? 'Done' : 'Cancel'}</button>
+              {!loginSuccess && (
+                <button onClick={createStoreLogin} disabled={loginSending || !loginForm.full_name || !loginForm.email || loginForm.password.length < 8} style={{ flex: 1, padding: '12px', background: loginSending ? '#ccc' : PRIMARY, color: '#fff', border: 'none', borderRadius: 10, fontWeight: 700, cursor: loginSending ? 'not-allowed' : 'pointer' }}>
+                  {loginSending ? 'Creating…' : 'Create Login'}
+                </button>
+              )}
             </div>
           </div>
         </div>
