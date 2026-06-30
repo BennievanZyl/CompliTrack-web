@@ -8,9 +8,13 @@ const STORE_ID = '05328298-fc27-4c9f-b091-bb7f6598b601';
 const PRIMARY = '#1a5c38';
 const DARK = '#0a1f12';
 
-type Employee = { id: string; full_name: string; role: string; is_active: boolean };
+type Employee = { id: string; full_name: string; role: string; is_active: boolean; hourly_rate: number | null };
 type AttendanceRecord = { id: string; employee_id: string; work_date: string; clock_in: string | null; clock_out: string | null; hours_worked: number | null; is_late: boolean; notes: string | null };
 type Shift = { id: string; shift_name: string; day_type: string; start_time: string; end_time: string; is_active: boolean };
+type Leave = { id: string; employee_id: string; leave_type: string; start_date: string; end_date: string; days_taken: number; status: string; reason: string | null };
+type Advance = { id: string; employee_id: string; amount: number; advance_date: string; repayment_status: string; deduct_from_wages: boolean; reason: string | null };
+type Holiday = { id: string; holiday_date: string; name: string };
+type PayrollSettings = { sunday_multiplier: number; holiday_multiplier: number };
 
 const ROLE_COLORS: Record<string, { bg: string; color: string }> = {
   'Store Manager': { bg: '#e8f5e9', color: PRIMARY },
@@ -25,6 +29,13 @@ const ROLE_COLORS: Record<string, { bg: string; color: string }> = {
 
 function initials(name: string) { return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2); }
 function todayDayType() { const d = new Date().getDay(); return d === 6 ? 'saturday' : d === 0 ? 'sunday' : 'weekday'; }
+function formatHM(decimalHours: number | null | undefined) {
+  if (!decimalHours) return '0h 0m';
+  const totalMinutes = Math.round(decimalHours * 60);
+  const h = Math.floor(totalMinutes / 60);
+  const m = totalMinutes % 60;
+  return `${h}h ${m}m`;
+}
 
 function ModalWrap({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
   return (
@@ -40,7 +51,7 @@ export default function AttendancePage() {
   const [todayRecords, setTodayRecords] = useState<AttendanceRecord[]>([]);
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'today' | 'history' | 'shifts'>('today');
+  const [activeTab, setActiveTab] = useState<'today' | 'history' | 'shifts' | 'payroll'>('today');
   const [historyRecords, setHistoryRecords] = useState<AttendanceRecord[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [selectedEmployee, setSelectedEmployee] = useState<string>('all');
@@ -51,6 +62,126 @@ export default function AttendancePage() {
   const [shiftSaving, setShiftSaving] = useState(false);
   const [showManualModal, setShowManualModal] = useState(false);
   const [manualForm, setManualForm] = useState({ employee_id: '', clock_in: '', clock_out: '', is_late: false, notes: '' });
+
+  // Payroll
+  const [payrollMonth, setPayrollMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const [monthAttendance, setMonthAttendance] = useState<AttendanceRecord[]>([]);
+  const [monthLeave, setMonthLeave] = useState<Leave[]>([]);
+  const [advances, setAdvances] = useState<Advance[]>([]);
+  const [holidays, setHolidays] = useState<Holiday[]>([]);
+  const [payrollSettings, setPayrollSettings] = useState<PayrollSettings>({ sunday_multiplier: 1.5, holiday_multiplier: 2 });
+  const [payrollLoaded, setPayrollLoaded] = useState(false);
+  const [selectedPayrollEmployee, setSelectedPayrollEmployee] = useState<Employee | null>(null);
+  const [editingRate, setEditingRate] = useState<string | null>(null);
+  const [rateInput, setRateInput] = useState('');
+  const [showLeaveModal, setShowLeaveModal] = useState(false);
+  const [leaveForm, setLeaveForm] = useState({ leave_type: 'Sick', start_date: '', end_date: '', days_taken: '1', status: 'approved', reason: '' });
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [settingsForm, setSettingsForm] = useState({ sunday_multiplier: '1.5', holiday_multiplier: '2' });
+
+  async function loadPayrollData() {
+    const [attRes, leaveRes, advRes, holRes, setRes] = await Promise.all([
+      supabase.from('attendance').select('*').eq('store_id', STORE_ID)
+        .gte('work_date', payrollMonth + '-01').lte('work_date', payrollMonth + '-31'),
+      supabase.from('employee_leave').select('*').eq('store_id', STORE_ID)
+        .lte('start_date', payrollMonth + '-31').gte('end_date', payrollMonth + '-01'),
+      supabase.from('employee_advances').select('*').eq('store_id', STORE_ID).order('advance_date', { ascending: false }),
+      supabase.from('public_holidays').select('*').eq('store_id', STORE_ID),
+      supabase.from('payroll_settings').select('*').eq('store_id', STORE_ID).maybeSingle(),
+    ]);
+    setMonthAttendance(attRes.data || []);
+    setMonthLeave(leaveRes.data || []);
+    setAdvances(advRes.data || []);
+    setHolidays(holRes.data || []);
+    if (setRes.data) {
+      setPayrollSettings(setRes.data);
+      setSettingsForm({ sunday_multiplier: String(setRes.data.sunday_multiplier), holiday_multiplier: String(setRes.data.holiday_multiplier) });
+    }
+    setPayrollLoaded(true);
+  }
+
+  useEffect(() => { if (activeTab === 'payroll') loadPayrollData(); }, [activeTab, payrollMonth]);
+
+  const holidaySet = new Set(holidays.map(h => h.holiday_date));
+  function dayMultiplier(dateStr: string) {
+    if (holidaySet.has(dateStr)) return { mult: payrollSettings.holiday_multiplier, label: holidays.find(h => h.holiday_date === dateStr)?.name || 'Public Holiday', type: 'holiday' as const };
+    const dow = new Date(dateStr + 'T00:00:00').getDay();
+    if (dow === 0) return { mult: payrollSettings.sunday_multiplier, label: 'Sunday', type: 'sunday' as const };
+    return { mult: 1, label: '', type: 'normal' as const };
+  }
+
+  // Per-employee totals for the selected month, used on the cards and inside the register drawer
+  function employeeMonthSummary(employeeId: string) {
+    const records = monthAttendance.filter(r => r.employee_id === employeeId);
+    let totalHours = 0, totalPay = 0;
+    const rate = employees.find(e => e.id === employeeId)?.hourly_rate || 0;
+    for (const r of records) {
+      const hrs = r.hours_worked || 0;
+      const { mult } = dayMultiplier(r.work_date);
+      totalHours += hrs;
+      totalPay += hrs * rate * mult;
+    }
+    const outstandingAdvances = advances.filter(a => a.employee_id === employeeId && a.deduct_from_wages && a.repayment_status === 'outstanding').reduce((s, a) => s + Number(a.amount), 0);
+    return { totalHours, totalPay, netPay: totalPay - outstandingAdvances, outstandingAdvances, recordCount: records.length };
+  }
+
+  async function saveHourlyRate(employeeId: string) {
+    const rate = parseFloat(rateInput) || 0;
+    await supabase.from('employees').update({ hourly_rate: rate }).eq('id', employeeId);
+    setEditingRate(null);
+    await loadEmployees();
+  }
+
+  async function savePayrollSettings() {
+    const payload = { store_id: STORE_ID, sunday_multiplier: parseFloat(settingsForm.sunday_multiplier) || 1.5, holiday_multiplier: parseFloat(settingsForm.holiday_multiplier) || 2 };
+    await supabase.from('payroll_settings').upsert(payload);
+    setPayrollSettings(payload);
+    setShowSettingsModal(false);
+  }
+
+  async function saveLeave() {
+    if (!selectedPayrollEmployee || !leaveForm.start_date || !leaveForm.end_date) return;
+    await supabase.from('employee_leave').insert({
+      employee_id: selectedPayrollEmployee.id, store_id: STORE_ID, leave_type: leaveForm.leave_type,
+      start_date: leaveForm.start_date, end_date: leaveForm.end_date, days_taken: parseFloat(leaveForm.days_taken) || 1,
+      status: leaveForm.status, reason: leaveForm.reason || null,
+    });
+    setShowLeaveModal(false);
+    setLeaveForm({ leave_type: 'Sick', start_date: '', end_date: '', days_taken: '1', status: 'approved', reason: '' });
+    await loadPayrollData();
+  }
+
+  function buildRegisterDays(employeeId: string) {
+    const [y, m] = payrollMonth.split('-').map(Number);
+    const daysInMonth = new Date(y, m, 0).getDate();
+    const todayStr = new Date().toISOString().split('T')[0];
+    const isCurrentMonth = payrollMonth === todayStr.slice(0, 7);
+    const lastDay = isCurrentMonth ? new Date().getDate() : daysInMonth;
+    const rate = employees.find(e => e.id === employeeId)?.hourly_rate || 0;
+    const days = [];
+    for (let d = 1; d <= lastDay; d++) {
+      const dateStr = `${payrollMonth}-${String(d).padStart(2, '0')}`;
+      const record = monthAttendance.find(r => r.employee_id === employeeId && r.work_date === dateStr);
+      const leave = monthLeave.find(l => l.employee_id === employeeId && dateStr >= l.start_date && dateStr <= l.end_date);
+      const { mult, label, type } = dayMultiplier(dateStr);
+      const hours = record?.hours_worked || 0;
+      days.push({
+        date: dateStr,
+        dayName: new Date(dateStr + 'T00:00:00').toLocaleDateString('en-ZA', { weekday: 'short' }),
+        hours, mult, label, type, leave,
+        pay: hours * rate * mult,
+        clockIn: record?.clock_in, clockOut: record?.clock_out, isLate: record?.is_late,
+      });
+    }
+    return days.reverse(); // most recent first
+  }
+
+  async function markAdvanceRepaid(id: string) {
+    await supabase.from('employee_advances').update({ repayment_status: 'repaid', repaid_date: new Date().toISOString().split('T')[0] }).eq('id', id);
+    await loadPayrollData();
+  }
+
+
   const [manualSaving, setManualSaving] = useState(false);
   const today = new Date().toISOString().split('T')[0];
 
@@ -64,7 +195,7 @@ export default function AttendancePage() {
   }
 
   async function loadEmployees() {
-    const { data } = await supabase.from('employees').select('id, full_name, role, is_active').eq('store_id', STORE_ID).eq('is_active', true).order('full_name');
+    const { data } = await supabase.from('employees').select('id, full_name, role, is_active, hourly_rate').eq('store_id', STORE_ID).eq('is_active', true).order('full_name');
     setEmployees(data || []);
   }
 
@@ -185,6 +316,124 @@ export default function AttendancePage() {
         </ModalWrap>
       )}
 
+      {showLeaveModal && selectedPayrollEmployee && (
+        <ModalWrap onClose={() => setShowLeaveModal(false)}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+            <div style={{ fontSize: 18, fontWeight: 700 }}>Leave — {selectedPayrollEmployee.full_name}</div>
+            <button onClick={() => setShowLeaveModal(false)} style={{ background: '#f0f4f0', border: 'none', borderRadius: 8, padding: '6px 14px', cursor: 'pointer' }}>Cancel</button>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div><label style={lbl}>Leave Type</label><select value={leaveForm.leave_type} onChange={e => setLeaveForm(p => ({ ...p, leave_type: e.target.value }))} style={inp}>{['Sick', 'Annual', 'Family Responsibility', 'Unpaid', 'Other'].map(t => <option key={t}>{t}</option>)}</select></div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div><label style={lbl}>Start Date *</label><input type="date" value={leaveForm.start_date} onChange={e => setLeaveForm(p => ({ ...p, start_date: e.target.value, end_date: p.end_date || e.target.value }))} style={inp} /></div>
+              <div><label style={lbl}>End Date *</label><input type="date" value={leaveForm.end_date} onChange={e => setLeaveForm(p => ({ ...p, end_date: e.target.value }))} style={inp} /></div>
+            </div>
+            <div><label style={lbl}>Status</label><select value={leaveForm.status} onChange={e => setLeaveForm(p => ({ ...p, status: e.target.value }))} style={inp}><option value="approved">Approved</option><option value="pending">Pending</option><option value="declined">Declined</option></select></div>
+            <div><label style={lbl}>Reason / Notes</label><textarea value={leaveForm.reason} onChange={e => setLeaveForm(p => ({ ...p, reason: e.target.value }))} rows={2} style={{ ...inp, resize: 'vertical' as const }} /></div>
+          </div>
+          <button onClick={saveLeave} disabled={!leaveForm.start_date || !leaveForm.end_date} style={{ width: '100%', marginTop: 20, padding: '13px', background: PRIMARY, color: '#fff', border: 'none', borderRadius: 12, fontWeight: 700, cursor: 'pointer', fontSize: 15 }}>Save Leave</button>
+        </ModalWrap>
+      )}
+
+      {showSettingsModal && (
+        <ModalWrap onClose={() => setShowSettingsModal(false)}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+            <div style={{ fontSize: 18, fontWeight: 700 }}>Pay Rate Multipliers</div>
+            <button onClick={() => setShowSettingsModal(false)} style={{ background: '#f0f4f0', border: 'none', borderRadius: 8, padding: '6px 14px', cursor: 'pointer' }}>Cancel</button>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div><label style={lbl}>Sunday Multiplier</label><input type="number" step="0.1" value={settingsForm.sunday_multiplier} onChange={e => setSettingsForm(p => ({ ...p, sunday_multiplier: e.target.value }))} style={inp} /><div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>BCEA default: 1.5x</div></div>
+            <div><label style={lbl}>Public Holiday Multiplier</label><input type="number" step="0.1" value={settingsForm.holiday_multiplier} onChange={e => setSettingsForm(p => ({ ...p, holiday_multiplier: e.target.value }))} style={inp} /><div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>BCEA default: 2x</div></div>
+          </div>
+          <button onClick={savePayrollSettings} style={{ width: '100%', marginTop: 20, padding: '13px', background: PRIMARY, color: '#fff', border: 'none', borderRadius: 12, fontWeight: 700, cursor: 'pointer', fontSize: 15 }}>Save</button>
+        </ModalWrap>
+      )}
+
+      {selectedPayrollEmployee && (() => {
+        const summary = employeeMonthSummary(selectedPayrollEmployee.id);
+        const days = buildRegisterDays(selectedPayrollEmployee.id);
+        const empAdvances = advances.filter(a => a.employee_id === selectedPayrollEmployee.id);
+        return (
+          <div style={{ position: 'fixed' as const, inset: 0, zIndex: 1500, display: 'flex', justifyContent: 'flex-end' }}>
+            <div onClick={() => setSelectedPayrollEmployee(null)} style={{ flex: 1, background: 'rgba(0,0,0,0.4)', cursor: 'pointer' }} />
+            <div style={{ width: '100%', maxWidth: 560, background: '#f8faf8', height: '100vh', overflowY: 'auto' as const }}>
+              <div style={{ background: `linear-gradient(135deg, ${DARK}, ${PRIMARY})`, padding: '24px 28px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
+                  <button onClick={() => setSelectedPayrollEmployee(null)} style={{ background: 'rgba(255,255,255,0.2)', border: 'none', color: '#fff', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', fontSize: 13 }}>Close</button>
+                  <button onClick={() => { setLeaveForm({ leave_type: 'Sick', start_date: '', end_date: '', days_taken: '1', status: 'approved', reason: '' }); setShowLeaveModal(true); }} style={{ background: '#fff', color: PRIMARY, border: 'none', borderRadius: 8, padding: '6px 14px', cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>+ Add Leave</button>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                  <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'rgba(255,255,255,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, fontWeight: 800, color: '#fff', flexShrink: 0 }}>{initials(selectedPayrollEmployee.full_name)}</div>
+                  <div>
+                    <div style={{ color: '#fff', fontWeight: 800, fontSize: 19 }}>{selectedPayrollEmployee.full_name}</div>
+                    <div style={{ color: 'rgba(255,255,255,0.7)', fontSize: 13 }}>{selectedPayrollEmployee.role}</div>
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ padding: '20px 24px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 20 }}>
+                  <div style={{ background: '#fff', borderRadius: 14, padding: 16, border: '1px solid #eef2ee' }}>
+                    <div style={{ fontSize: 11, color: '#999', fontWeight: 700, marginBottom: 4 }}>HOURS THIS MONTH</div>
+                    <div style={{ fontSize: 22, fontWeight: 800, color: '#333' }}>{formatHM(summary.totalHours)}</div>
+                  </div>
+                  <div style={{ background: '#fff', borderRadius: 14, padding: 16, border: '1px solid #eef2ee' }}>
+                    <div style={{ fontSize: 11, color: '#999', fontWeight: 700, marginBottom: 4 }}>EARNED THIS MONTH</div>
+                    <div style={{ fontSize: 22, fontWeight: 800, color: PRIMARY }}>R{summary.totalPay.toFixed(2)}</div>
+                  </div>
+                  {summary.outstandingAdvances > 0 && (
+                    <div style={{ background: '#fff7ed', borderRadius: 14, padding: 16, border: '1px solid #fed7aa', gridColumn: '1 / -1', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div><div style={{ fontSize: 11, color: '#c2410c', fontWeight: 700 }}>OUTSTANDING ADVANCES</div><div style={{ fontSize: 18, fontWeight: 800, color: '#c2410c' }}>-R{summary.outstandingAdvances.toFixed(2)}</div></div>
+                      <div style={{ textAlign: 'right' as const }}><div style={{ fontSize: 11, color: '#999', fontWeight: 700 }}>NET PAY</div><div style={{ fontSize: 18, fontWeight: 800, color: '#333' }}>R{summary.netPay.toFixed(2)}</div></div>
+                    </div>
+                  )}
+                </div>
+
+                {empAdvances.filter(a => a.repayment_status === 'outstanding').length > 0 && (
+                  <div style={{ marginBottom: 20 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: '#333', marginBottom: 8 }}>Outstanding Advances</div>
+                    {empAdvances.filter(a => a.repayment_status === 'outstanding').map(a => (
+                      <div key={a.id} style={{ background: '#fff', borderRadius: 10, padding: '10px 14px', border: '1px solid #eef2ee', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                        <div><span style={{ fontWeight: 700 }}>R{Number(a.amount).toFixed(2)}</span> <span style={{ fontSize: 12, color: '#999' }}>{a.advance_date}{a.reason ? ` — ${a.reason}` : ''}</span></div>
+                        <button onClick={() => markAdvanceRepaid(a.id)} style={{ fontSize: 12, background: '#f0f4f0', border: 'none', borderRadius: 8, padding: '5px 12px', cursor: 'pointer', fontWeight: 600 }}>Mark Repaid</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div style={{ fontSize: 13, fontWeight: 700, color: '#333', marginBottom: 8 }}>Daily Register — {new Date(payrollMonth + '-01').toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' })}</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {days.map(day => (
+                    <div key={day.date} style={{ background: '#fff', borderRadius: 10, padding: '10px 14px', border: '1px solid #eef2ee', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <div style={{ width: 38, textAlign: 'center' as const }}>
+                          <div style={{ fontSize: 10, color: '#999', fontWeight: 700 }}>{day.dayName.toUpperCase()}</div>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: '#333' }}>{day.date.slice(8)}</div>
+                        </div>
+                        <div>
+                          {day.leave ? (
+                            <div style={{ fontSize: 13, fontWeight: 600, color: '#c2410c' }}>🌴 {day.leave.leave_type} leave{day.leave.status !== 'approved' ? ` (${day.leave.status})` : ''}</div>
+                          ) : day.hours > 0 ? (
+                            <div>
+                              <span style={{ fontSize: 13, fontWeight: 700, color: '#333' }}>{formatHM(day.hours)}</span>
+                              {day.isLate && <span style={{ fontSize: 10, fontWeight: 700, color: '#f59e0b', marginLeft: 6 }}>LATE</span>}
+                              {day.label && <span style={{ fontSize: 11, fontWeight: 700, color: day.type === 'holiday' ? '#dc2626' : '#2563eb', marginLeft: 6 }}>{day.label} · {day.mult}x</span>}
+                            </div>
+                          ) : (
+                            <span style={{ fontSize: 13, color: '#ccc' }}>No record</span>
+                          )}
+                        </div>
+                      </div>
+                      {day.hours > 0 && !day.leave && <div style={{ fontWeight: 700, color: PRIMARY, fontSize: 14 }}>R{day.pay.toFixed(2)}</div>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Header */}
       <div style={{ background: `linear-gradient(135deg, ${DARK}, ${PRIMARY})`, padding: '0 32px' }}>
         <div style={{ maxWidth: 1200, margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 64 }}>
@@ -218,7 +467,7 @@ export default function AttendancePage() {
               ))}
             </div>
             <div style={{ display: 'flex', gap: 4, background: '#fff', padding: 4, borderRadius: 14, border: '1px solid #eef2ee', marginBottom: 24, width: 'fit-content' }}>
-              {[{ key: 'today', label: '📅 Today' }, { key: 'history', label: '📊 History' }, { key: 'shifts', label: '⚙️ Shifts' }].map(tab => (
+              {[{ key: 'today', label: '📅 Today' }, { key: 'history', label: '📊 History' }, { key: 'shifts', label: '⚙️ Shifts' }, { key: 'payroll', label: '💰 Payroll' }].map(tab => (
                 <button key={tab.key} onClick={() => setActiveTab(tab.key as typeof activeTab)} style={{ padding: '8px 20px', borderRadius: 10, border: 'none', cursor: 'pointer', fontWeight: 600, fontSize: 13, background: activeTab === tab.key ? PRIMARY : 'transparent', color: activeTab === tab.key ? '#fff' : '#666' }}>{tab.label}</button>
               ))}
             </div>
@@ -329,6 +578,60 @@ export default function AttendancePage() {
                     )}
                   </div>
                 ))}
+              </div>
+            )}
+
+            {activeTab === 'payroll' && (
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap' as const, gap: 10 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <h2 style={{ fontSize: 18, fontWeight: 700, color: '#333', margin: 0 }}>Payroll Register</h2>
+                    <input type="month" value={payrollMonth} onChange={e => setPayrollMonth(e.target.value)} style={{ ...inp, width: 160 }} />
+                  </div>
+                  <button onClick={() => setShowSettingsModal(true)} style={{ padding: '8px 16px', background: '#f0f4f0', border: 'none', borderRadius: 10, fontWeight: 600, cursor: 'pointer', fontSize: 13 }}>⚙️ Sunday {payrollSettings.sunday_multiplier}x · Holiday {payrollSettings.holiday_multiplier}x</button>
+                </div>
+                {!payrollLoaded ? (
+                  <div style={{ textAlign: 'center' as const, padding: 60, color: '#ccc' }}>Loading…</div>
+                ) : (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
+                    {employees.map(emp => {
+                      const summary = employeeMonthSummary(emp.id);
+                      const colors = ROLE_COLORS[emp.role] || ROLE_COLORS['Other'];
+                      return (
+                        <div key={emp.id} style={{ background: '#fff', borderRadius: 18, padding: 20, border: '1px solid #eef2ee', boxShadow: '0 2px 8px rgba(0,0,0,0.04)', cursor: 'pointer' }} onClick={() => setSelectedPayrollEmployee(emp)}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
+                            <div style={{ width: 48, height: 48, borderRadius: '50%', background: colors.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, color: colors.color, fontSize: 16, flexShrink: 0 }}>{initials(emp.full_name)}</div>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontWeight: 700, color: '#333', fontSize: 15 }}>{emp.full_name}</div>
+                              <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: colors.bg, color: colors.color }}>{emp.role}</span>
+                            </div>
+                          </div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                            <div>
+                              <div style={{ fontSize: 11, color: '#999', fontWeight: 600 }}>Rate</div>
+                              {editingRate === emp.id ? (
+                                <div style={{ display: 'flex', gap: 4 }} onClick={e => e.stopPropagation()}>
+                                  <input type="number" step="0.01" autoFocus value={rateInput} onChange={e => setRateInput(e.target.value)} style={{ width: 70, padding: '4px 6px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13 }} />
+                                  <button onClick={() => saveHourlyRate(emp.id)} style={{ background: PRIMARY, color: '#fff', border: 'none', borderRadius: 6, padding: '4px 8px', fontSize: 12, cursor: 'pointer' }}>✓</button>
+                                </div>
+                              ) : (
+                                <div onClick={e => { e.stopPropagation(); setEditingRate(emp.id); setRateInput(String(emp.hourly_rate || 0)); }} style={{ fontWeight: 700, fontSize: 14, color: '#333' }}>R{(emp.hourly_rate || 0).toFixed(2)}/hr ✎</div>
+                              )}
+                            </div>
+                            <div style={{ textAlign: 'right' as const }}>
+                              <div style={{ fontSize: 11, color: '#999', fontWeight: 600 }}>Hours MTD</div>
+                              <div style={{ fontWeight: 700, fontSize: 14, color: '#333' }}>{formatHM(summary.totalHours)}</div>
+                            </div>
+                          </div>
+                          <div style={{ background: '#f0f7f4', borderRadius: 10, padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <span style={{ fontSize: 12, color: '#666', fontWeight: 600 }}>{summary.outstandingAdvances > 0 ? 'Net Pay' : 'Earned MTD'}</span>
+                            <span style={{ fontWeight: 800, fontSize: 17, color: PRIMARY }}>R{(summary.outstandingAdvances > 0 ? summary.netPay : summary.totalPay).toFixed(2)}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             )}
           </div>
