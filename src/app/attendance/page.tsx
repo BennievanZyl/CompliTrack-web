@@ -80,11 +80,13 @@ export default function AttendancePage() {
   const [settingsForm, setSettingsForm] = useState({ sunday_multiplier: '1.5', holiday_multiplier: '2' });
 
   async function loadPayrollData() {
+    const [py, pm] = payrollMonth.split('-').map(Number);
+    const monthEnd = `${payrollMonth}-${String(new Date(py, pm, 0).getDate()).padStart(2, '0')}`;
     const [attRes, leaveRes, advRes, holRes, setRes] = await Promise.all([
       supabase.from('attendance').select('*').eq('store_id', STORE_ID)
-        .gte('work_date', payrollMonth + '-01').lte('work_date', payrollMonth + '-31'),
+        .gte('work_date', payrollMonth + '-01').lte('work_date', monthEnd),
       supabase.from('employee_leave').select('*').eq('store_id', STORE_ID)
-        .lte('start_date', payrollMonth + '-31').gte('end_date', payrollMonth + '-01'),
+        .lte('start_date', monthEnd).gte('end_date', payrollMonth + '-01'),
       supabase.from('employee_advances').select('*').eq('store_id', STORE_ID).order('advance_date', { ascending: false }),
       supabase.from('public_holidays').select('*').eq('store_id', STORE_ID),
       supabase.from('payroll_settings').select('*').eq('store_id', STORE_ID).maybeSingle(),
@@ -193,6 +195,61 @@ export default function AttendancePage() {
   async function markAdvanceRepaid(id: string) {
     await supabase.from('employee_advances').update({ repayment_status: 'repaid', repaid_date: new Date().toISOString().split('T')[0] }).eq('id', id);
     await loadPayrollData();
+  }
+
+  function exportRegisterCSV(emp: Employee, days: ReturnType<typeof buildRegisterDays>) {
+    const rows = [['Date', 'Day', 'Clock In', 'Clock Out', 'Hours', 'Type', 'Pay (R)']];
+    for (const day of [...days].reverse()) {
+      const clockIn = day.clockIn ? new Date(day.clockIn).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : '';
+      const clockOut = day.clockOut ? new Date(day.clockOut).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : '';
+      const hours = day.leave ? formatHM(day.leaveHours) : day.hours > 0 ? formatHM(day.hours) : '';
+      const type = day.leave ? `${day.leave.leave_type} leave${day.leave.status !== 'approved' ? ` (${day.leave.status})` : ''}` : day.label || '';
+      const pay = day.pay > 0 ? day.pay.toFixed(2) : '';
+      rows.push([day.date, day.dayName, clockIn, clockOut, hours, type, pay]);
+    }
+    const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `${emp.full_name.replace(/\s+/g, '_')}_${payrollMonth}.csv`;
+    a.click(); URL.revokeObjectURL(url);
+  }
+
+  function printRegister(emp: Employee, days: ReturnType<typeof buildRegisterDays>, summary: ReturnType<typeof employeeMonthSummary>) {
+    const monthLabel = new Date(payrollMonth + '-01').toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' });
+    const rate = emp.hourly_rate || 0;
+    const rowsHtml = [...days].reverse().map(day => {
+      const clockIn = day.clockIn ? new Date(day.clockIn).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : '—';
+      const clockOut = day.clockOut ? new Date(day.clockOut).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : '—';
+      const hours = day.leave ? formatHM(day.leaveHours) : day.hours > 0 ? formatHM(day.hours) : '—';
+      const type = day.leave ? `${day.leave.leave_type} leave` : day.label || '';
+      const pay = day.pay > 0 ? `R${day.pay.toFixed(2)}` : '—';
+      const rowBg = day.type === 'holiday' ? '#fde8e8' : (day.type === 'sunday' || new Date(day.date + 'T00:00:00').getDay() === 6) ? '#f3f4f6' : '#fff';
+      return `<tr style="background:${rowBg}"><td>${day.date}</td><td>${day.dayName}</td><td>${clockIn}</td><td>${clockOut}</td><td>${hours}</td><td>${type}</td><td style="text-align:right">${pay}</td></tr>`;
+    }).join('');
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${emp.full_name} — ${monthLabel}</title>
+      <style>
+        body{font-family:Arial,sans-serif;padding:32px;color:#111}
+        h1{font-size:20px;margin:0 0 2px}
+        .sub{color:#666;font-size:13px;margin-bottom:18px}
+        table{width:100%;border-collapse:collapse;font-size:13px}
+        th{background:#1a5c38;color:#fff;text-align:left;padding:8px 10px}
+        td{padding:7px 10px;border-bottom:1px solid #eee}
+        .totals{margin-top:18px;font-size:14px}
+        .totals b{font-size:16px}
+        .legend{margin-top:10px;font-size:11px;color:#666}
+        .sw{display:inline-block;width:10px;height:10px;margin-right:4px;vertical-align:middle}
+        @media print{body{padding:10px}}
+      </style></head><body>
+      <h1>${emp.full_name} — ${emp.role}</h1>
+      <div class="sub">Payroll Register · ${monthLabel} · Rate: R${rate.toFixed(2)}/hr</div>
+      <table><thead><tr><th>Date</th><th>Day</th><th>Clock In</th><th>Clock Out</th><th>Hours</th><th>Type</th><th style="text-align:right">Pay</th></tr></thead>
+      <tbody>${rowsHtml}</tbody></table>
+      <div class="totals">Total Hours: <b>${formatHM(summary.totalHours)}</b> &nbsp;&nbsp; Total Earned: <b>R${summary.totalPay.toFixed(2)}</b>${summary.outstandingAdvances > 0 ? ` &nbsp;&nbsp; Advances Owing: <b>-R${summary.outstandingAdvances.toFixed(2)}</b> &nbsp;&nbsp; Net Pay: <b>R${summary.netPay.toFixed(2)}</b>` : ''}</div>
+      <div class="legend"><span class="sw" style="background:#fde8e8"></span>Public Holiday &nbsp; <span class="sw" style="background:#f3f4f6"></span>Weekend</div>
+      </body></html>`;
+    const win = window.open('', '_blank');
+    if (win) { win.document.write(html); win.document.close(); win.focus(); setTimeout(() => win.print(), 300); }
   }
 
 
@@ -369,13 +426,17 @@ export default function AttendancePage() {
         const days = buildRegisterDays(selectedPayrollEmployee.id);
         const empAdvances = advances.filter(a => a.employee_id === selectedPayrollEmployee.id);
         return (
-          <div style={{ position: 'fixed' as const, inset: 0, zIndex: 1500, display: 'flex', justifyContent: 'flex-end' }}>
-            <div onClick={() => setSelectedPayrollEmployee(null)} style={{ flex: 1, background: 'rgba(0,0,0,0.4)', cursor: 'pointer' }} />
-            <div style={{ width: '100%', maxWidth: 560, background: '#f8faf8', height: '100vh', overflowY: 'auto' as const }}>
-              <div style={{ background: `linear-gradient(135deg, ${DARK}, ${PRIMARY})`, padding: '24px 28px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
+          <div style={{ position: 'fixed' as const, inset: 0, zIndex: 1500, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+            <div onClick={() => setSelectedPayrollEmployee(null)} style={{ position: 'absolute' as const, inset: 0, background: 'rgba(0,0,0,0.5)', cursor: 'pointer' }} />
+            <div style={{ position: 'relative' as const, width: '100%', maxWidth: 1000, maxHeight: '92vh', background: '#f8faf8', borderRadius: 20, overflow: 'hidden', display: 'flex', flexDirection: 'column' as const, boxShadow: '0 24px 60px rgba(0,0,0,0.3)' }}>
+              <div style={{ background: `linear-gradient(135deg, ${DARK}, ${PRIMARY})`, padding: '24px 28px', flexShrink: 0 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap' as const, gap: 10 }}>
                   <button onClick={() => setSelectedPayrollEmployee(null)} style={{ background: 'rgba(255,255,255,0.2)', border: 'none', color: '#fff', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', fontSize: 13 }}>Close</button>
-                  <button onClick={() => { setLeaveForm({ leave_type: 'Sick', start_date: '', end_date: '', days_taken: '1', status: 'approved', reason: '' }); setShowLeaveModal(true); }} style={{ background: '#fff', color: PRIMARY, border: 'none', borderRadius: 8, padding: '6px 14px', cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>+ Add Leave</button>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button onClick={() => exportRegisterCSV(selectedPayrollEmployee, days)} style={{ background: 'rgba(255,255,255,0.2)', border: 'none', color: '#fff', borderRadius: 8, padding: '6px 14px', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>⬇ Export CSV</button>
+                    <button onClick={() => printRegister(selectedPayrollEmployee, days, summary)} style={{ background: 'rgba(255,255,255,0.2)', border: 'none', color: '#fff', borderRadius: 8, padding: '6px 14px', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>🖨 Print / PDF</button>
+                    <button onClick={() => { setLeaveForm({ leave_type: 'Sick', start_date: '', end_date: '', days_taken: '1', status: 'approved', reason: '', paid_hours_per_day: '' }); setShowLeaveModal(true); }} style={{ background: '#fff', color: PRIMARY, border: 'none', borderRadius: 8, padding: '6px 14px', cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>+ Add Leave</button>
+                  </div>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
                   <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'rgba(255,255,255,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, fontWeight: 800, color: '#fff', flexShrink: 0 }}>{initials(selectedPayrollEmployee.full_name)}</div>
@@ -386,7 +447,7 @@ export default function AttendancePage() {
                 </div>
               </div>
 
-              <div style={{ padding: '20px 24px' }}>
+              <div style={{ padding: '20px 24px', overflowY: 'auto' as const, flex: 1 }}>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 20 }}>
                   <div style={{ background: '#fff', borderRadius: 14, padding: 16, border: '1px solid #eef2ee' }}>
                     <div style={{ fontSize: 11, color: '#999', fontWeight: 700, marginBottom: 4 }}>HOURS THIS MONTH</div>
@@ -416,34 +477,51 @@ export default function AttendancePage() {
                   </div>
                 )}
 
-                <div style={{ fontSize: 13, fontWeight: 700, color: '#333', marginBottom: 8 }}>Daily Register — {new Date(payrollMonth + '-01').toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' })}</div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {days.map(day => (
-                    <div key={day.date} style={{ background: '#fff', borderRadius: 10, padding: '10px 14px', border: '1px solid #eef2ee', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <div style={{ width: 38, textAlign: 'center' as const }}>
-                          <div style={{ fontSize: 10, color: '#999', fontWeight: 700 }}>{day.dayName.toUpperCase()}</div>
-                          <div style={{ fontSize: 14, fontWeight: 700, color: '#333' }}>{day.date.slice(8)}</div>
-                        </div>
-                        <div>
-                          {day.leave ? (
-                            <div style={{ fontSize: 13, fontWeight: 600, color: '#c2410c' }}>
-                              🌴 {day.leave.leave_type} leave{day.leave.status !== 'approved' ? ` (${day.leave.status})` : day.leaveHours > 0 ? ` · ${formatHM(day.leaveHours)} paid` : ' · unpaid'}
-                            </div>
-                          ) : day.hours > 0 ? (
-                            <div>
-                              <span style={{ fontSize: 13, fontWeight: 700, color: '#333' }}>{formatHM(day.hours)}</span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: '#333' }}>Daily Register — {new Date(payrollMonth + '-01').toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' })}</div>
+                  <div style={{ display: 'flex', gap: 12, fontSize: 11, color: '#999' }}>
+                    <span><span style={{ display: 'inline-block', width: 10, height: 10, background: '#fde8e8', borderRadius: 2, marginRight: 4, verticalAlign: 'middle' }} />Public Holiday</span>
+                    <span><span style={{ display: 'inline-block', width: 10, height: 10, background: '#f3f4f6', border: '1px solid #e5e7eb', borderRadius: 2, marginRight: 4, verticalAlign: 'middle' }} />Weekend</span>
+                  </div>
+                </div>
+                <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #eef2ee', overflow: 'hidden' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse' as const, fontSize: 13 }}>
+                    <thead>
+                      <tr style={{ background: '#f9fafb', borderBottom: '1px solid #e5e7eb' }}>
+                        {['Date', 'Day', 'Clock In', 'Clock Out', 'Hours', 'Type', 'Pay'].map(h => (
+                          <th key={h} style={{ padding: '10px 12px', textAlign: h === 'Pay' ? 'right' as const : 'left' as const, color: '#6b7280', fontWeight: 700, fontSize: 11, textTransform: 'uppercase' as const }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {days.map(day => {
+                        const isWeekend = new Date(day.date + 'T00:00:00').getDay() === 6 || day.type === 'sunday';
+                        const rowBg = day.type === 'holiday' ? '#fde8e8' : isWeekend ? '#f3f4f6' : '#fff';
+                        return (
+                          <tr key={day.date} style={{ background: rowBg, borderBottom: '1px solid #f3f4f6' }}>
+                            <td style={{ padding: '8px 12px', color: '#374151' }}>{day.date}</td>
+                            <td style={{ padding: '8px 12px', color: '#6b7280', fontWeight: 600 }}>{day.dayName}</td>
+                            <td style={{ padding: '8px 12px', color: '#374151' }}>{day.clockIn ? new Date(day.clockIn).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : '—'}</td>
+                            <td style={{ padding: '8px 12px', color: '#374151' }}>{day.clockOut ? new Date(day.clockOut).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : '—'}</td>
+                            <td style={{ padding: '8px 12px', fontWeight: 700, color: '#111' }}>
+                              {day.leave ? formatHM(day.leaveHours) : day.hours > 0 ? formatHM(day.hours) : '—'}
                               {day.isLate && <span style={{ fontSize: 10, fontWeight: 700, color: '#f59e0b', marginLeft: 6 }}>LATE</span>}
-                              {day.label && <span style={{ fontSize: 11, fontWeight: 700, color: day.type === 'holiday' ? '#dc2626' : '#2563eb', marginLeft: 6 }}>{day.label} · {day.mult}x</span>}
-                            </div>
-                          ) : (
-                            <span style={{ fontSize: 13, color: '#ccc' }}>No record</span>
-                          )}
-                        </div>
-                      </div>
-                      {((day.hours > 0 && !day.leave) || day.leaveHours > 0) && <div style={{ fontWeight: 700, color: PRIMARY, fontSize: 14 }}>R{day.pay.toFixed(2)}</div>}
-                    </div>
-                  ))}
+                            </td>
+                            <td style={{ padding: '8px 12px' }}>
+                              {day.leave ? (
+                                <span style={{ color: '#c2410c', fontWeight: 600 }}>🌴 {day.leave.leave_type}{day.leave.status !== 'approved' ? ` (${day.leave.status})` : ''}</span>
+                              ) : day.label ? (
+                                <span style={{ color: day.type === 'holiday' ? '#dc2626' : '#2563eb', fontWeight: 700 }}>{day.label} · {day.mult}x</span>
+                              ) : (
+                                <span style={{ color: '#ccc' }}>—</span>
+                              )}
+                            </td>
+                            <td style={{ padding: '8px 12px', textAlign: 'right' as const, fontWeight: 700, color: PRIMARY }}>{day.pay > 0 ? `R${day.pay.toFixed(2)}` : '—'}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
               </div>
             </div>
@@ -522,7 +600,7 @@ export default function AttendancePage() {
                               <div style={{ background: '#f0f7f4', borderRadius: 10, padding: '8px 12px' }}><div style={{ fontSize: 10, color: '#888', fontWeight: 600 }}>IN</div><div style={{ fontWeight: 700, color: PRIMARY }}>{record.clock_in ? new Date(record.clock_in).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : '—'}</div></div>
                               <div style={{ background: '#f8faf8', borderRadius: 10, padding: '8px 12px' }}><div style={{ fontSize: 10, color: '#888', fontWeight: 600 }}>OUT</div><div style={{ fontWeight: 700, color: record.clock_out ? '#333' : '#ccc' }}>{record.clock_out ? new Date(record.clock_out).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : '—'}</div></div>
                             </div>
-                            {record.hours_worked && <div style={{ textAlign: 'center' as const, fontSize: 13, color: '#888', marginBottom: 12 }}>⏱ <strong style={{ color: PRIMARY }}>{record.hours_worked.toFixed(1)}h</strong></div>}
+                            {record.hours_worked ? <div style={{ textAlign: 'center' as const, fontSize: 13, color: '#888', marginBottom: 12 }}>⏱ <strong style={{ color: PRIMARY }}>{formatHM(record.hours_worked)}</strong></div> : null}
                             {!record.clock_out && <button onClick={() => clockOut(record.id, record.clock_in!)} disabled={isSaving} style={{ width: '100%', padding: '10px', background: DARK, color: '#fff', border: 'none', borderRadius: 10, fontWeight: 700, cursor: 'pointer' }}>{isSaving ? 'Saving...' : '🔴 Clock Out'}</button>}
                           </div>
                         ) : (
@@ -550,7 +628,7 @@ export default function AttendancePage() {
                     <div key={date} style={{ background: '#fff', borderRadius: 16, border: '1px solid #eef2ee', overflow: 'hidden' }}>
                       <div style={{ padding: '12px 20px', background: date === today ? '#f0f7f4' : '#f8faf8', display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #eef2ee' }}>
                         <span style={{ fontWeight: 700, color: date === today ? PRIMARY : '#333', fontSize: 14 }}>{date === today ? 'Today' : new Date(date).toLocaleDateString('en-ZA', { weekday: 'long', day: 'numeric', month: 'long' })}</span>
-                        <span style={{ fontSize: 12, color: '#888' }}>{records.length} staff · {records.reduce((s, r) => s + (r.hours_worked || 0), 0).toFixed(1)}h</span>
+                        <span style={{ fontSize: 12, color: '#888' }}>{records.length} staff · {formatHM(records.reduce((s, r) => s + (r.hours_worked || 0), 0))}</span>
                       </div>
                       {records.map((r, i) => {
                         const rc = ROLE_COLORS[getEmpRole(r.employee_id)] || { bg: '#f5f5f5', color: '#424242' };
@@ -558,7 +636,7 @@ export default function AttendancePage() {
                           <div key={r.id} style={{ padding: '12px 20px', display: 'flex', alignItems: 'center', gap: 14, borderBottom: i < records.length - 1 ? '1px solid #f5f5f5' : 'none' }}>
                             <div style={{ width: 36, height: 36, borderRadius: '50%', background: rc.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 800, color: rc.color, flexShrink: 0 }}>{initials(getEmpName(r.employee_id))}</div>
                             <div style={{ flex: 1 }}><div style={{ fontWeight: 600, color: '#333', fontSize: 14 }}>{getEmpName(r.employee_id)}</div><div style={{ fontSize: 12, color: '#888' }}>{r.clock_in ? new Date(r.clock_in).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : '—'} → {r.clock_out ? new Date(r.clock_out).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : 'On shift'}</div></div>
-                            <div style={{ textAlign: 'right' as const }}>{r.hours_worked && <div style={{ fontWeight: 700, color: PRIMARY }}>{r.hours_worked.toFixed(1)}h</div>}{r.is_late && <div style={{ fontSize: 10, fontWeight: 700, color: '#f59e0b' }}>LATE</div>}</div>
+                            <div style={{ textAlign: 'right' as const }}>{r.hours_worked ? <div style={{ fontWeight: 700, color: PRIMARY }}>{formatHM(r.hours_worked)}</div> : null}{r.is_late && <div style={{ fontSize: 10, fontWeight: 700, color: '#f59e0b' }}>LATE</div>}</div>
                           </div>
                         );
                       })}
