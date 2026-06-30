@@ -120,6 +120,13 @@ export default function FinancesPage() {
 
   const CAT_MAP = Object.fromEntries(categories.map(c => [c.key, c]))
   const defaultCatKey = categories.find(c => /stock|cogs/i.test(c.name))?.key || categories[0]?.key || 'cost_of_sales'
+  // Stock/COGS is used daily (deliveries, packaging, cleaning) so it should always lead the dropdown,
+  // ahead of monthly items like Rent.
+  const sortedCategories = [...categories].sort((a, b) => {
+    const aStock = /stock|cogs/i.test(a.name) ? 0 : 1
+    const bStock = /stock|cogs/i.test(b.name) ? 0 : 1
+    return aStock - bStock
+  })
 
   async function saveQuickCategory() {
     if (!quickCatForm.name) return
@@ -298,7 +305,7 @@ export default function FinancesPage() {
           const reader = new FileReader()
           reader.onload = () => resolve(reader.result as ArrayBuffer)
           reader.onerror = () => reject(new Error(
-            'Could not read this file from disk. If it\'s synced via OneDrive, right-click it and select "Always keep on this device", then try again.'
+            'Could not read this file from disk. Try selecting it again, or pick a different copy of the file.'
           ))
           reader.readAsArrayBuffer(file)
         })
@@ -342,7 +349,7 @@ export default function FinancesPage() {
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Could not read invoice. Please try again.'
       const friendly = /could not be found|NotFoundError|NotReadableError/i.test(msg)
-        ? 'Could not read this file from disk — if it\'s synced via OneDrive/Dropbox, make sure it\'s fully downloaded (not just a cloud placeholder), then try again.'
+        ? 'Could not read this file from disk — this can happen if the file was just created/moved or is locked by another app. Wait a moment and try selecting it again.'
         : msg
       setScanError(friendly)
     }
@@ -685,7 +692,7 @@ export default function FinancesPage() {
                         <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 2fr 0.7fr 1fr 1fr auto', gap: 8, alignItems: 'center' }}>
                           <div>
                             <select value={line.category_key} onChange={e => updateLine(i, 'category_key', e.target.value)} style={{ ...inp, padding: '8px 10px' }}>
-                              {categories.map(c => <option key={c.key} value={c.key}>{c.name}</option>)}
+                              {sortedCategories.map(c => <option key={c.key} value={c.key}>{c.name}</option>)}
                             </select>
                             {i === 0 && <button type="button" onClick={() => setShowQuickCat(true)} style={{ fontSize: '11px', color: '#1a5c38', background: 'none', border: 'none', cursor: 'pointer', padding: '2px 0', fontWeight: '600' }}>+ New Category</button>}
                           </div>
@@ -826,7 +833,7 @@ export default function FinancesPage() {
                     <div>
                       <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Category *</label>
                       <select value={qForm.category_key} onChange={e => setQForm(f => ({ ...f, category_key: e.target.value }))} style={inp}>
-                        {categories.map(c => <option key={c.key} value={c.key}>{c.name}</option>)}
+                        {sortedCategories.map(c => <option key={c.key} value={c.key}>{c.name}</option>)}
                       </select>
                     </div>
                     <div>
