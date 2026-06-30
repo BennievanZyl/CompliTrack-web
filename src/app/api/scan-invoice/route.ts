@@ -16,6 +16,11 @@ export async function POST(req: NextRequest) {
     const today = new Date().toISOString().split('T')[0]
     const prompt = 'Extract ALL line items from this invoice. Return ONLY raw JSON (no markdown): { "supplier": string, "invoice_number": string, "invoice_date": "YYYY-MM-DD", "due_date": "YYYY-MM-DD or null", "notes": string, "lines": [{ "description": string, "qty": number, "uom": string, "unit_price": number, "amount": number, "vat_amount": number, "category_key": string }] }. For each line: description=item name only (not qty), qty=quantity ordered, uom=unit of measure (KG/CASE/BKT/Unit etc), unit_price=price per unit excl VAT, amount=Total Incl VAT column value, vat_amount=VAT column value. category_key: use cost_of_sales for food/meat/frozen/dairy items, packaging for packaging, cleaning for cleaning products, other for everything else. Extract EVERY line item visible - do not skip any. If date not found use ' + today + '. Return raw JSON only.'
 
+    const isPdf = (mediaType || '').includes('pdf')
+    const contentBlock = isPdf
+      ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64 } }
+      : { type: 'image', source: { type: 'base64', media_type: mediaType || 'image/jpeg', data: base64 } }
+
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -29,7 +34,7 @@ export async function POST(req: NextRequest) {
         messages: [{
           role: 'user',
           content: [
-            { type: 'image', source: { type: 'base64', media_type: mediaType || 'image/jpeg', data: base64 } },
+            contentBlock,
             { type: 'text', text: prompt }
           ]
         }]
@@ -47,9 +52,16 @@ export async function POST(req: NextRequest) {
     const jsonStart = text.indexOf('{')
     const jsonEnd = text.lastIndexOf('}')
     if (jsonStart === -1 || jsonEnd === -1) {
-      return NextResponse.json({ error: 'Could not extract data from invoice' }, { status: 500 })
+      console.error('No JSON found in model output:', text.slice(0, 300))
+      return NextResponse.json({ error: 'Could not extract data from invoice (no JSON in response)' }, { status: 500 })
     }
-    const data = JSON.parse(text.substring(jsonStart, jsonEnd + 1))
+    let data
+    try {
+      data = JSON.parse(text.substring(jsonStart, jsonEnd + 1))
+    } catch (parseErr) {
+      console.error('JSON parse failed:', parseErr, text.slice(0, 300))
+      return NextResponse.json({ error: 'Could not parse invoice data from AI response' }, { status: 500 })
+    }
     return NextResponse.json(data)
   } catch (e: unknown) {
     console.error('Invoice scan error:', e)
