@@ -30,6 +30,7 @@ type ChecklistTemplate = {
 
 const TABS = [
   { key: 'profile', label: '🏪 Store Profile' },
+  { key: 'account', label: '🔒 Account' },
   { key: 'licences', label: '📋 Licences & Compliance' },
   { key: 'payroll', label: '💰 Payroll Defaults' },
   { key: 'checklist', label: '✅ Checklist Templates' },
@@ -66,9 +67,27 @@ export default function SettingsPage() {
   const [editCat, setEditCat] = useState<ExpenseCategory | null>(null)
   const [catForm, setCatForm] = useState({ name: '', colour: '#10b981' })
 
+  const [pwForm, setPwForm] = useState({ newPassword: '', confirmPassword: '' })
+  const [pwSaving, setPwSaving] = useState(false)
+  const [pwError, setPwError] = useState('')
+  const [pwSuccess, setPwSuccess] = useState(false)
+  const [userEmail, setUserEmail] = useState('')
+
+  async function changePassword() {
+    setPwError(''); setPwSuccess(false)
+    if (pwForm.newPassword.length < 8) { setPwError('Password must be at least 8 characters'); return }
+    if (pwForm.newPassword !== pwForm.confirmPassword) { setPwError('Passwords don\u2019t match'); return }
+    setPwSaving(true)
+    const { error } = await supabase.auth.updateUser({ password: pwForm.newPassword })
+    setPwSaving(false)
+    if (error) { setPwError(error.message); return }
+    setPwSuccess(true)
+    setPwForm({ newPassword: '', confirmPassword: '' })
+  }
+
   const SECTIONS = [...new Set(templates.map(t => t.section)), 'Opening', 'During Service', 'Closing', 'Cleaning', 'Safety'].filter((v, i, a) => a.indexOf(v) === i)
 
-  useEffect(() => { loadAll() }, [])
+  useEffect(() => { loadAll(); supabase.auth.getUser().then(({ data }) => setUserEmail(data.user?.email || '')) }, [])
 
   async function loadAll() {
     setLoading(true)
@@ -275,6 +294,31 @@ export default function SettingsPage() {
           )}
 
           {/* ── LICENCES ── */}
+          {tab === 'account' && (
+            <div style={{ background: 'white', borderRadius: '20px', border: '1.5px solid #eef2ee', padding: '32px', boxShadow: '0 2px 8px rgba(0,0,0,0.04)', maxWidth: 480 }}>
+              <div style={SECTION}>Account</div>
+              <div style={{ marginBottom: 20 }}>
+                <label style={LABEL}>Email</label>
+                <div style={{ fontSize: 14, color: '#374151' }}>{userEmail || '—'}</div>
+              </div>
+
+              <div style={SECTION}>Change Password</div>
+              {pwError && <div style={{ background: '#fdecea', border: '1px solid #f5c6c6', borderRadius: 10, padding: '10px 14px', fontSize: 13, color: '#c62828', marginBottom: 16 }}>{pwError}</div>}
+              {pwSuccess && <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, padding: '10px 14px', fontSize: 13, color: '#166534', marginBottom: 16 }}>Password updated successfully.</div>}
+              <div style={{ marginBottom: 16 }}>
+                <label style={LABEL}>New Password</label>
+                <input type="password" value={pwForm.newPassword} onChange={e => setPwForm(f => ({ ...f, newPassword: e.target.value }))} placeholder="At least 8 characters" style={INPUT} />
+              </div>
+              <div style={{ marginBottom: 20 }}>
+                <label style={LABEL}>Confirm New Password</label>
+                <input type="password" value={pwForm.confirmPassword} onChange={e => setPwForm(f => ({ ...f, confirmPassword: e.target.value }))} onKeyDown={e => e.key === 'Enter' && changePassword()} placeholder="••••••••" style={INPUT} />
+              </div>
+              <button onClick={changePassword} disabled={pwSaving} style={{ padding: '12px 24px', background: pwSaving ? '#ccc' : '#1a5c38', color: '#fff', border: 'none', borderRadius: 10, fontWeight: 700, cursor: pwSaving ? 'not-allowed' : 'pointer', fontSize: 14 }}>
+                {pwSaving ? 'Updating…' : 'Update Password'}
+              </button>
+            </div>
+          )}
+
           {tab === 'licences' && (
             <div style={{ background: 'white', borderRadius: '20px', border: '1.5px solid #eef2ee', padding: '32px', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
