@@ -94,7 +94,7 @@ export default function FinancesPage() {
   const [showGRV, setShowGRV] = useState(false)
   const [grvInvoice, setGrvInvoice] = useState<Invoice | null>(null)
   const [grvItems, setGrvItems] = useState<{id:string;description:string;unit:string;supplier:string|null}[]>([])
-  const [grvLines, setGrvLines] = useState<{stock_item_id:string;description:string;unit:string;qty_received:string;unit_cost:string}[]>([])
+  const [grvLines, setGrvLines] = useState<{stock_item_id:string;description:string;unit:string;qty_received:string;unit_cost:string;units_per_case:string;case_qty:string;case_price:string}[]>([])
   const [savingGRV, setSavingGRV] = useState(false)
   const [scanning, setScanning] = useState(false)
   const [scanError, setScanError] = useState('')
@@ -247,9 +247,23 @@ export default function FinancesPage() {
       unit: i.unit || 'each',
       qty_received: '',
       unit_cost: String(Number(i.cost_price || i.price || 0) || ''),
-      units_per_case: ''
+      units_per_case: '',
+      case_qty: '',
+      case_price: ''
     })))
     setShowGRV(true)
+  }
+
+  // Breaks a case/box delivery down into the stock-keeping unit (e.g. 1 case of 10kg avo -> 10kg @ R/kg).
+  // Only overwrites qty_received/unit_cost when both case_qty and units_per_case are usable.
+  function recalcGrvCase(line: {qty_received:string;unit_cost:string;units_per_case:string;case_qty:string;case_price:string}) {
+    const perCase = parseFloat(line.units_per_case) || 0
+    const cases = parseFloat(line.case_qty) || 0
+    const casePrice = parseFloat(line.case_price) || 0
+    const updated = { ...line }
+    if (perCase > 0 && cases > 0) updated.qty_received = String(Number((cases * perCase).toFixed(3)))
+    if (perCase > 0 && casePrice > 0) updated.unit_cost = (casePrice / perCase).toFixed(4)
+    return updated
   }
 
   async function saveGRV() {
@@ -1004,34 +1018,44 @@ export default function FinancesPage() {
                 </div>
               ) : (
                 <>
-                  <div style={{ display: 'grid', gridTemplateColumns: '2fr 80px 80px 100px 90px', gap: 8, marginBottom: 8, fontSize: 12, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase' as const }}>
-                    <div>Item</div><div style={{textAlign:'center'}}>Qty</div><div>Unit Cost</div><div>÷ Per Case</div><div></div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1.7fr 65px 65px 75px 70px 80px 90px', gap: 6, marginBottom: 4, fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase' as const }}>
+                    <div>Item</div><div style={{textAlign:'center'}}>Cases</div><div style={{textAlign:'center'}}>Kg/Case</div><div>Case Price</div><div style={{textAlign:'center'}}>→ Qty</div><div>→ R/unit</div><div></div>
                   </div>
-                  <div style={{ maxHeight: 400, overflowY: 'auto' }}>
+                  <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 8 }}>For case/box items: fill in Cases, Kg per Case, and Case Price — Qty and R/unit will work out automatically. For simple items, just type Qty and R/unit directly.</div>
+                  <div style={{ maxHeight: 420, overflowY: 'auto' }}>
                     {grvLines.map((line, i) => (
                        <div key={line.stock_item_id} style={{ borderTop: '1px solid #f3f4f6', padding: '10px 0' }}>
-                         <div style={{ display: 'grid', gridTemplateColumns: '2fr 80px 80px 100px 90px', gap: 8, alignItems: 'center' }}>
+                         <div style={{ display: 'grid', gridTemplateColumns: '1.7fr 65px 65px 75px 70px 80px 90px', gap: 6, alignItems: 'center' }}>
                            <div>
                              <div style={{ fontWeight: 600, fontSize: 14 }}>{line.description}</div>
                              <div style={{ fontSize: 12, color: '#6b7280' }}>{line.unit}</div>
                            </div>
+                           <input type="number" step="1" min="0" placeholder="—"
+                             value={line.case_qty}
+                             onChange={e => setGrvLines(ls => ls.map((l,idx) => idx===i ? recalcGrvCase({ ...l, case_qty: e.target.value }) : l))}
+                             title="Number of cases/boxes received"
+                             style={{ width: '100%', padding: '6px 6px', border: '1.5px solid #fde68a', borderRadius: 8, fontSize: 13, outline: 'none', background: '#fefce8', textAlign: 'center' as const }} />
+                           <input type="number" step="0.1" min="0" placeholder="—"
+                             value={line.units_per_case}
+                             onChange={e => setGrvLines(ls => ls.map((l,idx) => idx===i ? recalcGrvCase({ ...l, units_per_case: e.target.value }) : l))}
+                             title="Kg (or units) per case/box"
+                             style={{ width: '100%', padding: '6px 6px', border: '1.5px solid #fde68a', borderRadius: 8, fontSize: 13, outline: 'none', background: '#fefce8', textAlign: 'center' as const }} />
+                           <input type="number" step="0.01" min="0" placeholder="R / case"
+                             value={line.case_price}
+                             onChange={e => setGrvLines(ls => ls.map((l,idx) => idx===i ? recalcGrvCase({ ...l, case_price: e.target.value }) : l))}
+                             title="Total price paid for one case/box"
+                             style={{ width: '100%', padding: '6px 6px', border: '1.5px solid #fde68a', borderRadius: 8, fontSize: 13, outline: 'none', background: '#fefce8' }} />
                            <input type="number" step="0.1" min="0" placeholder="0"
                              value={line.qty_received}
                              onChange={e => setGrvLines(ls => ls.map((l,idx) => idx===i ? {...l, qty_received: e.target.value} : l))}
-                             style={{ padding: '6px 8px', border: `1.5px solid ${parseFloat(line.qty_received) > 0 ? '#16a34a' : '#e5e7eb'}`, borderRadius: 8, fontSize: 15, textAlign: 'center' as const, outline: 'none', background: parseFloat(line.qty_received) > 0 ? '#f0fdf4' : '#fff' }} />
+                             title="Quantity that actually goes onto your stock sheet (auto-filled from case breakdown, or type directly)"
+                             style={{ padding: '6px 6px', border: `1.5px solid ${parseFloat(line.qty_received) > 0 ? '#16a34a' : '#e5e7eb'}`, borderRadius: 8, fontSize: 14, textAlign: 'center' as const, outline: 'none', background: parseFloat(line.qty_received) > 0 ? '#f0fdf4' : '#fff' }} />
                            <input type="number" step="0.01" min="0" placeholder="unit cost"
                              value={line.unit_cost}
                              onChange={e => setGrvLines(ls => ls.map((l,idx) => idx===i ? {...l, unit_cost: e.target.value} : l))}
-                             style={{ padding: '6px 8px', border: '1.5px solid #e5e7eb', borderRadius: 8, fontSize: 14, outline: 'none' }} />
-                           <div>
-                             <input type="number" step="0.1" min="0" placeholder="units/case"
-                               value={(line as {units_per_case?: string}).units_per_case || ''}
-                               onChange={e => { const u=parseFloat(e.target.value)||0; setGrvLines(ls => ls.map((l,idx) => idx===i ? {...l, units_per_case: e.target.value, unit_cost: u > 0 && l.unit_cost ? String((parseFloat(l.unit_cost)/u).toFixed(4)) : l.unit_cost} : l)) }}
-                               title="Units per case/box - divides unit cost to get per-unit price"
-                               style={{ width: '100%', padding: '6px 8px', border: '1.5px solid #fde68a', borderRadius: 8, fontSize: 13, outline: 'none', background: '#fefce8' }} />
-                             <div style={{ fontSize: '10px', color: '#92400e', marginTop: 2 }}>÷ per case</div>
-                           </div>
-                           {(line as {units_per_case?: string}).units_per_case && parseFloat(line.unit_cost) > 0 ? (
+                             title="Cost per unit on your stock sheet (auto-filled from case price ÷ kg-per-case, or type directly)"
+                             style={{ padding: '6px 6px', border: '1.5px solid #e5e7eb', borderRadius: 8, fontSize: 13, outline: 'none' }} />
+                           {parseFloat(line.unit_cost) > 0 ? (
                              <button onClick={async () => {
                                const { createClient } = await import('@supabase/supabase-js')
                                const sb = createClient('https://fdixocuxhpafxkfytvxu.supabase.co', process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '')
@@ -1039,6 +1063,7 @@ export default function FinancesPage() {
                                alert('Stock price updated to R' + parseFloat(line.unit_cost).toFixed(4) + ' per ' + line.unit)
                              }} style={{ background: '#1a5c38', color: 'white', border: 'none', borderRadius: 8, padding: '6px 8px', fontSize: 11, cursor: 'pointer', fontWeight: 700 }}>
                                Update price
+
                              </button>
                            ) : <div />}
                          </div>
