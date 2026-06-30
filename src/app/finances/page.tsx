@@ -45,6 +45,11 @@ function thisMonth() {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
 }
 function today() { return new Date().toISOString().split('T')[0] }
+function addDays(dateStr: string, days: number) {
+  const d = new Date(dateStr + 'T00:00:00')
+  d.setDate(d.getDate() + days)
+  return d.toISOString().split('T')[0]
+}
 
 // Suggest stock items whose name/description relates to the scanned invoice description.
 // Handles both directions: "Avocado Pulp" -> "Avo" (item is a prefix/abbreviation of a word)
@@ -85,7 +90,7 @@ export default function FinancesPage() {
   const [month, setMonth] = useState(thisMonth())
 
   const [categories, setCategories] = useState<{id:string;name:string;key:string;colour:string}[]>([])
-  const [suppliers, setSuppliers] = useState<{id:string;name:string}[]>([])
+  const [suppliers, setSuppliers] = useState<{id:string;name:string;payment_terms_days:number|null}[]>([])
   const [cashUps, setCashUps] = useState<CashUp[]>([])
   const [invoices, setInvoices] = useState<Invoice[]>([])
   const [quickExp, setQuickExp] = useState<QuickExpense[]>([])
@@ -160,7 +165,7 @@ export default function FinancesPage() {
         .gte('invoice_date', monthStart).lte('invoice_date', monthEnd)
         .order('invoice_date', { ascending: false }),
       supabase.from('expense_categories').select('id, name, key, colour, sort_order').eq('organisation_id', ORG_ID).eq('is_active', true).order('sort_order'),
-      supabase.from('stock_suppliers').select('id, name').eq('store_id', STORE_ID).eq('is_active', true).order('sort_order'),
+      supabase.from('stock_suppliers').select('id, name, payment_terms_days').eq('store_id', STORE_ID).eq('is_active', true).order('sort_order'),
       supabase.from('expenses')
         .select('*').eq('store_id', STORE_ID)
         .gte('expense_date', monthStart).lte('expense_date', monthEnd)
@@ -361,7 +366,12 @@ export default function FinancesPage() {
       if (data.supplier) setInvForm(f => ({ ...f, supplier: data.supplier }))
       if (data.invoice_number) setInvForm(f => ({ ...f, invoice_number: data.invoice_number }))
       if (data.invoice_date) setInvForm(f => ({ ...f, invoice_date: data.invoice_date }))
-      if (data.due_date) setInvForm(f => ({ ...f, due_date: data.due_date }))
+      if (data.due_date) {
+        setInvForm(f => ({ ...f, due_date: data.due_date }))
+      } else if (data.supplier && data.invoice_date) {
+        const sup = suppliers.find(s => s.name === data.supplier)
+        if (sup) setInvForm(f => ({ ...f, due_date: addDays(data.invoice_date, sup.payment_terms_days ?? 7) }))
+      }
       if (data.notes) setInvForm(f => ({ ...f, notes: data.notes }))
       if (data.lines && data.lines.length > 0) {
         setInvLines(data.lines.map((l: {description?: string; qty?: number; uom?: string; unit_price?: number; amount?: number; vat_amount?: number}) => ({
@@ -681,7 +691,11 @@ export default function FinancesPage() {
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 20 }}>
                     <div>
                       <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Supplier *</label>
-                      <select onChange={e => setInvForm(f => ({ ...f, supplier: e.target.value === '_other' ? '' : e.target.value }))} value={suppliers.some(s => s.name === invForm.supplier) ? invForm.supplier : (invForm.supplier ? '_other' : '')} style={inp}>
+                      <select onChange={e => {
+                        const name = e.target.value === '_other' ? '' : e.target.value
+                        const sup = suppliers.find(s => s.name === name)
+                        setInvForm(f => ({ ...f, supplier: name, due_date: sup && f.invoice_date ? addDays(f.invoice_date, sup.payment_terms_days ?? 7) : f.due_date }))
+                      }} value={suppliers.some(s => s.name === invForm.supplier) ? invForm.supplier : (invForm.supplier ? '_other' : '')} style={inp}>
                         <option value="">— Select Supplier —</option>
                         {suppliers.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
                         <option value="_other">+ Other (type name below)</option>
@@ -702,10 +716,14 @@ export default function FinancesPage() {
                     </div>
                     <div>
                       <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Invoice Date *</label>
-                      <input type="date" value={invForm.invoice_date} onChange={e => setInvForm(f => ({ ...f, invoice_date: e.target.value }))} style={inp} />
+                      <input type="date" value={invForm.invoice_date} onChange={e => {
+                        const date = e.target.value
+                        const sup = suppliers.find(s => s.name === invForm.supplier)
+                        setInvForm(f => ({ ...f, invoice_date: date, due_date: sup && date ? addDays(date, sup.payment_terms_days ?? 7) : f.due_date }))
+                      }} style={inp} />
                     </div>
                     <div>
-                      <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Due Date</label>
+                      <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Due Date {suppliers.find(s => s.name === invForm.supplier) && <span style={{ fontWeight: 400, color: '#9ca3af' }}>(auto)</span>}</label>
                       <input type="date" value={invForm.due_date} onChange={e => setInvForm(f => ({ ...f, due_date: e.target.value }))} style={inp} />
                     </div>
                     <div>
