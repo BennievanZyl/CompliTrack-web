@@ -102,10 +102,13 @@ export default function FinancesPage() {
   const [fcLoading, setFcLoading] = useState(false)
   const [fcLoaded, setFcLoaded] = useState(false)
   const [fcData, setFcData] = useState<{
-    openingValue: number; openingDate: string | null; openingMissing: boolean
-    closingValue: number; closingDate: string | null; closingMissing: boolean
+    openingValue: number; openingDate: string | null; openingMissing: boolean; openingManual: boolean; openingReason: string | null
+    closingValue: number; closingDate: string | null; closingMissing: boolean; closingManual: boolean; closingReason: string | null
     purchases: number; wastage: number; sales: number
   } | null>(null)
+  const [fcOverrideField, setFcOverrideField] = useState<'opening' | 'closing' | null>(null)
+  const [fcOverrideForm, setFcOverrideForm] = useState({ value: '', reason: '' })
+  const [fcOverrideCountThisQuarter, setFcOverrideCountThisQuarter] = useState(0)
 
   const [categories, setCategories] = useState<{id:string;name:string;key:string;colour:string}[]>([])
   const [suppliers, setSuppliers] = useState<{id:string;name:string;payment_terms_days:number|null}[]>([])
@@ -225,28 +228,39 @@ export default function FinancesPage() {
 
     const closing = (counts || []).find(c => c.count_date <= periodEnd) || null
     const opening = (counts || []).find(c => c.count_date < periodStart) || null
-    const openingMissing = !opening
-    const closingMissing = !closing
 
     async function countValue(countId: string | undefined) {
       if (!countId) return 0
       const { data: lines } = await supabase.from('stock_count_lines').select('actual_qty, unit_cost').eq('stock_count_id', countId)
       return (lines || []).reduce((s, l) => s + (Number(l.actual_qty) || 0) * (Number(l.unit_cost) || 0), 0)
     }
-    const [openingValue, closingValue] = await Promise.all([countValue(opening?.id), countValue(closing?.id)])
 
-    const [purchRes, wasteRes, salesRes] = await Promise.all([
+    // A manual override for this exact period takes precedence over whatever count we'd otherwise use.
+    const { data: overrides } = await supabase.from('food_cost_overrides').select('*')
+      .eq('store_id', STORE_ID).eq('period_start', periodStart).eq('period_end', periodEnd)
+    const openingOverride = (overrides || []).find(o => o.field === 'opening')
+    const closingOverride = (overrides || []).find(o => o.field === 'closing')
+
+    const [countedOpeningValue, countedClosingValue] = await Promise.all([countValue(opening?.id), countValue(closing?.id)])
+    const openingValue = openingOverride ? Number(openingOverride.value) : countedOpeningValue
+    const closingValue = closingOverride ? Number(closingOverride.value) : countedClosingValue
+    const openingMissing = !opening && !openingOverride
+    const closingMissing = !closing && !closingOverride
+
+    const [purchRes, wasteRes, salesRes, recentOverridesRes] = await Promise.all([
       supabase.from('stock_purchases').select('total_cost').eq('store_id', STORE_ID).gte('purchase_date', periodStart).lte('purchase_date', periodEnd),
       supabase.from('stock_wastage').select('total_cost').eq('store_id', STORE_ID).gte('wastage_date', periodStart).lte('wastage_date', periodEnd),
       supabase.from('cash_ups').select('cash_up_total').eq('store_id', STORE_ID).not('status', 'eq', 'draft').gte('cash_up_date', periodStart).lte('cash_up_date', periodEnd),
+      supabase.from('food_cost_overrides').select('id', { count: 'exact', head: true }).eq('store_id', STORE_ID).gte('created_at', new Date(Date.now() - 90 * 86400000).toISOString()),
     ])
     const purchases = (purchRes.data || []).reduce((s, p) => s + (Number(p.total_cost) || 0), 0)
     const wastage = (wasteRes.data || []).reduce((s, w) => s + (Number(w.total_cost) || 0), 0)
     const sales = (salesRes.data || []).reduce((s, c) => s + (Number(c.cash_up_total) || 0), 0)
+    setFcOverrideCountThisQuarter(recentOverridesRes.count || 0)
 
     setFcData({
-      openingValue, openingDate: opening?.count_date || null, openingMissing,
-      closingValue, closingDate: closing?.count_date || null, closingMissing,
+      openingValue, openingDate: opening?.count_date || null, openingMissing, openingManual: !!openingOverride, openingReason: openingOverride?.reason || null,
+      closingValue, closingDate: closing?.count_date || null, closingMissing, closingManual: !!closingOverride, closingReason: closingOverride?.reason || null,
       purchases, wastage, sales,
     })
     setFcLoading(false)
@@ -254,6 +268,25 @@ export default function FinancesPage() {
   }
 
   useEffect(() => { if (tab === 4) loadFoodCost() }, [tab, fcMode, fcWeekStart, month])
+
+  async function saveFoodCostOverride() {
+    if (!fcOverrideField || !fcOverrideForm.value) return
+    const [periodStart, periodEnd] = fcPeriodRange()
+    await supabase.from('food_cost_overrides').upsert({
+      store_id: STORE_ID, period_start: periodStart, period_end: periodEnd,
+      field: fcOverrideField, value: parseFloat(fcOverrideForm.value) || 0, reason: fcOverrideForm.reason || null,
+    }, { onConflict: 'store_id,period_start,period_end,field' })
+    setFcOverrideField(null)
+    setFcOverrideForm({ value: '', reason: '' })
+    await loadFoodCost()
+  }
+
+  async function clearFoodCostOverride(field: 'opening' | 'closing') {
+    const [periodStart, periodEnd] = fcPeriodRange()
+    await supabase.from('food_cost_overrides').delete()
+      .eq('store_id', STORE_ID).eq('period_start', periodStart).eq('period_end', periodEnd).eq('field', field)
+    await loadFoodCost()
+  }
 
 
   async function loadHistory() {
@@ -1130,23 +1163,60 @@ export default function FinancesPage() {
                   <div style={{ textAlign: 'center', padding: 60, color: '#6b7280' }}>Calculating…</div>
                 ) : !fcData ? null : (
                   <>
+                    {fcOverrideCountThisQuarter >= 3 && (
+                      <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 10, padding: '12px 16px', marginBottom: 16, fontSize: 13, color: '#991b1b', display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ fontSize: 18 }}>🚩</span>
+                        <span><b>Data quality flag:</b> this store has used {fcOverrideCountThisQuarter} manual stock value overrides in the last 90 days. Food Cost % here is being driven by estimates, not physical counts — worth flagging if reviewed from head office.</span>
+                      </div>
+                    )}
                     {(fcData.openingMissing || fcData.closingMissing) && (
                       <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 10, padding: '12px 16px', marginBottom: 16, fontSize: 13, color: '#c2410c' }}>
                         ⚠️ {fcData.openingMissing && 'No completed stock count found before this period — opening value is treated as R0, which will distort the result. '}
                         {fcData.closingMissing && 'No completed stock count found for this period — closing value is treated as R0. '}
-                        Run a stock count in Stock Management close to the start and end of each period for an accurate Food Cost %.
+                        Run a stock count in Stock Management close to the start and end of each period for an accurate Food Cost %, or set a manual opening/closing value below.
                       </div>
                     )}
 
                     <div style={{ display: 'grid', gridTemplateColumns: '1.3fr 1fr', gap: 20 }}>
                       <div style={card}>
                         <div style={{ fontSize: 13, fontWeight: 700, color: '#374151', marginBottom: 4 }}>Cost of Sales Breakdown</div>
-                        <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 8 }}>
-                          Opening {fcData.openingDate ? `(${fcData.openingDate} count)` : '(no count found)'} · Closing {fcData.closingDate ? `(${fcData.closingDate} count)` : '(no count found)'}
+
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid #f3f4f6' }}>
+                          <div>
+                            <div style={{ fontSize: 14, color: '#6b7280' }}>Opening Stock Value</div>
+                            <div style={{ fontSize: 11, color: fcData.openingManual ? '#c2410c' : '#9ca3af', fontWeight: fcData.openingManual ? 700 : 400 }}>
+                              {fcData.openingManual ? `⚠️ Manual entry${fcData.openingReason ? ` — ${fcData.openingReason}` : ''}` : fcData.openingDate ? `From count on ${fcData.openingDate}` : 'No count found'}
+                            </div>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <span style={{ fontWeight: 700 }}>{fmt(fcData.openingValue)}</span>
+                            {fcData.openingManual ? (
+                              <button onClick={() => clearFoodCostOverride('opening')} style={smBtn('#fef2f2', '#dc2626')}>Clear</button>
+                            ) : (
+                              <button onClick={() => { setFcOverrideField('opening'); setFcOverrideForm({ value: String(fcData.openingValue || ''), reason: '' }) }} style={smBtn('#f3f4f6', '#374151')}>Override</button>
+                            )}
+                          </div>
                         </div>
-                        {row('Opening Stock Value', fcData.openingValue, '')}
+
                         {row('Purchases (Stock module)', fcData.purchases, '+')}
-                        {row('Closing Stock Value', fcData.closingValue, '-')}
+
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid #f3f4f6' }}>
+                          <div>
+                            <div style={{ fontSize: 14, color: '#6b7280' }}><span style={{ display: 'inline-block', width: 16, fontWeight: 700, color: '#9ca3af' }}>-</span>Closing Stock Value</div>
+                            <div style={{ fontSize: 11, color: fcData.closingManual ? '#c2410c' : '#9ca3af', fontWeight: fcData.closingManual ? 700 : 400 }}>
+                              {fcData.closingManual ? `⚠️ Manual entry${fcData.closingReason ? ` — ${fcData.closingReason}` : ''}` : fcData.closingDate ? `From count on ${fcData.closingDate}` : 'No count found'}
+                            </div>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <span style={{ fontWeight: 700 }}>{fmt(fcData.closingValue)}</span>
+                            {fcData.closingManual ? (
+                              <button onClick={() => clearFoodCostOverride('closing')} style={smBtn('#fef2f2', '#dc2626')}>Clear</button>
+                            ) : (
+                              <button onClick={() => { setFcOverrideField('closing'); setFcOverrideForm({ value: String(fcData.closingValue || ''), reason: '' }) }} style={smBtn('#f3f4f6', '#374151')}>Override</button>
+                            )}
+                          </div>
+                        </div>
+
                         {row('Wastage', fcData.wastage, '-')}
                         <div style={{ display: 'flex', justifyContent: 'space-between', padding: '14px 0 0', fontSize: 16, fontWeight: 800 }}>
                           <span>Cost of Sales</span>
@@ -1161,6 +1231,7 @@ export default function FinancesPage() {
                         </div>
                         <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 4 }}>{fmt(costOfSales)} ÷ {fmt(fcData.sales)} sales</div>
                         {fcData.sales === 0 && <div style={{ fontSize: 11, color: '#dc2626', marginTop: 8 }}>No sales recorded for this period</div>}
+                        {(fcData.openingManual || fcData.closingManual) && <div style={{ fontSize: 11, color: '#c2410c', marginTop: 8, fontWeight: 600 }}>⚠️ Based on a manual entry, not a physical count</div>}
                         <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 16, borderTop: '1px solid #f3f4f6', paddingTop: 12 }}>Typical restaurant target: 28–35%</div>
                       </div>
                     </div>
@@ -1170,6 +1241,25 @@ export default function FinancesPage() {
                 <div style={{ marginTop: 20, textAlign: 'center' }}>
                   <button style={btn('#6b7280')} onClick={() => router.push('/stock')}>Go to Stock Management →</button>
                 </div>
+
+                {fcOverrideField && (
+                  <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={() => setFcOverrideField(null)}>
+                    <div style={{ background: '#fff', borderRadius: 16, padding: 24, width: 420, maxWidth: '90vw' }} onClick={e => e.stopPropagation()}>
+                      <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>Manual {fcOverrideField === 'opening' ? 'Opening' : 'Closing'} Stock Value</div>
+                      <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 8, padding: '10px 12px', fontSize: 12, color: '#c2410c', marginBottom: 16 }}>
+                        ⚠️ This overrides the value from your stock counts. It's flagged on screen as a manual entry, and counts toward a data-quality flag if used often. Only use this to bootstrap a new store or correct a known bad count.
+                      </div>
+                      <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Value (R)</label>
+                      <input type="number" step="0.01" value={fcOverrideForm.value} onChange={e => setFcOverrideForm(f => ({ ...f, value: e.target.value }))} style={{ ...inp, marginBottom: 12 }} autoFocus />
+                      <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Reason</label>
+                      <input type="text" placeholder="e.g. New store, no count yet" value={fcOverrideForm.reason} onChange={e => setFcOverrideForm(f => ({ ...f, reason: e.target.value }))} style={{ ...inp, marginBottom: 16 }} />
+                      <div style={{ display: 'flex', gap: 10 }}>
+                        <button style={btn('#6b7280')} onClick={() => setFcOverrideField(null)}>Cancel</button>
+                        <button style={btn()} onClick={saveFoodCostOverride}>Save Override</button>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             )
           })()}
