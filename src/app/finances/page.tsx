@@ -292,6 +292,10 @@ export default function FinancesPage() {
     }))
     const { error } = await supabase.from('stock_purchases').insert(purchases)
     if (error) { alert('Error saving GRV: ' + error.message); setSavingGRV(false); return }
+    // Add received quantities onto each item's running stock balance
+    await Promise.all(linesToSave.map(l =>
+      supabase.rpc('increment_stock_qty', { item_id: l.stock_item_id, amount: parseFloat(l.qty_received) })
+    ))
     // Update invoice status to received
     await supabase.from('invoices').update({ status: 'received' }).eq('id', grvInvoice.id)
     setShowGRV(false)
