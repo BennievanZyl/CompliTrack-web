@@ -7,7 +7,7 @@ import { useRouter } from 'next/navigation'
 const STORE_ID = '05328298-fc27-4c9f-b091-bb7f6598b601'
 
 type StockCategory = { id: string; name: string; color: string; sort_order: number }
-type StockItem = { id: string; category: string | null; name: string; description: string; unit: string; cost_price: number; price: number; par_level: number; is_active: boolean; sort_order: number; supplier: string | null; on_daily_sheet: boolean; is_catch_weight: boolean; kg_price: number; avg_weight_kg: number }
+type StockItem = { id: string; category: string | null; name: string; description: string; unit: string; cost_price: number; price: number; par_level: number; current_qty: number; is_active: boolean; sort_order: number; supplier: string | null; on_daily_sheet: boolean; is_catch_weight: boolean; kg_price: number; avg_weight_kg: number }
 type StockSupplier = { id: string; name: string; contact_name: string | null; phone: string | null; email: string | null; order_day: string | null; notes: string | null; is_active: boolean; sort_order: number }
 
 type StockCount = { id: string; count_type: string; count_date: string; status: string; notes: string | null }
@@ -219,6 +219,9 @@ export default function StockPage() {
     setSaving(true)
     const total = parseFloat(wastageForm.quantity || '0') * parseFloat(wastageForm.unit_cost || '0')
     await supabase.from('stock_wastage').insert({ store_id: STORE_ID, wastage_date: wastageForm.wastage_date, stock_item_id: wastageForm.stock_item_id || null, item_name: wastageForm.item_name || items.find(i => i.id === wastageForm.stock_item_id)?.description || null, quantity: parseFloat(wastageForm.quantity || '0'), unit: wastageForm.unit, unit_cost: parseFloat(wastageForm.unit_cost || '0'), total_cost: total, reason: wastageForm.reason })
+    if (wastageForm.stock_item_id && parseFloat(wastageForm.quantity || '0') > 0) {
+      await supabase.rpc('increment_stock_qty', { item_id: wastageForm.stock_item_id, amount: -parseFloat(wastageForm.quantity) })
+    }
     setWastageForm({ wastage_date: new Date().toISOString().split('T')[0], stock_item_id: '', item_name: '', quantity: '', unit: 'each', unit_cost: '', reason: 'Expired' })
     setShowAddWastage(false); await loadAll(); setSaving(false)
   }
@@ -688,7 +691,7 @@ export default function StockPage() {
                       <span style={{ fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '100px', background: catColors[catKey] + '20', color: catColors[catKey] }}>{catItems.length}</span>
                     </div>
                     <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                      <thead><tr style={{ background: '#fafafa' }}>{['Item', 'Unit', 'Cost Price', 'Par Level', ''].map(h => <th key={h} style={{ padding: '10px 16px', textAlign: 'left', fontSize: '11px', fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{h}</th>)}</tr></thead>
+                      <thead><tr style={{ background: '#fafafa' }}>{['Item', 'Unit', 'On Hand', 'Cost Price', 'Par Level', ''].map(h => <th key={h} style={{ padding: '10px 16px', textAlign: 'left', fontSize: '11px', fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{h}</th>)}</tr></thead>
                       <tbody>
                         {catItems.map(item => (
                           <tr key={item.id} style={{ borderTop: '1px solid #f3f4f6' }}>
@@ -700,6 +703,14 @@ export default function StockPage() {
                               </div>
                             </td>
                             <td style={{ padding: '12px 16px', fontSize: '13px', color: '#6b7280' }}>{item.unit}</td>
+                            <td style={{ padding: '12px 16px', fontSize: '13px' }}>
+                              <span style={{
+                                fontWeight: 700,
+                                color: item.par_level && Number(item.current_qty || 0) < Number(item.par_level) ? '#dc2626' : '#111'
+                              }}>
+                                {Number(item.current_qty || 0)} {item.unit}
+                              </span>
+                            </td>
                             <td style={{ padding: '12px 16px', fontSize: '13px', color: '#374151' }}>{formatCurrency(Number(item.cost_price) || Number(item.price) || 0)}</td>
                             <td style={{ padding: '12px 16px', fontSize: '13px', color: '#374151' }}>
                               {item.is_catch_weight
