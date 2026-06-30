@@ -149,6 +149,7 @@ function DashboardContent() {
     { icon: <span style={{ fontSize: '26px' }}>💰</span>, iconBg: '#eff6ff', title: 'Cash Up', subtitle: 'Daily cash reconciliation', href: '/cashup' },
     { icon: <span style={{ fontSize: '26px' }}>📊</span>, iconBg: '#f5f3ff', title: 'Analytics & Reports', subtitle: 'View reports and compliance analytics', href: '/reports' },
     { icon: <span style={{ fontSize: '26px' }}>📈</span>, iconBg: '#ecfdf5', title: 'Income & Expenses', subtitle: 'Financial tracking and food cost', href: '/finances' },
+    { icon: <span style={{ fontSize: '26px' }}>📋</span>, iconBg: '#fef3c7', title: 'Clipboard', subtitle: 'Unpaid bills and unsubmitted drafts', href: '/clipboard' },
     { icon: <span style={{ fontSize: '26px' }}>🌡️</span>, iconBg: '#fff1f2', title: 'Temperature Logs', subtitle: 'Equipment temperature monitoring', href: '/temperatures' },
     { icon: <span style={{ fontSize: '26px' }}>📦</span>, iconBg: '#faf5ff', title: 'Stock', subtitle: 'Stock counts and orders', href: '/stock' },
     { icon: <span style={{ fontSize: '26px' }}>👥</span>, iconBg: '#f0fdf4', title: 'People', subtitle: 'Staff profiles and attendance', href: '/people' },
