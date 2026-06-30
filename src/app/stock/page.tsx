@@ -14,16 +14,20 @@ type StockCount = { id: string; count_type: string; count_date: string; status: 
 type StockCountLine = { id: string; stock_count_id: string; stock_item_id: string; expected_qty: number; actual_qty: number; unit_cost: number }
 type StockPurchase = { id: string; purchase_date: string; supplier_name: string | null; item_name: string | null; quantity: number; unit: string | null; unit_cost: number; total_cost: number; invoice_number: string | null }
 type StockWastage = { id: string; wastage_date: string; item_name: string | null; quantity: number; unit: string | null; unit_cost: number; total_cost: number; reason: string | null }
+type StockIssue = { id: string; issue_date: string; item_name: string | null; quantity: number; unit: string | null; issued_to: string | null; notes: string | null }
 type StockOrder = { id: string; supplier_name: string; order_date: string; expected_delivery: string | null; status: string; notes: string | null; total_value: number }
 
 const TABS = [
   { key: 'counts', label: '📊 Stock Counts' },
   { key: 'purchases', label: '🛒 Purchases' },
+  { key: 'issues', label: '🍳 Issue Stock' },
   { key: 'wastage', label: '🗑️ Wastage' },
   { key: 'orders', label: '📦 Orders' },
   { key: 'items', label: '⚙️ Stock Items' },
   { key: 'suppliers', label: '🚛 Suppliers' },
 ]
+
+const ISSUE_DESTINATIONS = ['Kitchen', 'Fryer Station', 'Prep', 'Front Counter', 'Bar', 'Catering Order', 'Other']
 
 const COUNT_TYPES = [
   { key: 'daily', label: 'Daily', desc: 'Quick daily check — buy for the day', color: '#16a34a', bg: '#dcfce7' },
@@ -64,6 +68,7 @@ export default function StockPage() {
   const [counts, setCounts] = useState<StockCount[]>([])
   const [purchases, setPurchases] = useState<StockPurchase[]>([])
   const [wastage, setWastage] = useState<StockWastage[]>([])
+  const [issues, setIssues] = useState<StockIssue[]>([])
   const [orders, setOrders] = useState<StockOrder[]>([])
   const [loading, setLoading] = useState(true)
   const [suppliers, setSuppliers] = useState<StockSupplier[]>([])
@@ -83,12 +88,14 @@ export default function StockPage() {
   const [showAddItem, setShowAddItem] = useState(false)
   const [showAddPurchase, setShowAddPurchase] = useState(false)
   const [showAddWastage, setShowAddWastage] = useState(false)
+  const [showAddIssue, setShowAddIssue] = useState(false)
   const [showAddOrder, setShowAddOrder] = useState(false)
   const [showAddCategory, setShowAddCategory] = useState(false)
   const [editItem, setEditItem] = useState<StockItem | null>(null)
   const [itemForm, setItemForm] = useState({ name: '', description: '', category_id: 'goods', unit: 'each', cost_price: '', par_level: '', supplier: 'Other', on_daily_sheet: false, is_catch_weight: false, kg_price: '', avg_weight_kg: '' })
   const [purchaseForm, setPurchaseForm] = useState({ purchase_date: new Date().toISOString().split('T')[0], supplier_name: '', stock_item_id: '', item_name: '', quantity: '', unit: 'each', unit_cost: '', invoice_number: '' })
   const [wastageForm, setWastageForm] = useState({ wastage_date: new Date().toISOString().split('T')[0], stock_item_id: '', item_name: '', quantity: '', unit: 'each', unit_cost: '', reason: 'Expired' })
+  const [issueForm, setIssueForm] = useState({ issue_date: new Date().toISOString().split('T')[0], stock_item_id: '', item_name: '', quantity: '', unit: 'each', issued_to: 'Kitchen', notes: '' })
   const [orderForm, setOrderForm] = useState({ supplier_name: '', order_date: new Date().toISOString().split('T')[0], expected_delivery: '', notes: '' })
   const [categoryForm, setCategoryForm] = useState({ name: '', color: '#1a5c38' })
 
@@ -97,7 +104,7 @@ export default function StockPage() {
   async function loadAll() {
     setLoading(true)
     try {
-    const [catRes, itemRes, countRes, purchRes, wastRes, ordRes, suppRes] = await Promise.all([
+    const [catRes, itemRes, countRes, purchRes, wastRes, ordRes, suppRes, issueRes] = await Promise.all([
       supabase.from('stock_categories').select('*').eq('store_id', STORE_ID).order('sort_order'),
       supabase.from('stock_items').select('*').eq('store_id', STORE_ID).eq('is_active', true).order('sort_order', { nullsFirst: false }),
       supabase.from('stock_counts').select('*').eq('store_id', STORE_ID).order('count_date', { ascending: false }).limit(30),
@@ -105,12 +112,14 @@ export default function StockPage() {
       supabase.from('stock_wastage').select('*').eq('store_id', STORE_ID).order('wastage_date', { ascending: false }).limit(50),
       supabase.from('stock_orders').select('*').eq('store_id', STORE_ID).order('order_date', { ascending: false }).limit(30),
       supabase.from('stock_suppliers').select('*').eq('store_id', STORE_ID).eq('is_active', true).order('sort_order'),
+      supabase.from('stock_issues').select('*').eq('store_id', STORE_ID).order('issue_date', { ascending: false }).limit(50),
     ])
     setCategories(catRes.data || [])
     setItems(itemRes.data || [])
     setCounts(countRes.data || [])
     setPurchases(purchRes.data || [])
     setWastage(wastRes.data || [])
+    setIssues(issueRes.data || [])
     if (suppRes?.error) console.error('suppliers error:', suppRes.error.message)
     setOrders(ordRes.data || [])
     setSuppliers(suppRes?.data || [])
@@ -224,6 +233,19 @@ export default function StockPage() {
     }
     setWastageForm({ wastage_date: new Date().toISOString().split('T')[0], stock_item_id: '', item_name: '', quantity: '', unit: 'each', unit_cost: '', reason: 'Expired' })
     setShowAddWastage(false); await loadAll(); setSaving(false)
+  }
+
+  async function saveIssue() {
+    if (!issueForm.stock_item_id || !(parseFloat(issueForm.quantity || '0') > 0)) { alert('Select an item and quantity'); return }
+    setSaving(true)
+    await supabase.from('stock_issues').insert({
+      store_id: STORE_ID, issue_date: issueForm.issue_date, stock_item_id: issueForm.stock_item_id || null,
+      item_name: issueForm.item_name || items.find(i => i.id === issueForm.stock_item_id)?.description || null,
+      quantity: parseFloat(issueForm.quantity || '0'), unit: issueForm.unit, issued_to: issueForm.issued_to, notes: issueForm.notes || null
+    })
+    await supabase.rpc('increment_stock_qty', { item_id: issueForm.stock_item_id, amount: -parseFloat(issueForm.quantity) })
+    setIssueForm({ issue_date: new Date().toISOString().split('T')[0], stock_item_id: '', item_name: '', quantity: '', unit: 'each', issued_to: 'Kitchen', notes: '' })
+    setShowAddIssue(false); await loadAll(); setSaving(false)
   }
 
   function generateOrderText(supplierName: string, orderDate: string, deliveryDate: string, notes: string) {
@@ -549,6 +571,28 @@ export default function StockPage() {
           )}
 
           {/* WASTAGE */}
+          {tab === 'issues' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div><div style={{ fontSize: '18px', fontWeight: 800, color: '#111' }}>Issue Stock</div><div style={{ fontSize: '13px', color: '#9ca3af' }}>Record stock taken out for use — kitchen, prep, front counter etc.</div></div>
+                <button onClick={() => setShowAddIssue(true)} style={{ padding: '10px 20px', background: '#1a5c38', color: 'white', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: 800, cursor: 'pointer' }}>+ Issue Stock</button>
+              </div>
+              <div style={{ background: 'white', borderRadius: '20px', border: '1.5px solid #eef2ee', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
+                {issues.length === 0 ? <div style={{ padding: '48px', textAlign: 'center', color: '#9ca3af' }}>No stock issued yet</div> : (<>
+                  {(issues || []).map(iss => (
+                    <div key={iss.id} style={{ display: 'flex', alignItems: 'center', gap: '16px', padding: '14px 20px', borderTop: '1px solid #f3f4f6' }}>
+                      <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: '#dcfce7', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px', flexShrink: 0 }}>🍳</div>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 700, fontSize: '14px', color: '#111' }}>{iss.item_name}</div>
+                        <div style={{ fontSize: '12px', color: '#9ca3af' }}>{iss.quantity} {iss.unit} → {iss.issued_to} • {formatDate(iss.issue_date)}{iss.notes ? ' • ' + iss.notes : ''}</div>
+                      </div>
+                    </div>
+                  ))}
+                </>)}
+              </div>
+            </div>
+          )}
+
           {tab === 'wastage' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -889,6 +933,34 @@ export default function StockPage() {
         <div style={{ padding: '16px 28px 24px', display: 'flex', gap: '12px' }}>
           <button onClick={() => setShowAddWastage(false)} style={{ flex: 1, border: '1.5px solid #e5e7eb', color: '#374151', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: 700, cursor: 'pointer', background: 'white' }}>Cancel</button>
           <button onClick={saveWastage} disabled={saving} style={{ flex: 1, background: '#dc2626', color: 'white', border: 'none', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: 800, cursor: 'pointer' }}>Log Wastage</button>
+        </div>
+      </Modal>
+
+      {/* Issue Stock Modal */}
+      <Modal show={showAddIssue} onClose={() => setShowAddIssue(false)} title="Issue Stock">
+        <div style={{ padding: '20px 28px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+          <div><label style={LABEL}>Date</label><input type="date" value={issueForm.issue_date} onChange={e => setIssueForm(f => ({ ...f, issue_date: e.target.value }))} style={INPUT} /></div>
+          <div>
+            <label style={LABEL}>Stock Item</label>
+            <select value={issueForm.stock_item_id} onChange={e => { const item = items.find(i => i.id === e.target.value); setIssueForm(f => ({ ...f, stock_item_id: e.target.value, item_name: (item?.description||item?.name)||'', unit: item?.unit||f.unit })) }} style={INPUT}>
+              <option value="">Select stock item</option>
+              {suppliers.map(sup => { const supItems = items.filter(i => (i.supplier||'Other')===sup.name); return supItems.length ? <optgroup key={sup.id} label={sup.name}>{supItems.map(i => <option key={i.id} value={i.id}>{i.description||i.name}</option>)}</optgroup> : null })}
+            </select>
+            {issueForm.stock_item_id && (() => {
+              const sel = items.find(i => i.id === issueForm.stock_item_id)
+              return sel ? <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px' }}>On hand: <strong>{Number(sel.current_qty || 0)} {sel.unit}</strong></div> : null
+            })()}
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+            <div><label style={LABEL}>Quantity</label><input type="number" step="0.1" value={issueForm.quantity} onChange={e => setIssueForm(f => ({ ...f, quantity: e.target.value }))} placeholder="0" style={INPUT} /></div>
+            <div><label style={LABEL}>Unit</label><select value={issueForm.unit} onChange={e => setIssueForm(f => ({ ...f, unit: e.target.value }))} style={INPUT}>{UNITS.map(u => <option key={u}>{u}</option>)}</select></div>
+          </div>
+          <div><label style={LABEL}>Issued To</label><select value={issueForm.issued_to} onChange={e => setIssueForm(f => ({ ...f, issued_to: e.target.value }))} style={INPUT}>{ISSUE_DESTINATIONS.map(d => <option key={d}>{d}</option>)}</select></div>
+          <div><label style={LABEL}>Notes</label><input value={issueForm.notes} onChange={e => setIssueForm(f => ({ ...f, notes: e.target.value }))} placeholder="Optional" style={INPUT} /></div>
+        </div>
+        <div style={{ padding: '16px 28px 24px', display: 'flex', gap: '12px' }}>
+          <button onClick={() => setShowAddIssue(false)} style={{ flex: 1, border: '1.5px solid #e5e7eb', color: '#374151', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: 700, cursor: 'pointer', background: 'white' }}>Cancel</button>
+          <button onClick={saveIssue} disabled={saving} style={{ flex: 1, background: '#1a5c38', color: 'white', border: 'none', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: 800, cursor: 'pointer' }}>Issue Stock</button>
         </div>
       </Modal>
 
