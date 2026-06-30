@@ -805,7 +805,10 @@ export default function FinancesPage() {
                   <p>No supplier invoices for {month}.</p>
                   <button style={{ ...btn(), marginTop: 12 }} onClick={openNewInvoice}>+ New Invoice</button>
                 </div>
-                : invoices.map(inv => (
+                : (() => {
+                  const drafts = invoices.filter(i => i.status === 'draft')
+                  const submitted = invoices.filter(i => i.status !== 'draft')
+                  const renderInvoiceCard = (inv: Invoice) => (
                   <div key={inv.id} style={card}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
@@ -870,7 +873,27 @@ export default function FinancesPage() {
                       </div>
                     )}
                   </div>
-                ))}
+                  )
+                  return (
+                    <>
+                      {drafts.length > 0 && (
+                        <div style={{ marginBottom: 24 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                            <span style={{ fontSize: 15, fontWeight: 800, color: '#92400e' }}>📝 Drafts — not yet submitted</span>
+                            <span style={{ fontSize: 12, background: '#fef3c7', color: '#92400e', padding: '2px 10px', borderRadius: 20, fontWeight: 700 }}>{drafts.length}</span>
+                          </div>
+                          {drafts.map(renderInvoiceCard)}
+                        </div>
+                      )}
+                      {submitted.length > 0 && (
+                        <div>
+                          {drafts.length > 0 && <div style={{ fontSize: 15, fontWeight: 800, color: '#374151', marginBottom: 10 }}>Submitted Invoices</div>}
+                          {submitted.map(renderInvoiceCard)}
+                        </div>
+                      )}
+                    </>
+                  )
+                })()}
             </div>
           )}
 
