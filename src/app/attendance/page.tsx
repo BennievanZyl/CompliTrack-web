@@ -7,6 +7,7 @@ import { supabase } from '@/lib/supabase';
 const STORE_ID = '05328298-fc27-4c9f-b091-bb7f6598b601';
 const PRIMARY = '#1a5c38';
 const DARK = '#0a1f12';
+const EMPLOYER_NAME = 'Mochachos Hartswater (Pty) Ltd';
 
 type Employee = { id: string; full_name: string; role: string; is_active: boolean; hourly_rate: number | null; pay_frequency: string | null; night_allowance_rate: number | null; phone: string | null };
 type AttendanceRecord = { id: string; employee_id: string; work_date: string; clock_in: string | null; clock_out: string | null; hours_worked: number | null; is_late: boolean; notes: string | null };
@@ -327,6 +328,137 @@ export default function AttendancePage() {
     if (win) { win.document.write(html); win.document.close(); win.focus(); setTimeout(() => win.print(), 300); }
   }
 
+  function formatZaPhone(phone: string) {
+    const digits = phone.replace(/\D/g, '');
+    if (digits.startsWith('27')) return digits;
+    if (digits.startsWith('0')) return '27' + digits.slice(1);
+    return digits;
+  }
+
+  function payslipHtml(emp: Employee, summary: ReturnType<typeof employeeMonthSummary>, days: ReturnType<typeof buildRegisterDays>) {
+    const monthLabel = new Date(payrollMonth + '-01').toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' });
+    const rate = emp.hourly_rate || 0;
+    const daysWorked = days.filter(d => d.hours > 0 || (d.leave && d.leaveHours > 0)).length;
+    const row = (label: string, hrs: string, rateStr: string, amount: number) =>
+      `<tr><td>${label}</td><td style="text-align:center">${hrs}</td><td style="text-align:center">${rateStr}</td><td style="text-align:right">R${amount.toFixed(2)}</td></tr>`;
+    const lineItems = [
+      row('Normal Hours', formatHM(summary.normalHours), `R${rate.toFixed(2)}/hr`, summary.normalPay),
+      summary.otHours > 0 ? row('Overtime', formatHM(summary.otHours), `R${(rate * payrollSettings.overtime_multiplier).toFixed(2)}/hr`, summary.otPay) : '',
+      summary.sundayHolidayHours > 0 ? row('Sunday / Public Holiday', formatHM(summary.sundayHolidayHours), '—', summary.sundayHolidayPay) : '',
+      summary.nightHours > 0 ? row('Night Allowance', formatHM(summary.nightHours), `R${(emp.night_allowance_rate || 0).toFixed(2)}/hr`, summary.nightPay) : '',
+      summary.leaveHours > 0 ? row('Paid Leave', formatHM(summary.leaveHours), `R${rate.toFixed(2)}/hr`, summary.leavePay) : '',
+    ].join('');
+    return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Payslip — ${emp.full_name} — ${monthLabel}</title>
+      <style>
+        body{font-family:Arial,sans-serif;padding:36px;color:#111;max-width:680px;margin:0 auto}
+        .head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #1a5c38;padding-bottom:16px;margin-bottom:20px}
+        .head h1{font-size:18px;margin:0 0 4px;color:#1a5c38}
+        .head .sub{font-size:12px;color:#666}
+        .badge{font-size:11px;color:#fff;background:#1a5c38;padding:4px 12px;border-radius:20px;font-weight:700}
+        .grid{display:grid;grid-template-columns:1fr 1fr;gap:4px 24px;margin-bottom:20px;font-size:13px}
+        .grid .lbl{color:#888}
+        table{width:100%;border-collapse:collapse;font-size:13px;margin-bottom:16px}
+        th{background:#f3f4f6;text-align:left;padding:8px 10px;font-size:11px;text-transform:uppercase;color:#666}
+        td{padding:8px 10px;border-bottom:1px solid #f0f0f0}
+        .totals{margin-top:8px;border-top:2px solid #111;padding-top:12px}
+        .totals .row{display:flex;justify-content:space-between;padding:4px 0;font-size:14px}
+        .totals .net{font-size:18px;font-weight:800;color:#1a5c38;border-top:1px solid #ddd;margin-top:6px;padding-top:10px}
+        .sign{margin-top:50px;display:grid;grid-template-columns:1fr 1fr;gap:40px;font-size:12px}
+        .sign div{border-top:1px solid #999;padding-top:6px;color:#666}
+        @media print{body{padding:10px}}
+      </style></head><body>
+      <div class="head">
+        <div><h1>${EMPLOYER_NAME}</h1><div class="sub">Payslip · ${monthLabel}</div></div>
+        <div class="badge">PAYSLIP</div>
+      </div>
+      <div class="grid">
+        <div><span class="lbl">Employee:</span> <b>${emp.full_name}</b></div>
+        <div><span class="lbl">Role:</span> ${emp.role}</div>
+        <div><span class="lbl">Pay Frequency:</span> ${(emp.pay_frequency || 'monthly') === 'weekly' ? 'Weekly' : 'Monthly'}</div>
+        <div><span class="lbl">Days Worked:</span> ${daysWorked}</div>
+      </div>
+      <table><thead><tr><th>Description</th><th style="text-align:center">Hours</th><th style="text-align:center">Rate</th><th style="text-align:right">Amount</th></tr></thead>
+      <tbody>${lineItems}</tbody></table>
+      <div class="totals">
+        <div class="row"><span>Gross Pay</span><b>R${summary.totalPay.toFixed(2)}</b></div>
+        ${summary.outstandingAdvances > 0 ? `<div class="row" style="color:#c2410c"><span>Less: Advance Deduction</span><b>-R${summary.outstandingAdvances.toFixed(2)}</b></div>` : ''}
+        <div class="row net"><span>Net Pay</span><span>R${summary.netPay.toFixed(2)}</span></div>
+      </div>
+      <div class="sign"><div>Employer Signature</div><div>Employee Signature</div></div>
+      </body></html>`;
+  }
+
+  function printPayslip(emp: Employee, summary: ReturnType<typeof employeeMonthSummary>, days: ReturnType<typeof buildRegisterDays>) {
+    const win = window.open('', '_blank');
+    if (win) { win.document.write(payslipHtml(emp, summary, days)); win.document.close(); win.focus(); setTimeout(() => win.print(), 300); }
+  }
+
+  function emailPayslip(emp: Employee, summary: ReturnType<typeof employeeMonthSummary>) {
+    const monthLabel = new Date(payrollMonth + '-01').toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' });
+    const subject = encodeURIComponent(`Payslip — ${monthLabel}`);
+    const body = encodeURIComponent(
+      `Hi ${emp.full_name},\n\nYour payslip for ${monthLabel}:\n\nGross Pay: R${summary.totalPay.toFixed(2)}\n${summary.outstandingAdvances > 0 ? `Advance Deduction: -R${summary.outstandingAdvances.toFixed(2)}\n` : ''}Net Pay: R${summary.netPay.toFixed(2)}\n\nA printable copy is attached.\n\nRegards,\n${EMPLOYER_NAME}`
+    );
+    window.open(`mailto:?subject=${subject}&body=${body}`, '_blank');
+  }
+
+  function whatsappPayslip(emp: Employee, summary: ReturnType<typeof employeeMonthSummary>) {
+    if (!emp.phone) { alert(`No phone number on file for ${emp.full_name}. Add one on the People page first.`); return; }
+    const monthLabel = new Date(payrollMonth + '-01').toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' });
+    const text = encodeURIComponent(
+      `Hi ${emp.full_name}, here's your payslip for ${monthLabel}:\n\nGross Pay: R${summary.totalPay.toFixed(2)}\n${summary.outstandingAdvances > 0 ? `Advance Deduction: -R${summary.outstandingAdvances.toFixed(2)}\n` : ''}Net Pay: R${summary.netPay.toFixed(2)}\n\n- ${EMPLOYER_NAME}`
+    );
+    window.open(`https://wa.me/${formatZaPhone(emp.phone)}?text=${text}`, '_blank');
+  }
+
+  function exportAllPayrollCSV() {
+    const monthLabel = payrollMonth;
+    const rows = [['Employee', 'Role', 'Pay Frequency', 'Rate (R/hr)', 'Normal Hrs', 'Normal Pay', 'OT Hrs', 'OT Pay', 'Sunday/Holiday Hrs', 'Sunday/Holiday Pay', 'Night Hrs', 'Night Pay', 'Leave Hrs', 'Leave Pay', 'Gross Pay', 'Advances', 'Net Pay']];
+    for (const emp of employees) {
+      const s = employeeMonthSummary(emp.id);
+      rows.push([
+        emp.full_name, emp.role, emp.pay_frequency || 'monthly', (emp.hourly_rate || 0).toFixed(2),
+        formatHM(s.normalHours), s.normalPay.toFixed(2), formatHM(s.otHours), s.otPay.toFixed(2),
+        formatHM(s.sundayHolidayHours), s.sundayHolidayPay.toFixed(2), formatHM(s.nightHours), s.nightPay.toFixed(2),
+        formatHM(s.leaveHours), s.leavePay.toFixed(2), s.totalPay.toFixed(2), s.outstandingAdvances.toFixed(2), s.netPay.toFixed(2),
+      ]);
+    }
+    const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `Payroll_${monthLabel}.csv`;
+    a.click(); URL.revokeObjectURL(url);
+  }
+
+  function printAllPayroll() {
+    const monthLabel = new Date(payrollMonth + '-01').toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' });
+    const rowsHtml = employees.map(emp => {
+      const s = employeeMonthSummary(emp.id);
+      return `<tr><td>${emp.full_name}</td><td>${emp.role}</td><td style="text-align:right">${formatHM(s.totalHours)}</td><td style="text-align:right">R${s.totalPay.toFixed(2)}</td><td style="text-align:right">${s.outstandingAdvances > 0 ? '-R' + s.outstandingAdvances.toFixed(2) : '—'}</td><td style="text-align:right"><b>R${s.netPay.toFixed(2)}</b></td></tr>`;
+    }).join('');
+    const grandTotal = employees.reduce((sum, emp) => sum + employeeMonthSummary(emp.id).netPay, 0);
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Payroll — ${monthLabel}</title>
+      <style>
+        body{font-family:Arial,sans-serif;padding:32px;color:#111}
+        h1{font-size:20px;margin:0 0 2px;color:#1a5c38}
+        .sub{color:#666;font-size:13px;margin-bottom:18px}
+        table{width:100%;border-collapse:collapse;font-size:13px}
+        th{background:#1a5c38;color:#fff;text-align:left;padding:8px 10px}
+        td{padding:8px 10px;border-bottom:1px solid #eee}
+        .grand{margin-top:14px;font-size:16px;text-align:right;font-weight:800}
+        @media print{body{padding:10px}}
+      </style></head><body>
+      <h1>${EMPLOYER_NAME}</h1>
+      <div class="sub">Payroll Summary · ${monthLabel}</div>
+      <table><thead><tr><th>Employee</th><th>Role</th><th style="text-align:right">Hours</th><th style="text-align:right">Gross</th><th style="text-align:right">Advances</th><th style="text-align:right">Net Pay</th></tr></thead>
+      <tbody>${rowsHtml}</tbody></table>
+      <div class="grand">Total Payroll: R${grandTotal.toFixed(2)}</div>
+      </body></html>`;
+    const win = window.open('', '_blank');
+    if (win) { win.document.write(html); win.document.close(); win.focus(); setTimeout(() => win.print(), 300); }
+  }
+
 
   const [manualSaving, setManualSaving] = useState(false);
   const today = new Date().toISOString().split('T')[0];
@@ -521,13 +653,17 @@ export default function AttendancePage() {
             <div onClick={() => setSelectedPayrollEmployee(null)} style={{ position: 'absolute' as const, inset: 0, background: 'rgba(0,0,0,0.5)', cursor: 'pointer' }} />
             <div style={{ position: 'relative' as const, width: '100%', maxWidth: 1000, maxHeight: '92vh', background: '#f8faf8', borderRadius: 20, overflow: 'hidden', display: 'flex', flexDirection: 'column' as const, boxShadow: '0 24px 60px rgba(0,0,0,0.3)' }}>
               <div style={{ background: `linear-gradient(135deg, ${DARK}, ${PRIMARY})`, padding: '24px 28px', flexShrink: 0 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap' as const, gap: 10 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
                   <button onClick={() => setSelectedPayrollEmployee(null)} style={{ background: 'rgba(255,255,255,0.2)', border: 'none', color: '#fff', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', fontSize: 13 }}>Close</button>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <button onClick={() => exportRegisterCSV(selectedPayrollEmployee, days)} style={{ background: 'rgba(255,255,255,0.2)', border: 'none', color: '#fff', borderRadius: 8, padding: '6px 14px', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>⬇ Export CSV</button>
-                    <button onClick={() => printRegister(selectedPayrollEmployee, days, summary)} style={{ background: 'rgba(255,255,255,0.2)', border: 'none', color: '#fff', borderRadius: 8, padding: '6px 14px', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>🖨 Print / PDF</button>
-                    <button onClick={() => { setLeaveForm({ leave_type: 'Sick', start_date: '', end_date: '', days_taken: '1', status: 'approved', reason: '', paid_hours_per_day: '' }); setShowLeaveModal(true); }} style={{ background: '#fff', color: PRIMARY, border: 'none', borderRadius: 8, padding: '6px 14px', cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>+ Add Leave</button>
-                  </div>
+                  <button onClick={() => { setLeaveForm({ leave_type: 'Sick', start_date: '', end_date: '', days_taken: '1', status: 'approved', reason: '', paid_hours_per_day: '' }); setShowLeaveModal(true); }} style={{ background: '#fff', color: PRIMARY, border: 'none', borderRadius: 8, padding: '6px 14px', cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>+ Add Leave</button>
+                </div>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' as const, marginBottom: 16 }}>
+                  <button onClick={() => exportRegisterCSV(selectedPayrollEmployee, days)} style={{ background: 'rgba(255,255,255,0.15)', border: 'none', color: '#fff', borderRadius: 8, padding: '5px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>⬇ Register CSV</button>
+                  <button onClick={() => printRegister(selectedPayrollEmployee, days, summary)} style={{ background: 'rgba(255,255,255,0.15)', border: 'none', color: '#fff', borderRadius: 8, padding: '5px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>🖨 Register PDF</button>
+                  <div style={{ width: 1, background: 'rgba(255,255,255,0.25)', margin: '2px 4px' }} />
+                  <button onClick={() => printPayslip(selectedPayrollEmployee, summary, days)} style={{ background: '#fff', color: PRIMARY, border: 'none', borderRadius: 8, padding: '5px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>📄 Payslip PDF</button>
+                  <button onClick={() => emailPayslip(selectedPayrollEmployee, summary)} style={{ background: 'rgba(255,255,255,0.15)', border: 'none', color: '#fff', borderRadius: 8, padding: '5px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>✉️ Email</button>
+                  <button onClick={() => whatsappPayslip(selectedPayrollEmployee, summary)} style={{ background: '#25D366', border: 'none', color: '#fff', borderRadius: 8, padding: '5px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>💬 WhatsApp</button>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
                   <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'rgba(255,255,255,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, fontWeight: 800, color: '#fff', flexShrink: 0 }}>{initials(selectedPayrollEmployee.full_name)}</div>
@@ -790,7 +926,11 @@ export default function AttendancePage() {
                     <h2 style={{ fontSize: 18, fontWeight: 700, color: '#333', margin: 0 }}>Payroll Register</h2>
                     <input type="month" value={payrollMonth} onChange={e => setPayrollMonth(e.target.value)} style={{ ...inp, width: 160 }} />
                   </div>
-                  <button onClick={() => setShowSettingsModal(true)} style={{ padding: '8px 16px', background: '#f0f4f0', border: 'none', borderRadius: 10, fontWeight: 600, cursor: 'pointer', fontSize: 13 }}>⚙️ Sunday {payrollSettings.sunday_multiplier}x · Holiday {payrollSettings.holiday_multiplier}x</button>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <button onClick={exportAllPayrollCSV} style={{ padding: '8px 14px', background: '#f0f4f0', border: 'none', borderRadius: 10, fontWeight: 600, cursor: 'pointer', fontSize: 13 }}>⬇ Export All (CSV)</button>
+                    <button onClick={printAllPayroll} style={{ padding: '8px 14px', background: '#f0f4f0', border: 'none', borderRadius: 10, fontWeight: 600, cursor: 'pointer', fontSize: 13 }}>🖨 Print All</button>
+                    <button onClick={() => setShowSettingsModal(true)} style={{ padding: '8px 16px', background: '#f0f4f0', border: 'none', borderRadius: 10, fontWeight: 600, cursor: 'pointer', fontSize: 13 }}>⚙️ Pay Rules</button>
+                  </div>
                 </div>
                 {!payrollLoaded ? (
                   <div style={{ textAlign: 'center' as const, padding: 60, color: '#ccc' }}>Loading…</div>
