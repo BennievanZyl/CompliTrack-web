@@ -46,7 +46,29 @@ function thisMonth() {
 }
 function today() { return new Date().toISOString().split('T')[0] }
 
-const emptyLine = (firstKey = 'cost_of_sales'): InvoiceLine => ({ category_key: firstKey, description: '', amount: 0, vat_amount: 0 })
+// Suggest stock items whose name/description relates to the scanned invoice description.
+// Handles both directions: "Avocado Pulp" -> "Avo" (item is a prefix/abbreviation of a word)
+// and "Avo" -> "Avocado Pulp" (typed text is a prefix of the item word).
+function matchStockItems(desc: string, items: {id:string;description:string;unit:string;supplier:string|null}[], limit = 4) {
+  const words = desc.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(w => w.length > 2)
+  if (!words.length) return []
+  const scored = items.map(item => {
+    const itemWords = item.description.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(w => w.length > 1)
+    let score = 0
+    for (const w of words) {
+      for (const iw of itemWords) {
+        if (w === iw) score += 3
+        else if (w.startsWith(iw) || iw.startsWith(w)) score += 2
+        else if (w.includes(iw) || iw.includes(w)) score += 1
+      }
+    }
+    return { item, score }
+  }).filter(s => s.score > 0)
+  scored.sort((a, b) => b.score - a.score)
+  return scored.slice(0, limit).map(s => s.item)
+}
+
+const emptyLine = (firstKey = 'cost_of_sales'): InvoiceLine => ({ category_key: firstKey, description: '', qty: 1, uom: 'each', unit_price: 0, amount: 0, vat_amount: 0 })
 const emptyInvoice = () => ({
   supplier: '', invoice_number: '', invoice_date: today(),
   due_date: '', status: 'draft', payment_method: 'bank_transfer', notes: ''
@@ -77,6 +99,7 @@ export default function FinancesPage() {
   const [scanning, setScanning] = useState(false)
   const [scanError, setScanError] = useState('')
   const [error, setError] = useState('')
+  const [allStockItems, setAllStockItems] = useState<{id:string;description:string;unit:string;supplier:string|null}[]>([])
 
   // Category quick-add state
   const [showQuickCat, setShowQuickCat] = useState(false)
@@ -116,7 +139,7 @@ export default function FinancesPage() {
     const monthStart = `${month}-01`
     const [mYear, mMonth] = month.split('-').map(Number)
     const monthEnd = new Date(mYear, mMonth, 0).toISOString().split('T')[0]
-    const [cuRes, invRes, catRes, suppRes, qRes] = await Promise.all([
+    const [cuRes, invRes, catRes, suppRes, qRes, stockRes] = await Promise.all([
       supabase.from('cash_ups')
         .select('id,cash_up_date,cash_up_total,total_cash,eft_total,payouts,variance,customer_count,average_spend,status,notes')
         .eq('store_id', STORE_ID)
@@ -134,6 +157,9 @@ export default function FinancesPage() {
         .select('*').eq('store_id', STORE_ID)
         .gte('expense_date', monthStart).lte('expense_date', monthEnd)
         .order('expense_date', { ascending: false }),
+      supabase.from('stock_items')
+        .select('id, description, unit, supplier')
+        .eq('store_id', STORE_ID).eq('is_active', true).order('description'),
     ])
     setCashUps(cuRes.data || [])
     setInvoices(invRes.data || [])
@@ -141,6 +167,7 @@ export default function FinancesPage() {
     setCategories(cats.length ? cats : [])
     setSuppliers(suppRes?.data || [])
     setQuickExp(qRes.data || [])
+    setAllStockItems(stockRes?.data || [])
     setLoading(false)
   }, [month])
 
@@ -175,7 +202,7 @@ export default function FinancesPage() {
   function openEditInvoice(inv: Invoice) {
     setEditInv(inv)
     setInvForm({ supplier: inv.supplier, invoice_number: inv.invoice_number, invoice_date: inv.invoice_date, due_date: inv.due_date || '', status: inv.status, payment_method: inv.payment_method || 'bank_transfer', notes: inv.notes || '' })
-    setInvLines(inv.invoice_lines?.length ? inv.invoice_lines.map(l => ({ id: l.id, category_key: l.category_key, description: l.description || '', amount: Number(l.amount), vat_amount: Number(l.vat_amount || 0) })) : [emptyLine()])
+    setInvLines(inv.invoice_lines?.length ? inv.invoice_lines.map(l => ({ id: l.id, category_key: l.category_key, description: l.description || '', qty: Number(l.qty) || 1, uom: l.uom || 'each', unit_price: Number(l.unit_price) || 0, amount: Number(l.amount), vat_amount: Number(l.vat_amount || 0) })) : [emptyLine()])
     setShowInvForm(true)
   }
 
@@ -288,8 +315,8 @@ export default function FinancesPage() {
       if (data.due_date) setInvForm(f => ({ ...f, due_date: data.due_date }))
       if (data.notes) setInvForm(f => ({ ...f, notes: data.notes }))
       if (data.lines && data.lines.length > 0) {
-        setInvLines(data.lines.map((l: {category_key?: string; description?: string; qty?: number; uom?: string; unit_price?: number; amount?: number; vat_amount?: number}) => ({
-          category_key: l.category_key || 'cost_of_sales',
+        setInvLines(data.lines.map((l: {description?: string; qty?: number; uom?: string; unit_price?: number; amount?: number; vat_amount?: number}) => ({
+          category_key: 'cost_of_sales',
           description: l.description || '',
           qty: Number(l.qty) || 1,
           uom: l.uom || 'each',
@@ -628,26 +655,45 @@ export default function FinancesPage() {
                       <h4 style={{ margin: 0, fontSize: 14, fontWeight: 700 }}>Line Items</h4>
                       <button style={btn()} onClick={addLine}>+ Add Line</button>
                     </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: '2fr 2fr 1fr 1fr auto', gap: 8, marginBottom: 8 }}>
-                      {['Category', 'Description', 'Amount (incl VAT)', 'VAT Amount', ''].map(h => (
+                    <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 2fr 0.7fr 1fr 1fr auto', gap: 8, marginBottom: 8 }}>
+                      {['Category', 'Description', 'Qty', 'Amount (incl VAT)', 'VAT Amount', ''].map(h => (
                         <div key={h} style={{ fontSize: 12, fontWeight: 600, color: '#6b7280' }}>{h}</div>
                       ))}
                     </div>
-                    {invLines.map((line, i) => (
-                      <div key={i} style={{ display: 'grid', gridTemplateColumns: '2fr 2fr 1fr 1fr auto', gap: 8, marginBottom: 8, alignItems: 'center' }}>
-                        <div>
-                          <select value={line.category_key} onChange={e => updateLine(i, 'category_key', e.target.value)} style={{ ...inp, padding: '8px 10px' }}>
-                            {categories.map(c => <option key={c.key} value={c.key}>{c.name}</option>)}
-                          </select>
-                          {i === 0 && <button type="button" onClick={() => setShowQuickCat(true)} style={{ fontSize: '11px', color: '#1a5c38', background: 'none', border: 'none', cursor: 'pointer', padding: '2px 0', fontWeight: '600' }}>+ New Category</button>}
+                    {invLines.map((line, i) => {
+                      const matches = line.description.trim().length > 2 ? matchStockItems(line.description, allStockItems) : []
+                      return (
+                      <div key={i} style={{ marginBottom: 8 }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 2fr 0.7fr 1fr 1fr auto', gap: 8, alignItems: 'center' }}>
+                          <div>
+                            <select value={line.category_key} onChange={e => updateLine(i, 'category_key', e.target.value)} style={{ ...inp, padding: '8px 10px' }}>
+                              {categories.map(c => <option key={c.key} value={c.key}>{c.name}</option>)}
+                            </select>
+                            {i === 0 && <button type="button" onClick={() => setShowQuickCat(true)} style={{ fontSize: '11px', color: '#1a5c38', background: 'none', border: 'none', cursor: 'pointer', padding: '2px 0', fontWeight: '600' }}>+ New Category</button>}
+                          </div>
+                          <input type="text" placeholder="Description" value={line.description} onChange={e => updateLine(i, 'description', e.target.value)} style={{ ...inp, padding: '8px 10px' }} />
+                          <input type="number" step="0.01" placeholder="1" value={line.qty || ''} onChange={e => updateLine(i, 'qty', e.target.value)} style={{ ...inp, padding: '8px 10px' }} />
+                          <input type="number" step="0.01" placeholder="0.00" value={line.amount || ''} onChange={e => updateLine(i, 'amount', e.target.value)} style={{ ...inp, padding: '8px 10px' }} />
+                          <input type="number" step="0.01" placeholder="0.00" value={line.vat_amount || ''} onChange={e => updateLine(i, 'vat_amount', e.target.value)} style={{ ...inp, padding: '8px 10px' }} />
+                          <button onClick={() => removeLine(i)} disabled={invLines.length === 1}
+                            style={{ background: '#fef2f2', color: '#dc2626', border: 'none', borderRadius: 6, padding: '8px 12px', cursor: 'pointer', fontSize: 16, fontWeight: 700 }}>×</button>
                         </div>
-                        <input type="text" placeholder="Description" value={line.description} onChange={e => updateLine(i, 'description', e.target.value)} style={{ ...inp, padding: '8px 10px' }} />
-                        <input type="number" step="0.01" placeholder="0.00" value={line.amount || ''} onChange={e => updateLine(i, 'amount', e.target.value)} style={{ ...inp, padding: '8px 10px' }} />
-                        <input type="number" step="0.01" placeholder="0.00" value={line.vat_amount || ''} onChange={e => updateLine(i, 'vat_amount', e.target.value)} style={{ ...inp, padding: '8px 10px' }} />
-                        <button onClick={() => removeLine(i)} disabled={invLines.length === 1}
-                          style={{ background: '#fef2f2', color: '#dc2626', border: 'none', borderRadius: 6, padding: '8px 12px', cursor: 'pointer', fontSize: 16, fontWeight: 700 }}>×</button>
+                        {matches.length > 0 && (
+                          <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 2fr 0.7fr 1fr 1fr auto', gap: 8, marginTop: 4 }}>
+                            <div />
+                            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                              <span style={{ fontSize: 11, color: '#9ca3af' }}>Match to your stock sheet:</span>
+                              {matches.map(m => (
+                                <button key={m.id} type="button" onClick={() => updateLine(i, 'description', m.description)}
+                                  style={{ fontSize: 11, background: '#eff6ff', color: '#2563eb', border: '1px solid #bfdbfe', borderRadius: 12, padding: '3px 10px', cursor: 'pointer', fontWeight: 600 }}>
+                                  {m.description}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
-                    ))}
+                    )})}
                     <div style={{ borderTop: '2px solid #e5e7eb', marginTop: 8, paddingTop: 12, display: 'flex', justifyContent: 'flex-end', gap: 24, fontSize: 14 }}>
                       <span style={{ color: '#6b7280' }}>VAT: <strong>{fmt(lineVatTotal)}</strong></span>
                       <span style={{ fontWeight: 800, fontSize: 16 }}>Total: <span style={{ color: '#1a5c38' }}>{fmt(lineTotal)}</span></span>
