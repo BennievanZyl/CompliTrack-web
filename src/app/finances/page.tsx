@@ -7,7 +7,7 @@ const STORE_ID = '05328298-fc27-4c9f-b091-bb7f6598b601'
 const ORG_ID = 'e903386b-133a-4bad-b054-ef7ef616a3ff'
 const VAT_RATE = 0.15
 
-const TABS = ['Summary', 'Cash-Ups / Sales', 'Supplier Bills', 'Quick Expenses', 'Food Cost']
+const TABS = ['Summary', 'Cash-Ups / Sales', 'Supplier Bills', 'Quick Expenses', 'Food Cost', 'History']
 
 const COLOUR_PALETTE = ['#10b981','#ef4444','#3b82f6','#f59e0b','#8b5cf6','#06b6d4','#f97316','#ec4899','#84cc16','#6b7280','#dc2626','#0ea5e9','#a855f7','#22c55e','#1d4ed8']
 
@@ -87,6 +87,12 @@ const emptyQuick = () => ({
 export default function FinancesPage() {
   const router = useRouter()
   const [tab, setTab] = useState(0)
+  const [historyInvoices, setHistoryInvoices] = useState<Invoice[]>([])
+  const [historyLoading, setHistoryLoading] = useState(false)
+  const [historyLoaded, setHistoryLoaded] = useState(false)
+  const [historySupplier, setHistorySupplier] = useState('All')
+  const [historySearch, setHistorySearch] = useState('')
+  const [historyStatus, setHistoryStatus] = useState('All')
   const [month, setMonth] = useState(thisMonth())
 
   const [categories, setCategories] = useState<{id:string;name:string;key:string;colour:string}[]>([])
@@ -186,6 +192,31 @@ export default function FinancesPage() {
 
   useEffect(() => { load() }, [load])
 
+  async function loadHistory() {
+    setHistoryLoading(true)
+    const { data } = await supabase.from('invoices')
+      .select('*, invoice_lines(*)')
+      .eq('store_id', STORE_ID)
+      .order('invoice_date', { ascending: false })
+      .limit(300)
+    setHistoryInvoices(data || [])
+    setHistoryLoading(false)
+    setHistoryLoaded(true)
+  }
+
+  useEffect(() => { if (tab === 5 && !historyLoaded) loadHistory() }, [tab, historyLoaded])
+
+  const filteredHistory = historyInvoices.filter(inv => {
+    if (historySupplier !== 'All' && inv.supplier !== historySupplier) return false
+    if (historyStatus !== 'All' && inv.status !== historyStatus) return false
+    if (historySearch.trim()) {
+      const q = historySearch.trim().toLowerCase()
+      const hay = `${inv.supplier} ${inv.invoice_number} ${inv.notes || ''}`.toLowerCase()
+      if (!hay.includes(q)) return false
+    }
+    return true
+  })
+
   // ── Summary calcs ──
   const totalSales = cashUps.reduce((s, r) => s + Number(r.cash_up_total || 0), 0)
   const totalInvoices = invoices.reduce((s, r) => s + Number(r.total_amount || 0), 0)
@@ -217,6 +248,7 @@ export default function FinancesPage() {
     setInvForm({ supplier: inv.supplier, invoice_number: inv.invoice_number, invoice_date: inv.invoice_date, due_date: inv.due_date || '', status: inv.status, payment_method: inv.payment_method || 'bank_transfer', notes: inv.notes || '' })
     setInvLines(inv.invoice_lines?.length ? inv.invoice_lines.map(l => ({ id: l.id, category_key: l.category_key, description: l.description || '', qty: Number(l.qty) || 1, uom: l.uom || 'each', unit_price: Number(l.unit_price) || 0, amount: Number(l.amount), vat_amount: Number(l.vat_amount || 0) })) : [emptyLine(defaultCatKey)])
     setShowInvForm(true)
+    setTab(2)
   }
 
   function addLine() { setInvLines(l => [...l, emptyLine(defaultCatKey)]) }
@@ -1023,6 +1055,57 @@ export default function FinancesPage() {
               <div style={{ marginTop: 24 }}>
                 <button style={btn()} onClick={() => router.push('/stock')}>Go to Stock Management →</button>
               </div>
+            </div>
+          )}
+
+          {tab === 5 && (
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
+                <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Invoice History</h2>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <input type="text" placeholder="Search supplier, invoice #, notes…" value={historySearch} onChange={e => setHistorySearch(e.target.value)} style={{ ...inp, width: 220 }} />
+                  <select value={historySupplier} onChange={e => setHistorySupplier(e.target.value)} style={inp}>
+                    <option value="All">All Suppliers</option>
+                    {suppliers.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
+                  </select>
+                  <select value={historyStatus} onChange={e => setHistoryStatus(e.target.value)} style={inp}>
+                    {['All', 'draft', 'received', 'paid'].map(s => <option key={s} value={s}>{s === 'All' ? 'All Statuses' : s.charAt(0).toUpperCase() + s.slice(1)}</option>)}
+                  </select>
+                </div>
+              </div>
+              <p style={{ fontSize: 12, color: '#9ca3af', marginBottom: 16 }}>Every invoice across all months, most recent first. Showing the last 300 — narrow the filters above for older records.</p>
+              {historyLoading ? (
+                <div style={{ textAlign: 'center', padding: 60, color: '#6b7280' }}>Loading…</div>
+              ) : filteredHistory.length === 0 ? (
+                <div style={{ ...card, textAlign: 'center', padding: 48, color: '#6b7280' }}>
+                  <div style={{ fontSize: 40, marginBottom: 8 }}>📄</div>
+                  <p>No invoices match these filters.</p>
+                </div>
+              ) : (
+                <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #e5e7eb', overflow: 'hidden' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                    <thead>
+                      <tr style={{ background: '#f9fafb', borderBottom: '1px solid #e5e7eb' }}>
+                        {['Date', 'Supplier', 'Invoice #', 'Status', 'Due', 'Amount'].map(h => (
+                          <th key={h} style={{ padding: '10px 14px', textAlign: h === 'Amount' ? 'right' : 'left', color: '#6b7280', fontWeight: 700, fontSize: 11, textTransform: 'uppercase' as const }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredHistory.map(inv => (
+                        <tr key={inv.id} style={{ borderBottom: '1px solid #f3f4f6', cursor: 'pointer' }} onClick={() => openEditInvoice(inv)}>
+                          <td style={{ padding: '10px 14px' }}>{inv.invoice_date}</td>
+                          <td style={{ padding: '10px 14px', fontWeight: 600 }}>{inv.supplier}</td>
+                          <td style={{ padding: '10px 14px', color: '#6b7280' }}>{inv.invoice_number || '—'}</td>
+                          <td style={{ padding: '10px 14px' }}>{statusBadge(inv.status, 11)}</td>
+                          <td style={{ padding: '10px 14px', color: '#6b7280' }}>{inv.due_date || '—'}</td>
+                          <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 700 }}>{fmt(Number(inv.total_amount))}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           )}
         </>)}
