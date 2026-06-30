@@ -8,7 +8,7 @@ const STORE_ID = '05328298-fc27-4c9f-b091-bb7f6598b601'
 
 type StockCategory = { id: string; name: string; color: string; sort_order: number }
 type StockItem = { id: string; category: string | null; name: string; description: string; unit: string; cost_price: number; price: number; par_level: number; current_qty: number; is_active: boolean; sort_order: number; supplier: string | null; on_daily_sheet: boolean; is_catch_weight: boolean; kg_price: number; avg_weight_kg: number }
-type StockSupplier = { id: string; name: string; contact_name: string | null; phone: string | null; email: string | null; order_day: string | null; notes: string | null; is_active: boolean; sort_order: number }
+type StockSupplier = { id: string; name: string; contact_name: string | null; phone: string | null; email: string | null; order_day: string | null; notes: string | null; payment_terms_days: number | null; is_active: boolean; sort_order: number }
 
 type StockCount = { id: string; count_type: string; count_date: string; status: string; notes: string | null }
 type StockCountLine = { id: string; stock_count_id: string; stock_item_id: string; expected_qty: number; actual_qty: number; unit_cost: number }
@@ -74,7 +74,7 @@ export default function StockPage() {
   const [suppliers, setSuppliers] = useState<StockSupplier[]>([])
   const [showSupplierForm, setShowSupplierForm] = useState(false)
   const [editSupplier, setEditSupplier] = useState<StockSupplier | null>(null)
-  const [supplierForm, setSupplierForm] = useState({ name: '', contact_name: '', phone: '', email: '', order_day: '', notes: '' })
+  const [supplierForm, setSupplierForm] = useState({ name: '', contact_name: '', phone: '', email: '', order_day: '', notes: '', payment_terms_days: '7' })
   const [saving, setSaving] = useState(false)
   const [activeCount, setActiveCount] = useState<StockCount | null>(null)
   const [countLines, setCountLines] = useState<StockCountLine[]>([])
@@ -130,14 +130,14 @@ export default function StockPage() {
   async function saveSupplier() {
     if (!supplierForm.name) return
     setSaving(true)
-    const payload = { store_id: STORE_ID, ...supplierForm, is_active: true, sort_order: suppliers.length + 1 }
+    const payload = { store_id: STORE_ID, ...supplierForm, payment_terms_days: parseInt(supplierForm.payment_terms_days) || 7, is_active: true, sort_order: suppliers.length + 1 }
     if (editSupplier) {
       await supabase.from('stock_suppliers').update(payload).eq('id', editSupplier.id)
     } else {
       await supabase.from('stock_suppliers').insert(payload)
     }
     setShowSupplierForm(false); setEditSupplier(null)
-    setSupplierForm({ name: '', contact_name: '', phone: '', email: '', order_day: '', notes: '' })
+    setSupplierForm({ name: '', contact_name: '', phone: '', email: '', order_day: '', notes: '', payment_terms_days: '7' })
     setSaving(false); await loadAll()
   }
 
@@ -665,7 +665,7 @@ export default function StockPage() {
                   <div style={{ fontSize: '18px', fontWeight: 800, color: '#111' }}>Suppliers</div>
                   <div style={{ fontSize: '13px', color: '#9ca3af' }}>Manage your suppliers — used across stock items, orders and counts</div>
                 </div>
-                <button onClick={() => { setEditSupplier(null); setSupplierForm({ name: '', contact_name: '', phone: '', email: '', order_day: '', notes: '' }); setShowSupplierForm(true) }}
+                <button onClick={() => { setEditSupplier(null); setSupplierForm({ name: '', contact_name: '', phone: '', email: '', order_day: '', notes: '', payment_terms_days: '7' }); setShowSupplierForm(true) }}
                   style={{ padding: '10px 18px', background: '#1a5c38', color: 'white', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: 800, cursor: 'pointer' }}>+ Add Supplier</button>
               </div>
               {suppliers.length === 0 ? (
@@ -691,7 +691,7 @@ export default function StockPage() {
                       </div>
                       <div style={{ fontSize: '12px', color: '#9ca3af' }}>{items.filter(i => i.supplier === s.name).length} items</div>
                       <div style={{ display: 'flex', gap: '8px' }}>
-                        <button onClick={() => { setEditSupplier(s); setSupplierForm({ name: s.name, contact_name: s.contact_name||'', phone: s.phone||'', email: s.email||'', order_day: s.order_day||'', notes: s.notes||'' }); setShowSupplierForm(true) }}
+                        <button onClick={() => { setEditSupplier(s); setSupplierForm({ name: s.name, contact_name: s.contact_name||'', phone: s.phone||'', email: s.email||'', order_day: s.order_day||'', notes: s.notes||'', payment_terms_days: String(s.payment_terms_days ?? 7) }); setShowSupplierForm(true) }}
                           style={{ background: '#eff6ff', color: '#2563eb', border: 'none', borderRadius: '8px', padding: '6px 12px', cursor: 'pointer', fontSize: '12px', fontWeight: 600 }}>Edit</button>
                         <button onClick={() => deleteSupplier(s.id)}
                           style={{ background: '#fef2f2', color: '#dc2626', border: 'none', borderRadius: '8px', padding: '6px 12px', cursor: 'pointer', fontSize: '12px', fontWeight: 600 }}>Remove</button>
@@ -1041,6 +1041,7 @@ export default function StockPage() {
               {['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'].map(d => <option key={d} value={d}>{d}</option>)}
             </select>
           </div>
+          <div><label style={LABEL}>Payment Terms (days)</label><input type="number" min="0" step="1" value={supplierForm.payment_terms_days} onChange={e => setSupplierForm(f => ({ ...f, payment_terms_days: e.target.value }))} placeholder="7" style={INPUT} /><div style={{ fontSize: '12px', color: '#9ca3af', marginTop: '4px' }}>Used to auto-calculate the Due Date on invoices from this supplier</div></div>
           <div><label style={LABEL}>Notes</label><input value={supplierForm.notes} onChange={e => setSupplierForm(f => ({ ...f, notes: e.target.value }))} placeholder="e.g. Order by 10am" style={INPUT} /></div>
         </div>
         <div style={{ padding: '16px 28px 24px', display: 'flex', gap: '12px' }}>
