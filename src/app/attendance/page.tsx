@@ -17,7 +17,7 @@ type Leave = { id: string; employee_id: string; leave_type: string; start_date: 
 type Advance = { id: string; employee_id: string; amount: number; advance_date: string; repayment_status: string; deduct_from_wages: boolean; reason: string | null };
 type Holiday = { id: string; holiday_date: string; name: string };
 type WagePayment = { id: string; employee_id: string; period: string; paid_date: string; net_pay: number; payment_method: string | null };
-type PayrollSettings = { sunday_multiplier: number; holiday_multiplier: number; overtime_multiplier: number; weekly_ot_threshold: number; monthly_ot_threshold: number; night_allowance_start_hour: number; default_night_rate: number; uif_employee_rate: number; uif_employer_rate: number; uif_ceiling: number };
+type PayrollSettings = { sunday_multiplier: number; holiday_multiplier: number; overtime_multiplier: number; weekly_ot_threshold: number; monthly_ot_threshold: number; night_allowance_start_hour: number; default_night_rate: number; uif_employee_rate: number; uif_employer_rate: number; uif_ceiling: number; uif_reference_number: string };
 
 const ROLE_COLORS: Record<string, { bg: string; color: string }> = {
   'Store Manager': { bg: '#e8f5e9', color: PRIMARY },
@@ -76,7 +76,7 @@ export default function AttendancePage() {
   const [showPayModal, setShowPayModal] = useState(false);
   const [payForm, setPayForm] = useState({ paid_date: new Date().toISOString().split('T')[0], payment_method: 'Cash' });
   const [paying, setPaying] = useState(false);
-  const [payrollSettings, setPayrollSettings] = useState<PayrollSettings>({ sunday_multiplier: 1.5, holiday_multiplier: 2, overtime_multiplier: 1.5, weekly_ot_threshold: 45, monthly_ot_threshold: 195, night_allowance_start_hour: 18, default_night_rate: 0.5, uif_employee_rate: 1, uif_employer_rate: 1, uif_ceiling: 17712 });
+  const [payrollSettings, setPayrollSettings] = useState<PayrollSettings>({ sunday_multiplier: 1.5, holiday_multiplier: 2, overtime_multiplier: 1.5, weekly_ot_threshold: 45, monthly_ot_threshold: 195, night_allowance_start_hour: 18, default_night_rate: 0.5, uif_employee_rate: 1, uif_employer_rate: 1, uif_ceiling: 17712, uif_reference_number: '' });
   const [payrollLoaded, setPayrollLoaded] = useState(false);
   const [selectedPayrollEmployee, setSelectedPayrollEmployee] = useState<Employee | null>(null);
   const [editingRate, setEditingRate] = useState<string | null>(null);
@@ -86,7 +86,7 @@ export default function AttendancePage() {
   const [showLeaveModal, setShowLeaveModal] = useState(false);
   const [leaveForm, setLeaveForm] = useState({ leave_type: 'Sick', start_date: '', end_date: '', days_taken: '1', status: 'approved', reason: '', paid_hours_per_day: '' });
   const [showSettingsModal, setShowSettingsModal] = useState(false);
-  const [settingsForm, setSettingsForm] = useState({ sunday_multiplier: '1.5', holiday_multiplier: '2', overtime_multiplier: '1.5', weekly_ot_threshold: '45', monthly_ot_threshold: '195', night_allowance_start_hour: '18', default_night_rate: '0.5', uif_employee_rate: '1', uif_employer_rate: '1', uif_ceiling: '17712' });
+  const [settingsForm, setSettingsForm] = useState({ sunday_multiplier: '1.5', holiday_multiplier: '2', overtime_multiplier: '1.5', weekly_ot_threshold: '45', monthly_ot_threshold: '195', night_allowance_start_hour: '18', default_night_rate: '0.5', uif_employee_rate: '1', uif_employer_rate: '1', uif_ceiling: '17712', uif_reference_number: '' });
 
   async function loadPayrollData() {
     const [py, pm] = payrollMonth.split('-').map(Number);
@@ -114,6 +114,7 @@ export default function AttendancePage() {
         monthly_ot_threshold: s.monthly_ot_threshold ?? 195, night_allowance_start_hour: s.night_allowance_start_hour ?? 18,
         default_night_rate: s.default_night_rate ?? 0.5,
         uif_employee_rate: s.uif_employee_rate ?? 1, uif_employer_rate: s.uif_employer_rate ?? 1, uif_ceiling: s.uif_ceiling ?? 17712,
+        uif_reference_number: s.uif_reference_number ?? '',
       });
       setSettingsForm({
         sunday_multiplier: String(s.sunday_multiplier ?? 1.5), holiday_multiplier: String(s.holiday_multiplier ?? 2),
@@ -121,6 +122,7 @@ export default function AttendancePage() {
         monthly_ot_threshold: String(s.monthly_ot_threshold ?? 195), night_allowance_start_hour: String(s.night_allowance_start_hour ?? 18),
         default_night_rate: String(s.default_night_rate ?? 0.5),
         uif_employee_rate: String(s.uif_employee_rate ?? 1), uif_employer_rate: String(s.uif_employer_rate ?? 1), uif_ceiling: String(s.uif_ceiling ?? 17712),
+        uif_reference_number: s.uif_reference_number || '',
       });
     }
     setPayrollLoaded(true);
@@ -269,6 +271,7 @@ export default function AttendancePage() {
       uif_employee_rate: parseFloat(settingsForm.uif_employee_rate) || 1,
       uif_employer_rate: parseFloat(settingsForm.uif_employer_rate) || 1,
       uif_ceiling: parseFloat(settingsForm.uif_ceiling) || 17712,
+      uif_reference_number: settingsForm.uif_reference_number || '',
     };
     await supabase.from('payroll_settings').upsert(payload);
     setPayrollSettings(payload);
@@ -288,7 +291,7 @@ export default function AttendancePage() {
   }
 
   async function markAdvanceRepaid(id: string) {
-    await supabase.from('employee_advances').update({ repayment_status: 'repaid', repaid_date: new Date().toISOString().split('T')[0] }).eq('id', id);
+    await supabase.from('employee_advances').update({ repayment_status: 'paid', repaid_date: new Date().toISOString().split('T')[0] }).eq('id', id);
     await loadPayrollData();
   }
 
@@ -331,7 +334,7 @@ export default function AttendancePage() {
     // Any advances that were deducted in this pay run are now settled
     const empAdvances = advances.filter(a => a.employee_id === emp.id && a.deduct_from_wages && a.repayment_status === 'outstanding');
     for (const adv of empAdvances) {
-      await supabase.from('employee_advances').update({ repayment_status: 'repaid', repaid_date: payForm.paid_date }).eq('id', adv.id);
+      await supabase.from('employee_advances').update({ repayment_status: 'paid', repaid_date: payForm.paid_date }).eq('id', adv.id);
     }
 
     setShowPayModal(false);
@@ -441,11 +444,12 @@ export default function AttendancePage() {
         @media print{body{padding:10px}}
       </style></head><body>
       <div class="head">
-        <div><h1>${EMPLOYER_NAME}</h1><div class="sub">Payslip · ${monthLabel}</div></div>
+        <div><h1>${EMPLOYER_NAME}</h1><div class="sub">Payslip · ${monthLabel}${payrollSettings.uif_reference_number ? ` · UIF Ref: ${payrollSettings.uif_reference_number}` : ''}</div></div>
         <div class="badge">PAYSLIP</div>
       </div>
       <div class="grid">
         <div><span class="lbl">Employee:</span> <b>${emp.full_name}</b></div>
+        <div><span class="lbl">ID Number:</span> ${emp.id_number || '—'}</div>
         <div><span class="lbl">Role:</span> ${emp.role}</div>
         <div><span class="lbl">Pay Frequency:</span> ${(emp.pay_frequency || 'monthly') === 'weekly' ? 'Weekly' : 'Monthly'}</div>
         <div><span class="lbl">Days Worked:</span> ${daysWorked}</div>
@@ -529,7 +533,7 @@ export default function AttendancePage() {
         @media print{body{padding:10px}}
       </style></head><body>
       <h1>${EMPLOYER_NAME}</h1>
-      <div class="sub">Payroll Summary · ${monthLabel} · UIF: ${payrollSettings.uif_employee_rate}% employee / ${payrollSettings.uif_employer_rate}% employer, capped at R${payrollSettings.uif_ceiling.toLocaleString()}/month</div>
+      <div class="sub">Payroll Summary · ${monthLabel}${payrollSettings.uif_reference_number ? ` · UIF Ref: ${payrollSettings.uif_reference_number}` : ''} · UIF: ${payrollSettings.uif_employee_rate}% employee / ${payrollSettings.uif_employer_rate}% employer, capped at R${payrollSettings.uif_ceiling.toLocaleString()}/month</div>
       <table><thead><tr><th>Employee</th><th>ID Number</th><th>Role</th><th style="text-align:right">Hours</th><th style="text-align:right">Gross</th><th style="text-align:right">UIF (Emp)</th><th style="text-align:right">UIF (Empr)</th><th style="text-align:right">Advances</th><th style="text-align:right">Net Pay</th></tr></thead>
       <tbody>${rowsHtml}</tbody></table>
       <div class="grand">Total UIF Employee: R${grandUifEmployee.toFixed(2)} &nbsp;&nbsp; Total UIF Employer: R${grandUifEmployer.toFixed(2)}</div>
@@ -685,12 +689,12 @@ export default function AttendancePage() {
             <button onClick={() => setShowLeaveModal(false)} style={{ background: '#f0f4f0', border: 'none', borderRadius: 8, padding: '6px 14px', cursor: 'pointer' }}>Cancel</button>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <div><label style={lbl}>Leave Type</label><select value={leaveForm.leave_type} onChange={e => setLeaveForm(p => ({ ...p, leave_type: e.target.value }))} style={inp}>{['Sick', 'Annual', 'Family Responsibility', 'Unpaid', 'Other'].map(t => <option key={t}>{t}</option>)}</select></div>
+            <div><label style={lbl}>Leave Type</label><select value={leaveForm.leave_type} onChange={e => setLeaveForm(p => ({ ...p, leave_type: e.target.value }))} style={inp}>{['Annual', 'Sick', 'Family Responsibility', 'Unpaid', 'Maternity', 'Paternity', 'Study'].map(t => <option key={t}>{t}</option>)}</select></div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
               <div><label style={lbl}>Start Date *</label><input type="date" value={leaveForm.start_date} onChange={e => setLeaveForm(p => ({ ...p, start_date: e.target.value, end_date: p.end_date || e.target.value }))} style={inp} /></div>
               <div><label style={lbl}>End Date *</label><input type="date" value={leaveForm.end_date} onChange={e => setLeaveForm(p => ({ ...p, end_date: e.target.value }))} style={inp} /></div>
             </div>
-            <div><label style={lbl}>Status</label><select value={leaveForm.status} onChange={e => setLeaveForm(p => ({ ...p, status: e.target.value }))} style={inp}><option value="approved">Approved</option><option value="pending">Pending</option><option value="declined">Declined</option></select></div>
+            <div><label style={lbl}>Status</label><select value={leaveForm.status} onChange={e => setLeaveForm(p => ({ ...p, status: e.target.value }))} style={inp}><option value="approved">Approved</option><option value="pending">Pending</option><option value="rejected">Rejected</option></select></div>
             <div><label style={lbl}>Hours to pay per day</label><input type="number" step="0.25" placeholder="e.g. 5 for a 10:00–15:00 shift" value={leaveForm.paid_hours_per_day} onChange={e => setLeaveForm(p => ({ ...p, paid_hours_per_day: e.target.value }))} style={inp} /><div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>Applied to every day in this leave period at their normal hourly rate. Leave at 0 if this leave is unpaid.</div></div>
             <div><label style={lbl}>Reason / Notes</label><textarea value={leaveForm.reason} onChange={e => setLeaveForm(p => ({ ...p, reason: e.target.value }))} rows={2} style={{ ...inp, resize: 'vertical' as const }} /></div>
           </div>
@@ -728,6 +732,7 @@ export default function AttendancePage() {
               <div><label style={lbl}>Employee %</label><input type="number" step="0.1" value={settingsForm.uif_employee_rate} onChange={e => setSettingsForm(p => ({ ...p, uif_employee_rate: e.target.value }))} style={inp} /></div>
               <div><label style={lbl}>Employer %</label><input type="number" step="0.1" value={settingsForm.uif_employer_rate} onChange={e => setSettingsForm(p => ({ ...p, uif_employer_rate: e.target.value }))} style={inp} /></div>
               <div style={{ gridColumn: '1 / -1' }}><label style={lbl}>Monthly Earnings Ceiling (R)</label><input type="number" step="1" value={settingsForm.uif_ceiling} onChange={e => setSettingsForm(p => ({ ...p, uif_ceiling: e.target.value }))} style={inp} /><div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>SA default is 1% employee + 1% employer, capped at the Dept. of Labour's earnings ceiling — confirm the current figure before relying on this for a real submission.</div></div>
+              <div style={{ gridColumn: '1 / -1' }}><label style={lbl}>Employer UIF Reference Number</label><input type="text" value={settingsForm.uif_reference_number} onChange={e => setSettingsForm(p => ({ ...p, uif_reference_number: e.target.value }))} placeholder="U..." style={inp} /><div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>Printed on payslips and the labour broker export.</div></div>
             </div>
           </div>
           <button onClick={savePayrollSettings} style={{ width: '100%', marginTop: 20, padding: '13px', background: PRIMARY, color: '#fff', border: 'none', borderRadius: 12, fontWeight: 700, cursor: 'pointer', fontSize: 15 }}>Save</button>
