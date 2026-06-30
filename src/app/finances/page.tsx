@@ -119,6 +119,7 @@ export default function FinancesPage() {
   const [qForm, setQForm] = useState(emptyQuick())
 
   const CAT_MAP = Object.fromEntries(categories.map(c => [c.key, c]))
+  const defaultCatKey = categories.find(c => /stock|cogs/i.test(c.name))?.key || categories[0]?.key || 'cost_of_sales'
 
   async function saveQuickCategory() {
     if (!quickCatForm.name) return
@@ -197,16 +198,16 @@ export default function FinancesPage() {
 
   // ── Invoice CRUD ──
   function openNewInvoice() {
-    setEditInv(null); setInvForm(emptyInvoice()); setInvLines([emptyLine()]); setShowInvForm(true)
+    setEditInv(null); setInvForm(emptyInvoice()); setInvLines([emptyLine(defaultCatKey)]); setShowInvForm(true)
   }
   function openEditInvoice(inv: Invoice) {
     setEditInv(inv)
     setInvForm({ supplier: inv.supplier, invoice_number: inv.invoice_number, invoice_date: inv.invoice_date, due_date: inv.due_date || '', status: inv.status, payment_method: inv.payment_method || 'bank_transfer', notes: inv.notes || '' })
-    setInvLines(inv.invoice_lines?.length ? inv.invoice_lines.map(l => ({ id: l.id, category_key: l.category_key, description: l.description || '', qty: Number(l.qty) || 1, uom: l.uom || 'each', unit_price: Number(l.unit_price) || 0, amount: Number(l.amount), vat_amount: Number(l.vat_amount || 0) })) : [emptyLine()])
+    setInvLines(inv.invoice_lines?.length ? inv.invoice_lines.map(l => ({ id: l.id, category_key: l.category_key, description: l.description || '', qty: Number(l.qty) || 1, uom: l.uom || 'each', unit_price: Number(l.unit_price) || 0, amount: Number(l.amount), vat_amount: Number(l.vat_amount || 0) })) : [emptyLine(defaultCatKey)])
     setShowInvForm(true)
   }
 
-  function addLine() { setInvLines(l => [...l, emptyLine()]) }
+  function addLine() { setInvLines(l => [...l, emptyLine(defaultCatKey)]) }
   function removeLine(i: number) { setInvLines(l => l.filter((_, idx) => idx !== i)) }
   function updateLine(i: number, field: keyof InvoiceLine, value: string | number) {
     setInvLines(lines => lines.map((l, idx) => {
@@ -287,8 +288,21 @@ export default function FinancesPage() {
         : file.type === 'image/webp' ? 'image/webp'
         : 'image/jpeg'
 
-      // Read file as ArrayBuffer first, then convert to base64
-      const arrayBuffer = await file.arrayBuffer()
+      // Read file as ArrayBuffer. Falls back to FileReader if direct read fails
+      // (common with OneDrive "Files On-Demand" placeholders that haven't downloaded yet).
+      let arrayBuffer: ArrayBuffer
+      try {
+        arrayBuffer = await file.arrayBuffer()
+      } catch {
+        arrayBuffer = await new Promise<ArrayBuffer>((resolve, reject) => {
+          const reader = new FileReader()
+          reader.onload = () => resolve(reader.result as ArrayBuffer)
+          reader.onerror = () => reject(new Error(
+            'Could not read this file from disk. If it\'s synced via OneDrive, right-click it and select "Always keep on this device", then try again.'
+          ))
+          reader.readAsArrayBuffer(file)
+        })
+      }
       const uint8Array = new Uint8Array(arrayBuffer)
       let binary = ''
       for (let i = 0; i < uint8Array.byteLength; i++) {
@@ -316,7 +330,7 @@ export default function FinancesPage() {
       if (data.notes) setInvForm(f => ({ ...f, notes: data.notes }))
       if (data.lines && data.lines.length > 0) {
         setInvLines(data.lines.map((l: {description?: string; qty?: number; uom?: string; unit_price?: number; amount?: number; vat_amount?: number}) => ({
-          category_key: 'cost_of_sales',
+          category_key: defaultCatKey,
           description: l.description || '',
           qty: Number(l.qty) || 1,
           uom: l.uom || 'each',
@@ -326,7 +340,11 @@ export default function FinancesPage() {
         })))
       }
     } catch (e: unknown) {
-      setScanError(e instanceof Error ? e.message : 'Could not read invoice. Please try again.')
+      const msg = e instanceof Error ? e.message : 'Could not read invoice. Please try again.'
+      const friendly = /could not be found|NotFoundError|NotReadableError/i.test(msg)
+        ? 'Could not read this file from disk — if it\'s synced via OneDrive/Dropbox, make sure it\'s fully downloaded (not just a cloud placeholder), then try again.'
+        : msg
+      setScanError(friendly)
     }
     setScanning(false)
   }
