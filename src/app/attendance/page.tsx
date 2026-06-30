@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 
 const STORE_ID = '05328298-fc27-4c9f-b091-bb7f6598b601';
+const ORG_ID = 'e903386b-133a-4bad-b054-ef7ef616a3ff';
 const PRIMARY = '#1a5c38';
 const DARK = '#0a1f12';
 const EMPLOYER_NAME = 'Mochachos Hartswater (Pty) Ltd';
@@ -15,6 +16,7 @@ type Shift = { id: string; shift_name: string; day_type: string; start_time: str
 type Leave = { id: string; employee_id: string; leave_type: string; start_date: string; end_date: string; days_taken: number; status: string; reason: string | null; paid_hours_per_day: number | null };
 type Advance = { id: string; employee_id: string; amount: number; advance_date: string; repayment_status: string; deduct_from_wages: boolean; reason: string | null };
 type Holiday = { id: string; holiday_date: string; name: string };
+type WagePayment = { id: string; employee_id: string; period: string; paid_date: string; net_pay: number; payment_method: string | null };
 type PayrollSettings = { sunday_multiplier: number; holiday_multiplier: number; overtime_multiplier: number; weekly_ot_threshold: number; monthly_ot_threshold: number; night_allowance_start_hour: number; uif_employee_rate: number; uif_employer_rate: number; uif_ceiling: number };
 
 const ROLE_COLORS: Record<string, { bg: string; color: string }> = {
@@ -70,6 +72,10 @@ export default function AttendancePage() {
   const [monthLeave, setMonthLeave] = useState<Leave[]>([]);
   const [advances, setAdvances] = useState<Advance[]>([]);
   const [holidays, setHolidays] = useState<Holiday[]>([]);
+  const [wagePayments, setWagePayments] = useState<WagePayment[]>([]);
+  const [showPayModal, setShowPayModal] = useState(false);
+  const [payForm, setPayForm] = useState({ paid_date: new Date().toISOString().split('T')[0], payment_method: 'Cash' });
+  const [paying, setPaying] = useState(false);
   const [payrollSettings, setPayrollSettings] = useState<PayrollSettings>({ sunday_multiplier: 1.5, holiday_multiplier: 2, overtime_multiplier: 1.5, weekly_ot_threshold: 45, monthly_ot_threshold: 195, night_allowance_start_hour: 18, uif_employee_rate: 1, uif_employer_rate: 1, uif_ceiling: 17712 });
   const [payrollLoaded, setPayrollLoaded] = useState(false);
   const [selectedPayrollEmployee, setSelectedPayrollEmployee] = useState<Employee | null>(null);
@@ -85,7 +91,7 @@ export default function AttendancePage() {
   async function loadPayrollData() {
     const [py, pm] = payrollMonth.split('-').map(Number);
     const monthEnd = `${payrollMonth}-${String(new Date(py, pm, 0).getDate()).padStart(2, '0')}`;
-    const [attRes, leaveRes, advRes, holRes, setRes] = await Promise.all([
+    const [attRes, leaveRes, advRes, holRes, setRes, payRes] = await Promise.all([
       supabase.from('attendance').select('*').eq('store_id', STORE_ID)
         .gte('work_date', payrollMonth + '-01').lte('work_date', monthEnd),
       supabase.from('employee_leave').select('*').eq('store_id', STORE_ID)
@@ -93,11 +99,13 @@ export default function AttendancePage() {
       supabase.from('employee_advances').select('*').eq('store_id', STORE_ID).order('advance_date', { ascending: false }),
       supabase.from('public_holidays').select('*').eq('store_id', STORE_ID),
       supabase.from('payroll_settings').select('*').eq('store_id', STORE_ID).maybeSingle(),
+      supabase.from('wage_payments').select('*').eq('store_id', STORE_ID).eq('period', payrollMonth),
     ]);
     setMonthAttendance(attRes.data || []);
     setMonthLeave(leaveRes.data || []);
     setAdvances(advRes.data || []);
     setHolidays(holRes.data || []);
+    setWagePayments(payRes.data || []);
     if (setRes.data) {
       const s = setRes.data;
       setPayrollSettings({
@@ -278,6 +286,60 @@ export default function AttendancePage() {
 
   async function markAdvanceRepaid(id: string) {
     await supabase.from('employee_advances').update({ repayment_status: 'repaid', repaid_date: new Date().toISOString().split('T')[0] }).eq('id', id);
+    await loadPayrollData();
+  }
+
+  function isEmployeePaid(employeeId: string) {
+    return wagePayments.find(p => p.employee_id === employeeId);
+  }
+
+  async function markEmployeePaid(emp: Employee, summary: ReturnType<typeof employeeMonthSummary>) {
+    if (isEmployeePaid(emp.id)) { alert(`${emp.full_name} has already been marked paid for this period.`); return; }
+    setPaying(true);
+    const monthLabel = new Date(payrollMonth + '-01').toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' });
+
+    // Make sure a Wages expense category exists so this lands in the right bucket on Income & Expenses
+    let { data: wagesCat } = await supabase.from('expense_categories').select('key, name').eq('organisation_id', ORG_ID).eq('key', 'wages').maybeSingle();
+    if (!wagesCat) {
+      const { data: catCountData } = await supabase.from('expense_categories').select('id', { count: 'exact', head: true }).eq('organisation_id', ORG_ID);
+      await supabase.from('expense_categories').insert({ organisation_id: ORG_ID, name: 'Wages / Salaries', key: 'wages', colour: '#1a5c38', is_active: true, sort_order: (catCountData ? 0 : 0) + 1 });
+      wagesCat = { key: 'wages', name: 'Wages / Salaries' };
+    }
+
+    // Write the actual cash-out expense so it shows up in Income & Expenses / food cost
+    const { data: expenseRow, error: expError } = await supabase.from('expenses').insert({
+      store_id: STORE_ID, expense_date: payForm.paid_date,
+      category_key: 'wages', category_name: wagesCat?.name || 'Wages / Salaries',
+      description: `Wages — ${emp.full_name} — ${monthLabel}`,
+      amount: summary.netPay, vat_amount: 0,
+      supplier: '', invoice_number: '', payment_method: payForm.payment_method, notes: 'Auto-created from Payroll',
+    }).select().single();
+    if (expError) { alert('Error creating expense: ' + expError.message); setPaying(false); return; }
+
+    // Audit record tying this payment to the payroll period, and preventing accidental double-pay
+    const { error: payError } = await supabase.from('wage_payments').insert({
+      store_id: STORE_ID, employee_id: emp.id, period: payrollMonth, paid_date: payForm.paid_date,
+      gross_pay: summary.totalPay, uif_employee: summary.uifEmployee, uif_employer: summary.uifEmployer,
+      advances_deducted: summary.outstandingAdvances, net_pay: summary.netPay, payment_method: payForm.payment_method,
+      expense_id: expenseRow?.id || null,
+    });
+    if (payError) { alert('Error recording payment: ' + payError.message); setPaying(false); return; }
+
+    // Any advances that were deducted in this pay run are now settled
+    const empAdvances = advances.filter(a => a.employee_id === emp.id && a.deduct_from_wages && a.repayment_status === 'outstanding');
+    for (const adv of empAdvances) {
+      await supabase.from('employee_advances').update({ repayment_status: 'repaid', repaid_date: payForm.paid_date }).eq('id', adv.id);
+    }
+
+    setShowPayModal(false);
+    setPaying(false);
+    await loadPayrollData();
+  }
+
+  async function undoEmployeePayment(payment: WagePayment) {
+    if (!confirm('Undo this payment? This removes the expense entry and payment record — advances will need to be re-marked manually if needed.')) return;
+    if (payment.expense_id) await supabase.from('expenses').delete().eq('id', payment.expense_id);
+    await supabase.from('wage_payments').delete().eq('id', payment.id);
     await loadPayrollData();
   }
 
@@ -670,6 +732,7 @@ export default function AttendancePage() {
         const days = buildRegisterDays(selectedPayrollEmployee.id);
         const empAdvances = advances.filter(a => a.employee_id === selectedPayrollEmployee.id);
         return (
+          <>
           <div style={{ position: 'fixed' as const, inset: 0, zIndex: 1500, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
             <div onClick={() => setSelectedPayrollEmployee(null)} style={{ position: 'absolute' as const, inset: 0, background: 'rgba(0,0,0,0.5)', cursor: 'pointer' }} />
             <div style={{ position: 'relative' as const, width: '100%', maxWidth: 1000, maxHeight: '92vh', background: '#f8faf8', borderRadius: 20, overflow: 'hidden', display: 'flex', flexDirection: 'column' as const, boxShadow: '0 24px 60px rgba(0,0,0,0.3)' }}>
@@ -685,6 +748,18 @@ export default function AttendancePage() {
                   <button onClick={() => printPayslip(selectedPayrollEmployee, summary, days)} style={{ background: '#fff', color: PRIMARY, border: 'none', borderRadius: 8, padding: '5px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>📄 Payslip PDF</button>
                   <button onClick={() => emailPayslip(selectedPayrollEmployee, summary)} style={{ background: 'rgba(255,255,255,0.15)', border: 'none', color: '#fff', borderRadius: 8, padding: '5px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>✉️ Email</button>
                   <button onClick={() => whatsappPayslip(selectedPayrollEmployee, summary)} style={{ background: '#25D366', border: 'none', color: '#fff', borderRadius: 8, padding: '5px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>💬 WhatsApp</button>
+                  <div style={{ width: 1, background: 'rgba(255,255,255,0.25)', margin: '2px 4px' }} />
+                  {(() => {
+                    const payment = isEmployeePaid(selectedPayrollEmployee.id);
+                    return payment ? (
+                      <>
+                        <span style={{ background: 'rgba(34,197,94,0.25)', color: '#bbf7d0', border: '1px solid rgba(34,197,94,0.4)', borderRadius: 8, padding: '5px 12px', fontSize: 12, fontWeight: 700 }}>✓ Paid R{payment.net_pay.toFixed(2)} on {payment.paid_date}</span>
+                        <button onClick={() => undoEmployeePayment(payment)} style={{ background: 'rgba(255,255,255,0.15)', border: 'none', color: '#fff', borderRadius: 8, padding: '5px 12px', cursor: 'pointer', fontSize: 12 }}>Undo</button>
+                      </>
+                    ) : (
+                      <button onClick={() => { setPayForm({ paid_date: new Date().toISOString().split('T')[0], payment_method: 'Cash' }); setShowPayModal(true); }} style={{ background: '#fbbf24', color: '#1a1a1a', border: 'none', borderRadius: 8, padding: '5px 14px', cursor: 'pointer', fontSize: 12, fontWeight: 800 }}>💰 Mark as Paid</button>
+                    );
+                  })()}
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
                   <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'rgba(255,255,255,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, fontWeight: 800, color: '#fff', flexShrink: 0 }}>{initials(selectedPayrollEmployee.full_name)}</div>
@@ -785,6 +860,27 @@ export default function AttendancePage() {
               </div>
             </div>
           </div>
+
+          {showPayModal && (
+            <ModalWrap onClose={() => setShowPayModal(false)}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+                <div style={{ fontSize: 18, fontWeight: 700 }}>Mark as Paid</div>
+                <button onClick={() => setShowPayModal(false)} style={{ background: '#f0f4f0', border: 'none', borderRadius: 8, padding: '6px 14px', cursor: 'pointer' }}>Cancel</button>
+              </div>
+              <div style={{ background: '#f0f7f4', borderRadius: 12, padding: 16, marginBottom: 16 }}>
+                <div style={{ fontSize: 13, color: '#666', marginBottom: 4 }}>{selectedPayrollEmployee.full_name} — {new Date(payrollMonth + '-01').toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' })}</div>
+                <div style={{ fontSize: 24, fontWeight: 800, color: PRIMARY }}>R{summary.netPay.toFixed(2)}</div>
+                <div style={{ fontSize: 12, color: '#999' }}>Net pay, after UIF{summary.outstandingAdvances > 0 ? ' and advances' : ''}</div>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                <div><label style={lbl}>Date Paid</label><input type="date" value={payForm.paid_date} onChange={e => setPayForm(p => ({ ...p, paid_date: e.target.value }))} style={inp} /></div>
+                <div><label style={lbl}>Payment Method</label><select value={payForm.payment_method} onChange={e => setPayForm(p => ({ ...p, payment_method: e.target.value }))} style={inp}>{['Cash', 'Bank Transfer', 'EFT'].map(m => <option key={m}>{m}</option>)}</select></div>
+              </div>
+              <div style={{ fontSize: 12, color: '#999', marginTop: 12 }}>This will create a R{summary.netPay.toFixed(2)} expense under &quot;Wages / Salaries&quot; in Income &amp; Expenses dated {payForm.paid_date}, and settle any outstanding advances deducted this period.</div>
+              <button onClick={() => markEmployeePaid(selectedPayrollEmployee, summary)} disabled={paying} style={{ width: '100%', marginTop: 20, padding: '13px', background: '#fbbf24', color: '#1a1a1a', border: 'none', borderRadius: 12, fontWeight: 800, cursor: 'pointer', fontSize: 15 }}>{paying ? 'Saving…' : `💰 Confirm Paid R${summary.netPay.toFixed(2)}`}</button>
+            </ModalWrap>
+          )}
+          </>
         );
       })()}
 
@@ -970,6 +1066,7 @@ export default function AttendancePage() {
                               <div style={{ fontWeight: 700, color: '#333', fontSize: 15 }}>{emp.full_name}</div>
                               <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: colors.bg, color: colors.color }}>{emp.role}</span>
                             </div>
+                            {isEmployeePaid(emp.id) && <span style={{ fontSize: 10, fontWeight: 700, color: '#16a34a', background: '#dcfce7', padding: '3px 8px', borderRadius: 20 }}>✓ PAID</span>}
                           </div>
                           <div style={{ marginBottom: 10 }}>
                             {editingRate === emp.id ? (
