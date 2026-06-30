@@ -213,6 +213,12 @@ export default function StockPage() {
   async function completeCount() {
     if (!activeCount) return
     await supabase.from('stock_counts').update({ status: 'completed' }).eq('id', activeCount.id)
+    // Physical count is the source of truth — reconcile running stock balances to what was actually counted.
+    await Promise.all(
+      countLines
+        .filter(l => l.stock_item_id)
+        .map(l => supabase.from('stock_items').update({ current_qty: Number(l.actual_qty) || 0 }).eq('id', l.stock_item_id))
+    )
     setActiveCount(null); setCountLines([]); await loadAll()
   }
 
