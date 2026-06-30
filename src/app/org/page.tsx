@@ -25,6 +25,12 @@ export default function OrgPage() {
   const [orgName, setOrgName] = useState('');
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
+  const [showDistribute, setShowDistribute] = useState(false);
+  const [distSourceId, setDistSourceId] = useState('');
+  const [distTargets, setDistTargets] = useState<string[]>([]);
+  const [distSending, setDistSending] = useState(false);
+  const [distResult, setDistResult] = useState('');
+
   useEffect(() => { checkAuthAndLoad(); }, []);
 
   useEffect(() => {
@@ -37,6 +43,46 @@ export default function OrgPage() {
     const poll = setInterval(() => { loadStats(stores); }, 60000);
     return () => { supabase.removeChannel(channel); clearInterval(poll); };
   }, [stores]);
+
+  async function runDistribute() {
+    if (!distSourceId || distTargets.length === 0) return
+    setDistSending(true)
+    setDistResult('')
+
+    const [{ data: sourceCats }, { data: sourceItems }] = await Promise.all([
+      supabase.from('stock_categories').select('*').eq('store_id', distSourceId).order('sort_order'),
+      supabase.from('stock_items').select('*').eq('store_id', distSourceId).eq('is_active', true),
+    ])
+
+    let storesDone = 0
+    for (const targetId of distTargets) {
+      // Recreate categories at the target store, keeping an old-id -> new-id map so items
+      // can be re-linked correctly. Quantity, supplier, and local cost are deliberately NOT
+      // copied — those are real per-store realities, not shared template data.
+      const catIdMap: Record<string, string> = {}
+      for (const cat of sourceCats || []) {
+        const { data: newCat } = await supabase.from('stock_categories')
+          .insert({ store_id: targetId, name: cat.name, color: cat.color, sort_order: cat.sort_order })
+          .select().single()
+        if (newCat) catIdMap[cat.id] = newCat.id
+      }
+      const newItems = (sourceItems || []).map(item => ({
+        store_id: targetId,
+        category: item.category ? (catIdMap[item.category] || null) : null,
+        name: item.name, description: item.description, unit: item.unit,
+        cost_price: item.cost_price, price: item.price, par_level: item.par_level,
+        current_qty: 0, is_active: true, sort_order: item.sort_order,
+        supplier: null, // each store picks their own local supplier
+        on_daily_sheet: item.on_daily_sheet, is_catch_weight: item.is_catch_weight,
+        kg_price: item.kg_price, avg_weight_kg: item.avg_weight_kg,
+      }))
+      if (newItems.length) await supabase.from('stock_items').insert(newItems)
+      storesDone++
+    }
+
+    setDistResult(`Sent ${(sourceItems || []).length} stock items to ${storesDone} store${storesDone === 1 ? '' : 's'}. Each store still needs to assign their own local suppliers.`)
+    setDistSending(false)
+  }
 
   async function checkAuthAndLoad() {
     const { data: { user } } = await supabase.auth.getUser();
@@ -216,9 +262,12 @@ export default function OrgPage() {
             </div>
 
             {/* Store cards */}
-            <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' as const, gap: 10 }}>
               <h2 style={{ fontSize: 18, fontWeight: 700, color: '#333', margin: 0 }}>Store Overview — Today</h2>
-              <span style={{ fontSize: 13, color: '#aaa' }}>Click a store to open its full dashboard</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                <span style={{ fontSize: 13, color: '#aaa' }}>Click a store to open its full dashboard</span>
+                <button onClick={() => { setShowDistribute(true); setDistSourceId(stores[0]?.id || ''); setDistTargets([]); setDistResult(''); }} style={{ padding: '10px 18px', background: PRIMARY, color: '#fff', border: 'none', borderRadius: 10, fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>📋 Distribute Stocksheet</button>
+              </div>
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 20 }}>
@@ -298,6 +347,44 @@ export default function OrgPage() {
           </div>
         )}
       </div>
+
+      {showDistribute && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 20 }} onClick={() => setShowDistribute(false)}>
+          <div style={{ background: '#fff', borderRadius: 20, padding: 28, width: 480, maxWidth: '100%', maxHeight: '85vh', overflowY: 'auto' as const }} onClick={e => e.stopPropagation()}>
+            <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 4 }}>📋 Distribute Stocksheet</div>
+            <p style={{ fontSize: 13, color: '#888', margin: '0 0 20px' }}>Copies stock categories and items from one store to others. Quantities start at zero and suppliers stay blank — each store sets those up locally.</p>
+
+            <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 6 }}>Copy from</label>
+            <select value={distSourceId} onChange={e => setDistSourceId(e.target.value)} style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1.5px solid #e5e7eb', fontSize: 14, marginBottom: 18 }}>
+              {stores.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+
+            <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 6 }}>Send to</label>
+            <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 8, marginBottom: 20 }}>
+              {stores.filter(s => s.id !== distSourceId).map(s => (
+                <label key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', border: '1.5px solid #f0f0f0', borderRadius: 10, cursor: 'pointer', fontSize: 14 }}>
+                  <input type="checkbox" checked={distTargets.includes(s.id)} onChange={e => setDistTargets(t => e.target.checked ? [...t, s.id] : t.filter(id => id !== s.id))} />
+                  {s.name} <span style={{ color: '#aaa', fontSize: 12 }}>— {s.city}</span>
+                </label>
+              ))}
+              {stores.filter(s => s.id !== distSourceId).length === 0 && (
+                <div style={{ fontSize: 13, color: '#aaa', textAlign: 'center' as const, padding: 12 }}>No other stores yet — add another store first.</div>
+              )}
+            </div>
+
+            {distResult && (
+              <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, padding: '10px 14px', fontSize: 13, color: '#166534', marginBottom: 16 }}>{distResult}</div>
+            )}
+
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button onClick={() => setShowDistribute(false)} style={{ padding: '12px 18px', background: '#f0f0f0', color: '#333', border: 'none', borderRadius: 10, fontWeight: 700, cursor: 'pointer' }}>Close</button>
+              <button onClick={runDistribute} disabled={distSending || distTargets.length === 0} style={{ flex: 1, padding: '12px', background: distSending || distTargets.length === 0 ? '#ccc' : PRIMARY, color: '#fff', border: 'none', borderRadius: 10, fontWeight: 700, cursor: distSending || distTargets.length === 0 ? 'not-allowed' : 'pointer' }}>
+                {distSending ? 'Sending…' : `Send to ${distTargets.length || ''} Store${distTargets.length === 1 ? '' : 's'}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
