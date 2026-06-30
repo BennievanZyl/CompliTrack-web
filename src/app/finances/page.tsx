@@ -567,6 +567,12 @@ export default function FinancesPage() {
                 </div>
               </div>
 
+              {scanError && (
+                <div style={{ background: '#fef2f2', color: '#dc2626', padding: '10px 14px', borderRadius: 8, marginBottom: 16, fontSize: 13, fontWeight: 600, border: '1px solid #fecaca' }}>
+                  ⚠️ Scan failed: {scanError}
+                </div>
+              )}
+
               {/* Invoice form */}
               {showInvForm && (
                 <div style={{ ...card, border: '2px solid #1a5c38', marginBottom: 24 }}>
