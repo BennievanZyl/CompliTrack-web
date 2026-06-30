@@ -20,7 +20,7 @@ type EmployeeDocument = {
 };
 type EmployeeLeave = {
   id: string; leave_type: string; start_date: string; end_date: string;
-  days_taken: number; status: string; reason: string | null; notes: string | null; created_at: string;
+  days_taken: number; status: string; reason: string | null; notes: string | null; created_at: string; paid_hours_per_day: number | null;
 };
 type EmployeeWarning = {
   id: string; warning_type: string; reason: string; incident_date: string;
@@ -63,6 +63,11 @@ const PROFILE_TABS: { key: ProfileTab; label: string; emoji: string }[] = [
 
 // ─── PURE FUNCTIONS ───────────────────────────────────────────────────────────
 function initials(name: string) { return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2); }
+function formatHM(decimalHours: number | null | undefined) {
+  if (!decimalHours) return '0h 0m';
+  const totalMinutes = Math.round(decimalHours * 60);
+  return `${Math.floor(totalMinutes / 60)}h ${totalMinutes % 60}m`;
+}
 function fmt(n: number) { return `R ${n.toFixed(2)}`; }
 function tenure(startDate: string) {
   const months = Math.floor((Date.now() - new Date(startDate).getTime()) / (1000 * 60 * 60 * 24 * 30));
@@ -181,7 +186,7 @@ export default function PeoplePage() {
   const [empForm, setEmpForm] = useState({ full_name: '', role: 'Cashier', phone: '', id_number: '', start_date: '', employment_type: 'full_time', notes: '', is_active: true });
   const [docForm, setDocForm] = useState({ document_type: 'Employment Contract', document_name: '', expiry_date: '', notes: '' });
   const [docFile, setDocFile] = useState<File | null>(null);
-  const [leaveForm, setLeaveForm] = useState({ leave_type: 'Annual', start_date: '', end_date: '', days_taken: '', status: 'approved', reason: '', notes: '' });
+  const [leaveForm, setLeaveForm] = useState({ leave_type: 'Annual', start_date: '', end_date: '', days_taken: '', status: 'approved', reason: '', notes: '', paid_hours_per_day: '' });
   const [warningForm, setWarningForm] = useState({ warning_type: 'Written Warning', reason: '', incident_date: '', issued_by: '', notes: '' });
   const [warningFile, setWarningFile] = useState<File | null>(null);
   const [advanceForm, setAdvanceForm] = useState({ amount: '', reason: '', advance_date: new Date().toISOString().split('T')[0], repayment_status: 'outstanding', deduct_from_wages: false, notes: '' });
@@ -257,8 +262,8 @@ export default function PeoplePage() {
     if (!selectedEmployee || !leaveForm.start_date || !leaveForm.end_date) return;
     setSaving(true); setSaveError(null);
     try {
-      await supabase.from('employee_leave').insert({ employee_id: selectedEmployee.id, store_id: STORE_ID, leave_type: leaveForm.leave_type, start_date: leaveForm.start_date, end_date: leaveForm.end_date, days_taken: parseFloat(leaveForm.days_taken) || 1, status: leaveForm.status, reason: leaveForm.reason || null, notes: leaveForm.notes || null });
-      await loadEmployeeProfile(selectedEmployee); setShowLeaveModal(false); setLeaveForm({ leave_type: 'Annual', start_date: '', end_date: '', days_taken: '', status: 'approved', reason: '', notes: '' });
+      await supabase.from('employee_leave').insert({ employee_id: selectedEmployee.id, store_id: STORE_ID, leave_type: leaveForm.leave_type, start_date: leaveForm.start_date, end_date: leaveForm.end_date, days_taken: parseFloat(leaveForm.days_taken) || 1, status: leaveForm.status, reason: leaveForm.reason || null, notes: leaveForm.notes || null, paid_hours_per_day: parseFloat(leaveForm.paid_hours_per_day) || 0 });
+      await loadEmployeeProfile(selectedEmployee); setShowLeaveModal(false); setLeaveForm({ leave_type: 'Annual', start_date: '', end_date: '', days_taken: '', status: 'approved', reason: '', notes: '', paid_hours_per_day: '' });
     } catch (e: unknown) { setSaveError(e instanceof Error ? e.message : 'Failed to save'); }
     setSaving(false);
   }
@@ -376,6 +381,7 @@ export default function PeoplePage() {
               <div><label style={lbl}>Days Taken</label><input type="number" min="0.5" step="0.5" value={leaveForm.days_taken} onChange={e => setLeaveForm(p => ({ ...p, days_taken: e.target.value }))} placeholder="1" style={inp} /></div>
               <div><label style={lbl}>Status</label><select value={leaveForm.status} onChange={e => setLeaveForm(p => ({ ...p, status: e.target.value }))} style={inp}><option value="pending">Pending</option><option value="approved">Approved</option><option value="rejected">Rejected</option></select></div>
             </div>
+            <div><label style={lbl}>Hours to Pay per Day</label><input type="number" step="0.25" placeholder="e.g. 5 for a 10:00–15:00 shift" value={leaveForm.paid_hours_per_day} onChange={e => setLeaveForm(p => ({ ...p, paid_hours_per_day: e.target.value }))} style={inp} /><div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>Used by Payroll to calculate this leave's pay. Leave at 0 if unpaid.</div></div>
             <div><label style={lbl}>Reason</label><textarea value={leaveForm.reason} onChange={e => setLeaveForm(p => ({ ...p, reason: e.target.value }))} rows={2} style={{ ...inp, resize: 'vertical' as const }} /></div>
           </div>
           <ErrorBanner msg={saveError} />
@@ -570,7 +576,7 @@ export default function PeoplePage() {
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                             <div>
                               <div style={{ fontWeight: 700, color: '#333', fontSize: 14 }}>{l.leave_type} Leave</div>
-                              <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>{new Date(l.start_date).toLocaleDateString('en-ZA')} — {new Date(l.end_date).toLocaleDateString('en-ZA')} ({l.days_taken} day{l.days_taken !== 1 ? 's' : ''})</div>
+                              <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>{new Date(l.start_date).toLocaleDateString('en-ZA')} — {new Date(l.end_date).toLocaleDateString('en-ZA')} ({l.days_taken} day{l.days_taken !== 1 ? 's' : ''}){l.paid_hours_per_day ? ` · ${l.paid_hours_per_day}h/day paid` : ' · unpaid'}</div>
                               {l.reason && <div style={{ fontSize: 12, color: '#888', marginTop: 4, fontStyle: 'italic' }}>{l.reason}</div>}
                             </div>
                             <span style={{ fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 20, background: l.status === 'approved' ? '#e8f5e9' : l.status === 'rejected' ? '#fdecea' : '#fff8e1', color: l.status === 'approved' ? PRIMARY : l.status === 'rejected' ? '#ef4444' : '#f59e0b', whiteSpace: 'nowrap' as const }}>{l.status.toUpperCase()}</span>
@@ -649,7 +655,7 @@ export default function PeoplePage() {
                       {[
                         { label: 'Days Logged', value: attendance.length },
                         { label: 'Late Arrivals', value: attendance.filter(a => a.is_late).length },
-                        { label: 'Avg Hours', value: attendance.filter(a => a.hours_worked).length > 0 ? (attendance.filter(a => a.hours_worked).reduce((s, a) => s + (a.hours_worked || 0), 0) / attendance.filter(a => a.hours_worked).length).toFixed(1) + 'h' : '—' },
+                        { label: 'Avg Hours', value: attendance.filter(a => a.hours_worked).length > 0 ? formatHM(attendance.filter(a => a.hours_worked).reduce((s, a) => s + (a.hours_worked || 0), 0) / attendance.filter(a => a.hours_worked).length) : '—' },
                       ].map(item => (
                         <div key={item.label} style={{ background: '#f8faf8', borderRadius: 10, padding: '12px', textAlign: 'center' as const, border: '1px solid #eef2ee' }}>
                           <div style={{ fontSize: 22, fontWeight: 800, color: PRIMARY }}>{item.value}</div>
@@ -668,7 +674,7 @@ export default function PeoplePage() {
                             </div>
                           </div>
                           <div style={{ textAlign: 'right' as const }}>
-                            {a.hours_worked && <div style={{ fontWeight: 700, color: PRIMARY, fontSize: 15 }}>{a.hours_worked.toFixed(1)}h</div>}
+                            {a.hours_worked ? <div style={{ fontWeight: 700, color: PRIMARY, fontSize: 15 }}>{formatHM(a.hours_worked)}</div> : null}
                             {a.is_late && <span style={{ fontSize: 10, fontWeight: 700, color: '#f59e0b' }}>LATE</span>}
                           </div>
                         </div>
