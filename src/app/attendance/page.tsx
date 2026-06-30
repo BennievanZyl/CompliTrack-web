@@ -170,11 +170,23 @@ export default function AttendancePage() {
       const leaveHours = leave && leave.status === 'approved' && sessions.length === 0 ? (leave.paid_hours_per_day || 0) : 0;
       const firstIn = sessions.length ? sessions.reduce((a, b) => (a.clock_in || '') < (b.clock_in || '') ? a : b).clock_in : null;
       const lastSession = sessions.length ? sessions.reduce((a, b) => (a.clock_in || '') > (b.clock_in || '') ? a : b) : null;
+      const sessionRows = sessions
+        .slice()
+        .sort((a, b) => (a.clock_in || '').localeCompare(b.clock_in || ''))
+        .map(s => {
+          const sHours = s.hours_worked || 0;
+          const sNight = s.clock_in && s.clock_out ? nightHoursForSession(s.clock_in, s.clock_out, payrollSettings.night_allowance_start_hour) : 0;
+          return {
+            clockIn: s.clock_in, clockOut: s.clock_out, hours: sHours, nightHours: sNight,
+            isLate: s.is_late, isOpen: !!(s.clock_in && !s.clock_out),
+            pay: sHours * rate * mult + sNight * nightRate,
+          };
+        });
       days.push({
         date: dateStr,
         dayName: new Date(dateStr + 'T00:00:00').toLocaleDateString('en-ZA', { weekday: 'short' }),
         hours, mult, label, type, leave, leaveHours, nightHours,
-        sessionCount: sessions.length,
+        sessionCount: sessions.length, sessions: sessionRows,
         pay: sessions.length ? hours * rate * mult + nightHours * nightRate : leaveHours * rate,
         clockIn: firstIn, clockOut: lastSession?.clock_out, isLate: sessions.some(r => r.is_late), isOpen: sessions.some(r => r.clock_in && !r.clock_out),
       });
@@ -357,12 +369,21 @@ export default function AttendancePage() {
       ['Date', 'Day', 'Clock In', 'Clock Out', 'Hours', 'Type', 'Pay (R)'],
     ];
     for (const day of [...days].reverse()) {
-      const clockIn = day.clockIn ? new Date(day.clockIn).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : '';
-      const clockOut = day.clockOut ? new Date(day.clockOut).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : '';
-      const hours = day.leave ? formatHM(day.leaveHours) : day.hours > 0 ? formatHM(day.hours) : '';
       const type = day.leave ? `${day.leave.leave_type} leave${day.leave.status !== 'approved' ? ` (${day.leave.status})` : ''}` : day.label || '';
-      const pay = day.pay > 0 ? day.pay.toFixed(2) : '';
-      rows.push([day.date, day.dayName, clockIn, clockOut, hours, type, pay]);
+      if (day.sessions.length <= 1) {
+        const s = day.sessions[0];
+        const clockIn = s?.clockIn ? new Date(s.clockIn).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : '';
+        const clockOut = s?.isOpen ? 'On shift' : s?.clockOut ? new Date(s.clockOut).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : '';
+        const hours = day.leave ? formatHM(day.leaveHours) : day.hours > 0 ? formatHM(day.hours) : '';
+        const pay = day.pay > 0 ? day.pay.toFixed(2) : '';
+        rows.push([day.date, day.dayName, clockIn, clockOut, hours, type, pay]);
+      } else {
+        day.sessions.forEach((s, i) => {
+          const clockIn = s.clockIn ? new Date(s.clockIn).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : '';
+          const clockOut = s.isOpen ? 'On shift' : s.clockOut ? new Date(s.clockOut).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : '';
+          rows.push([i === 0 ? day.date : '', i === 0 ? day.dayName : `Session ${i + 1}`, clockIn, clockOut, formatHM(s.hours), i === 0 ? type : '', s.pay > 0 ? s.pay.toFixed(2) : '']);
+        });
+      }
     }
     const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -397,13 +418,22 @@ export default function AttendancePage() {
     const monthLabel = new Date(payrollMonth + '-01').toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' });
     const rate = emp.hourly_rate || 0;
     const rowsHtml = [...days].reverse().map(day => {
-      const clockIn = day.clockIn ? new Date(day.clockIn).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : '—';
-      const clockOut = day.clockOut ? new Date(day.clockOut).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : '—';
-      const hours = day.leave ? formatHM(day.leaveHours) : day.hours > 0 ? formatHM(day.hours) : '—';
       const type = day.leave ? `${day.leave.leave_type} leave` : day.label || '';
-      const pay = day.pay > 0 ? `R${day.pay.toFixed(2)}` : '—';
       const rowBg = day.type === 'holiday' ? '#fde8e8' : (day.type === 'sunday' || new Date(day.date + 'T00:00:00').getDay() === 6) ? '#f3f4f6' : '#fff';
-      return `<tr style="background:${rowBg}"><td>${day.date}</td><td>${day.dayName}</td><td>${clockIn}</td><td>${clockOut}</td><td>${hours}</td><td>${type}</td><td style="text-align:right">${pay}</td></tr>`;
+      if (day.sessions.length <= 1) {
+        const s = day.sessions[0];
+        const clockIn = s?.clockIn ? new Date(s.clockIn).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : '—';
+        const clockOut = s?.isOpen ? 'On shift' : s?.clockOut ? new Date(s.clockOut).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : '—';
+        const hours = day.leave ? formatHM(day.leaveHours) : day.hours > 0 ? formatHM(day.hours) : '—';
+        const pay = day.pay > 0 ? `R${day.pay.toFixed(2)}` : '—';
+        return `<tr style="background:${rowBg}"><td>${day.date}</td><td>${day.dayName}</td><td>${clockIn}</td><td>${clockOut}</td><td>${hours}</td><td>${type}</td><td style="text-align:right">${pay}</td></tr>`;
+      }
+      return day.sessions.map((s, i) => {
+        const clockIn = s.clockIn ? new Date(s.clockIn).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : '—';
+        const clockOut = s.isOpen ? 'On shift' : s.clockOut ? new Date(s.clockOut).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : '—';
+        const pay = s.pay > 0 ? `R${s.pay.toFixed(2)}` : '—';
+        return `<tr style="background:${rowBg}"><td>${i === 0 ? day.date : ''}</td><td>${i === 0 ? day.dayName : `Session ${i + 1}`}</td><td>${clockIn}</td><td>${clockOut}</td><td>${formatHM(s.hours)}</td><td>${i === 0 ? type : ''}</td><td style="text-align:right">${pay}</td></tr>`;
+      }).join('');
     }).join('');
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${emp.full_name} — ${monthLabel}</title>
       <style>
@@ -884,32 +914,52 @@ export default function AttendancePage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {days.map(day => {
+                      {days.flatMap(day => {
                         const isWeekend = new Date(day.date + 'T00:00:00').getDay() === 6 || day.type === 'sunday';
                         const rowBg = day.type === 'holiday' ? '#fde8e8' : isWeekend ? '#f3f4f6' : '#fff';
-                        return (
-                          <tr key={day.date} style={{ background: rowBg, borderBottom: '1px solid #f3f4f6' }}>
-                            <td style={{ padding: '8px 12px', color: '#374151' }}>{day.date}</td>
-                            <td style={{ padding: '8px 12px', color: '#6b7280', fontWeight: 600 }}>{day.dayName}</td>
-                            <td style={{ padding: '8px 12px', color: '#374151' }}>{day.clockIn ? new Date(day.clockIn).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : '—'}</td>
-                            <td style={{ padding: '8px 12px', color: '#374151' }}>{day.isOpen ? <span style={{ color: '#22c55e', fontWeight: 700 }}>On shift</span> : day.clockOut ? new Date(day.clockOut).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : '—'}{day.sessionCount > 1 && <span style={{ fontSize: 10, color: '#999', marginLeft: 4 }}>({day.sessionCount}x)</span>}</td>
-                            <td style={{ padding: '8px 12px', fontWeight: 700, color: '#111' }}>
-                              {day.leave ? formatHM(day.leaveHours) : day.hours > 0 ? formatHM(day.hours) : '—'}
-                              {day.isLate && <span style={{ fontSize: 10, fontWeight: 700, color: '#f59e0b', marginLeft: 6 }}>LATE</span>}
-                              {day.nightHours > 0 && <span style={{ fontSize: 10, fontWeight: 700, color: '#7c3aed', marginLeft: 6 }}>🌙 {formatHM(day.nightHours)}</span>}
-                            </td>
-                            <td style={{ padding: '8px 12px' }}>
-                              {day.leave ? (
-                                <span style={{ color: '#c2410c', fontWeight: 600 }}>🌴 {day.leave.leave_type}{day.leave.status !== 'approved' ? ` (${day.leave.status})` : ''}</span>
-                              ) : day.label ? (
-                                <span style={{ color: day.type === 'holiday' ? '#dc2626' : '#2563eb', fontWeight: 700 }}>{day.label} · {day.mult}x</span>
-                              ) : (
-                                <span style={{ color: '#ccc' }}>—</span>
-                              )}
-                            </td>
-                            <td style={{ padding: '8px 12px', textAlign: 'right' as const, fontWeight: 700, color: PRIMARY }}>{day.pay > 0 ? `R${day.pay.toFixed(2)}` : '—'}</td>
-                          </tr>
+                        const typeCell = day.leave ? (
+                          <span style={{ color: '#c2410c', fontWeight: 600 }}>🌴 {day.leave.leave_type}{day.leave.status !== 'approved' ? ` (${day.leave.status})` : ''}</span>
+                        ) : day.label ? (
+                          <span style={{ color: day.type === 'holiday' ? '#dc2626' : '#2563eb', fontWeight: 700 }}>{day.label} · {day.mult}x</span>
+                        ) : (
+                          <span style={{ color: '#ccc' }}>—</span>
                         );
+                        // No sessions that day (leave or blank) — one summary row as before
+                        if (day.sessions.length <= 1) {
+                          const s = day.sessions[0];
+                          return [
+                            <tr key={day.date} style={{ background: rowBg, borderBottom: '1px solid #f3f4f6' }}>
+                              <td style={{ padding: '8px 12px', color: '#374151' }}>{day.date}</td>
+                              <td style={{ padding: '8px 12px', color: '#6b7280', fontWeight: 600 }}>{day.dayName}</td>
+                              <td style={{ padding: '8px 12px', color: '#374151' }}>{s?.clockIn ? new Date(s.clockIn).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : '—'}</td>
+                              <td style={{ padding: '8px 12px', color: '#374151' }}>{s?.isOpen ? <span style={{ color: '#22c55e', fontWeight: 700 }}>On shift</span> : s?.clockOut ? new Date(s.clockOut).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : '—'}</td>
+                              <td style={{ padding: '8px 12px', fontWeight: 700, color: '#111' }}>
+                                {day.leave ? formatHM(day.leaveHours) : day.hours > 0 ? formatHM(day.hours) : '—'}
+                                {day.isLate && <span style={{ fontSize: 10, fontWeight: 700, color: '#f59e0b', marginLeft: 6 }}>LATE</span>}
+                                {day.nightHours > 0 && <span style={{ fontSize: 10, fontWeight: 700, color: '#7c3aed', marginLeft: 6 }}>🌙 {formatHM(day.nightHours)}</span>}
+                              </td>
+                              <td style={{ padding: '8px 12px' }}>{typeCell}</td>
+                              <td style={{ padding: '8px 12px', textAlign: 'right' as const, fontWeight: 700, color: PRIMARY }}>{day.pay > 0 ? `R${day.pay.toFixed(2)}` : '—'}</td>
+                            </tr>
+                          ];
+                        }
+                        // Multiple sessions that day — one row per session, each with its own real
+                        // clock in/out so nothing implies a single long shift that didn't happen.
+                        return day.sessions.map((s, i) => (
+                          <tr key={`${day.date}-${i}`} style={{ background: rowBg, borderBottom: i === day.sessions.length - 1 ? '2px solid #e5e7eb' : '1px dashed #e5e7eb' }}>
+                            <td style={{ padding: '8px 12px', color: i === 0 ? '#374151' : '#bbb' }}>{i === 0 ? day.date : ''}</td>
+                            <td style={{ padding: '8px 12px', color: i === 0 ? '#6b7280' : '#ccc', fontWeight: 600 }}>{i === 0 ? day.dayName : `Session ${i + 1}`}</td>
+                            <td style={{ padding: '8px 12px', color: '#374151' }}>{s.clockIn ? new Date(s.clockIn).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : '—'}</td>
+                            <td style={{ padding: '8px 12px', color: '#374151' }}>{s.isOpen ? <span style={{ color: '#22c55e', fontWeight: 700 }}>On shift</span> : s.clockOut ? new Date(s.clockOut).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : '—'}</td>
+                            <td style={{ padding: '8px 12px', fontWeight: 700, color: '#111' }}>
+                              {formatHM(s.hours)}
+                              {s.isLate && <span style={{ fontSize: 10, fontWeight: 700, color: '#f59e0b', marginLeft: 6 }}>LATE</span>}
+                              {s.nightHours > 0 && <span style={{ fontSize: 10, fontWeight: 700, color: '#7c3aed', marginLeft: 6 }}>🌙 {formatHM(s.nightHours)}</span>}
+                            </td>
+                            <td style={{ padding: '8px 12px' }}>{i === 0 ? typeCell : null}</td>
+                            <td style={{ padding: '8px 12px', textAlign: 'right' as const, fontWeight: 700, color: PRIMARY }}>{s.pay > 0 ? `R${s.pay.toFixed(2)}` : '—'}</td>
+                          </tr>
+                        ));
                       })}
                     </tbody>
                   </table>
