@@ -17,7 +17,7 @@ type Leave = { id: string; employee_id: string; leave_type: string; start_date: 
 type Advance = { id: string; employee_id: string; amount: number; advance_date: string; repayment_status: string; deduct_from_wages: boolean; reason: string | null };
 type Holiday = { id: string; holiday_date: string; name: string };
 type WagePayment = { id: string; employee_id: string; period: string; paid_date: string; net_pay: number; payment_method: string | null };
-type PayrollSettings = { sunday_multiplier: number; holiday_multiplier: number; overtime_multiplier: number; weekly_ot_threshold: number; monthly_ot_threshold: number; night_allowance_start_hour: number; uif_employee_rate: number; uif_employer_rate: number; uif_ceiling: number };
+type PayrollSettings = { sunday_multiplier: number; holiday_multiplier: number; overtime_multiplier: number; weekly_ot_threshold: number; monthly_ot_threshold: number; night_allowance_start_hour: number; default_night_rate: number; uif_employee_rate: number; uif_employer_rate: number; uif_ceiling: number };
 
 const ROLE_COLORS: Record<string, { bg: string; color: string }> = {
   'Store Manager': { bg: '#e8f5e9', color: PRIMARY },
@@ -76,7 +76,7 @@ export default function AttendancePage() {
   const [showPayModal, setShowPayModal] = useState(false);
   const [payForm, setPayForm] = useState({ paid_date: new Date().toISOString().split('T')[0], payment_method: 'Cash' });
   const [paying, setPaying] = useState(false);
-  const [payrollSettings, setPayrollSettings] = useState<PayrollSettings>({ sunday_multiplier: 1.5, holiday_multiplier: 2, overtime_multiplier: 1.5, weekly_ot_threshold: 45, monthly_ot_threshold: 195, night_allowance_start_hour: 18, uif_employee_rate: 1, uif_employer_rate: 1, uif_ceiling: 17712 });
+  const [payrollSettings, setPayrollSettings] = useState<PayrollSettings>({ sunday_multiplier: 1.5, holiday_multiplier: 2, overtime_multiplier: 1.5, weekly_ot_threshold: 45, monthly_ot_threshold: 195, night_allowance_start_hour: 18, default_night_rate: 0.5, uif_employee_rate: 1, uif_employer_rate: 1, uif_ceiling: 17712 });
   const [payrollLoaded, setPayrollLoaded] = useState(false);
   const [selectedPayrollEmployee, setSelectedPayrollEmployee] = useState<Employee | null>(null);
   const [editingRate, setEditingRate] = useState<string | null>(null);
@@ -86,7 +86,7 @@ export default function AttendancePage() {
   const [showLeaveModal, setShowLeaveModal] = useState(false);
   const [leaveForm, setLeaveForm] = useState({ leave_type: 'Sick', start_date: '', end_date: '', days_taken: '1', status: 'approved', reason: '', paid_hours_per_day: '' });
   const [showSettingsModal, setShowSettingsModal] = useState(false);
-  const [settingsForm, setSettingsForm] = useState({ sunday_multiplier: '1.5', holiday_multiplier: '2', overtime_multiplier: '1.5', weekly_ot_threshold: '45', monthly_ot_threshold: '195', night_allowance_start_hour: '18', uif_employee_rate: '1', uif_employer_rate: '1', uif_ceiling: '17712' });
+  const [settingsForm, setSettingsForm] = useState({ sunday_multiplier: '1.5', holiday_multiplier: '2', overtime_multiplier: '1.5', weekly_ot_threshold: '45', monthly_ot_threshold: '195', night_allowance_start_hour: '18', default_night_rate: '0.5', uif_employee_rate: '1', uif_employer_rate: '1', uif_ceiling: '17712' });
 
   async function loadPayrollData() {
     const [py, pm] = payrollMonth.split('-').map(Number);
@@ -112,12 +112,14 @@ export default function AttendancePage() {
         sunday_multiplier: s.sunday_multiplier ?? 1.5, holiday_multiplier: s.holiday_multiplier ?? 2,
         overtime_multiplier: s.overtime_multiplier ?? 1.5, weekly_ot_threshold: s.weekly_ot_threshold ?? 45,
         monthly_ot_threshold: s.monthly_ot_threshold ?? 195, night_allowance_start_hour: s.night_allowance_start_hour ?? 18,
+        default_night_rate: s.default_night_rate ?? 0.5,
         uif_employee_rate: s.uif_employee_rate ?? 1, uif_employer_rate: s.uif_employer_rate ?? 1, uif_ceiling: s.uif_ceiling ?? 17712,
       });
       setSettingsForm({
         sunday_multiplier: String(s.sunday_multiplier ?? 1.5), holiday_multiplier: String(s.holiday_multiplier ?? 2),
         overtime_multiplier: String(s.overtime_multiplier ?? 1.5), weekly_ot_threshold: String(s.weekly_ot_threshold ?? 45),
         monthly_ot_threshold: String(s.monthly_ot_threshold ?? 195), night_allowance_start_hour: String(s.night_allowance_start_hour ?? 18),
+        default_night_rate: String(s.default_night_rate ?? 0.5),
         uif_employee_rate: String(s.uif_employee_rate ?? 1), uif_employer_rate: String(s.uif_employer_rate ?? 1), uif_ceiling: String(s.uif_ceiling ?? 17712),
       });
     }
@@ -154,7 +156,7 @@ export default function AttendancePage() {
     const isCurrentMonth = payrollMonth === todayStr.slice(0, 7);
     const lastDay = isCurrentMonth ? new Date().getDate() : daysInMonth;
     const rate = employees.find(e => e.id === employeeId)?.hourly_rate || 0;
-    const nightRate = employees.find(e => e.id === employeeId)?.night_allowance_rate || 0;
+    const nightRate = employees.find(e => e.id === employeeId)?.night_allowance_rate || payrollSettings.default_night_rate;
     const days = [];
     for (let d = 1; d <= lastDay; d++) {
       const dateStr = `${payrollMonth}-${String(d).padStart(2, '0')}`;
@@ -184,7 +186,7 @@ export default function AttendancePage() {
   function employeeMonthSummary(employeeId: string) {
     const emp = employees.find(e => e.id === employeeId);
     const rate = emp?.hourly_rate || 0;
-    const nightRate = emp?.night_allowance_rate || 0;
+    const nightRate = emp?.night_allowance_rate || payrollSettings.default_night_rate;
     const isWeeklyPaid = emp?.pay_frequency === 'weekly';
     const days = buildRegisterDays(employeeId); // most-recent-first; fine, we don't depend on order below
 
@@ -263,6 +265,7 @@ export default function AttendancePage() {
       weekly_ot_threshold: parseFloat(settingsForm.weekly_ot_threshold) || 45,
       monthly_ot_threshold: parseFloat(settingsForm.monthly_ot_threshold) || 195,
       night_allowance_start_hour: parseInt(settingsForm.night_allowance_start_hour) || 18,
+      default_night_rate: parseFloat(settingsForm.default_night_rate) || 0,
       uif_employee_rate: parseFloat(settingsForm.uif_employee_rate) || 1,
       uif_employer_rate: parseFloat(settingsForm.uif_employer_rate) || 1,
       uif_ceiling: parseFloat(settingsForm.uif_ceiling) || 17712,
@@ -415,7 +418,7 @@ export default function AttendancePage() {
       row('Normal Hours', formatHM(summary.normalHours), `R${rate.toFixed(2)}/hr`, summary.normalPay),
       summary.otHours > 0 ? row('Overtime', formatHM(summary.otHours), `R${(rate * payrollSettings.overtime_multiplier).toFixed(2)}/hr`, summary.otPay) : '',
       summary.sundayHolidayHours > 0 ? row('Sunday / Public Holiday', formatHM(summary.sundayHolidayHours), '—', summary.sundayHolidayPay) : '',
-      summary.nightHours > 0 ? row('Night Allowance', formatHM(summary.nightHours), `R${(emp.night_allowance_rate || 0).toFixed(2)}/hr`, summary.nightPay) : '',
+      summary.nightHours > 0 ? row('Night Allowance', formatHM(summary.nightHours), `R${(emp.night_allowance_rate || payrollSettings.default_night_rate).toFixed(2)}/hr`, summary.nightPay) : '',
       summary.leaveHours > 0 ? row('Paid Leave', formatHM(summary.leaveHours), `R${rate.toFixed(2)}/hr`, summary.leavePay) : '',
     ].join('');
     return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Payslip — ${emp.full_name} — ${monthLabel}</title>
@@ -715,7 +718,11 @@ export default function AttendancePage() {
               <div><label style={lbl}>Monthly Threshold (hrs)</label><input type="number" step="1" value={settingsForm.monthly_ot_threshold} onChange={e => setSettingsForm(p => ({ ...p, monthly_ot_threshold: e.target.value }))} style={inp} /><div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>For monthly-paid staff</div></div>
             </div>
             <div style={{ fontSize: 13, fontWeight: 700, color: PRIMARY, marginTop: 6 }}>Night Allowance</div>
-            <div><label style={lbl}>Starts From (hour, 24h)</label><input type="number" min="0" max="23" value={settingsForm.night_allowance_start_hour} onChange={e => setSettingsForm(p => ({ ...p, night_allowance_start_hour: e.target.value }))} style={inp} /><div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>Hours worked after this time qualify. Rate per hour is set per employee on their card.</div></div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div><label style={lbl}>Starts From (hour, 24h)</label><input type="number" min="0" max="23" value={settingsForm.night_allowance_start_hour} onChange={e => setSettingsForm(p => ({ ...p, night_allowance_start_hour: e.target.value }))} style={inp} /></div>
+              <div><label style={lbl}>Default Rate (R/hr)</label><input type="number" step="0.01" value={settingsForm.default_night_rate} onChange={e => setSettingsForm(p => ({ ...p, default_night_rate: e.target.value }))} style={inp} /></div>
+            </div>
+            <div style={{ fontSize: 12, color: '#999', marginTop: -8 }}>Hours worked after the start time qualify, paid at the rate above on top of normal pay. Each employee can override their own rate on the Payroll card — this is just the default for new staff.</div>
             <div style={{ fontSize: 13, fontWeight: 700, color: PRIMARY, marginTop: 6 }}>UIF</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
               <div><label style={lbl}>Employee %</label><input type="number" step="0.1" value={settingsForm.uif_employee_rate} onChange={e => setSettingsForm(p => ({ ...p, uif_employee_rate: e.target.value }))} style={inp} /></div>
@@ -1098,7 +1105,7 @@ export default function AttendancePage() {
                                   <span style={{ fontWeight: 700, fontSize: 14, color: '#333' }}>R{(emp.hourly_rate || 0).toFixed(2)}/hr ✎</span>
                                   <span style={{ fontWeight: 700, fontSize: 14, color: '#333' }}>{formatHM(summary.totalHours)}</span>
                                 </div>
-                                <div style={{ fontSize: 10, color: '#bbb', marginTop: 2 }}>{(emp.pay_frequency || 'monthly') === 'weekly' ? 'Weekly' : 'Monthly'} paid · Night R{(emp.night_allowance_rate || 0).toFixed(2)}/hr</div>
+                                <div style={{ fontSize: 10, color: '#bbb', marginTop: 2 }}>{(emp.pay_frequency || 'monthly') === 'weekly' ? 'Weekly' : 'Monthly'} paid · Night R{(emp.night_allowance_rate || payrollSettings.default_night_rate).toFixed(2)}/hr{!emp.night_allowance_rate ? ' (default)' : ''}</div>
                               </div>
                             )}
                           </div>
