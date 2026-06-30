@@ -8,13 +8,13 @@ const STORE_ID = '05328298-fc27-4c9f-b091-bb7f6598b601';
 const PRIMARY = '#1a5c38';
 const DARK = '#0a1f12';
 
-type Employee = { id: string; full_name: string; role: string; is_active: boolean; hourly_rate: number | null };
+type Employee = { id: string; full_name: string; role: string; is_active: boolean; hourly_rate: number | null; pay_frequency: string | null; night_allowance_rate: number | null; phone: string | null };
 type AttendanceRecord = { id: string; employee_id: string; work_date: string; clock_in: string | null; clock_out: string | null; hours_worked: number | null; is_late: boolean; notes: string | null };
 type Shift = { id: string; shift_name: string; day_type: string; start_time: string; end_time: string; is_active: boolean };
 type Leave = { id: string; employee_id: string; leave_type: string; start_date: string; end_date: string; days_taken: number; status: string; reason: string | null; paid_hours_per_day: number | null };
 type Advance = { id: string; employee_id: string; amount: number; advance_date: string; repayment_status: string; deduct_from_wages: boolean; reason: string | null };
 type Holiday = { id: string; holiday_date: string; name: string };
-type PayrollSettings = { sunday_multiplier: number; holiday_multiplier: number };
+type PayrollSettings = { sunday_multiplier: number; holiday_multiplier: number; overtime_multiplier: number; weekly_ot_threshold: number; monthly_ot_threshold: number; night_allowance_start_hour: number };
 
 const ROLE_COLORS: Record<string, { bg: string; color: string }> = {
   'Store Manager': { bg: '#e8f5e9', color: PRIMARY },
@@ -69,15 +69,17 @@ export default function AttendancePage() {
   const [monthLeave, setMonthLeave] = useState<Leave[]>([]);
   const [advances, setAdvances] = useState<Advance[]>([]);
   const [holidays, setHolidays] = useState<Holiday[]>([]);
-  const [payrollSettings, setPayrollSettings] = useState<PayrollSettings>({ sunday_multiplier: 1.5, holiday_multiplier: 2 });
+  const [payrollSettings, setPayrollSettings] = useState<PayrollSettings>({ sunday_multiplier: 1.5, holiday_multiplier: 2, overtime_multiplier: 1.5, weekly_ot_threshold: 45, monthly_ot_threshold: 195, night_allowance_start_hour: 18 });
   const [payrollLoaded, setPayrollLoaded] = useState(false);
   const [selectedPayrollEmployee, setSelectedPayrollEmployee] = useState<Employee | null>(null);
   const [editingRate, setEditingRate] = useState<string | null>(null);
   const [rateInput, setRateInput] = useState('');
+  const [nightRateInput, setNightRateInput] = useState('');
+  const [payFreqInput, setPayFreqInput] = useState('monthly');
   const [showLeaveModal, setShowLeaveModal] = useState(false);
   const [leaveForm, setLeaveForm] = useState({ leave_type: 'Sick', start_date: '', end_date: '', days_taken: '1', status: 'approved', reason: '', paid_hours_per_day: '' });
   const [showSettingsModal, setShowSettingsModal] = useState(false);
-  const [settingsForm, setSettingsForm] = useState({ sunday_multiplier: '1.5', holiday_multiplier: '2' });
+  const [settingsForm, setSettingsForm] = useState({ sunday_multiplier: '1.5', holiday_multiplier: '2', overtime_multiplier: '1.5', weekly_ot_threshold: '45', monthly_ot_threshold: '195', night_allowance_start_hour: '18' });
 
   async function loadPayrollData() {
     const [py, pm] = payrollMonth.split('-').map(Number);
@@ -96,8 +98,17 @@ export default function AttendancePage() {
     setAdvances(advRes.data || []);
     setHolidays(holRes.data || []);
     if (setRes.data) {
-      setPayrollSettings(setRes.data);
-      setSettingsForm({ sunday_multiplier: String(setRes.data.sunday_multiplier), holiday_multiplier: String(setRes.data.holiday_multiplier) });
+      const s = setRes.data;
+      setPayrollSettings({
+        sunday_multiplier: s.sunday_multiplier ?? 1.5, holiday_multiplier: s.holiday_multiplier ?? 2,
+        overtime_multiplier: s.overtime_multiplier ?? 1.5, weekly_ot_threshold: s.weekly_ot_threshold ?? 45,
+        monthly_ot_threshold: s.monthly_ot_threshold ?? 195, night_allowance_start_hour: s.night_allowance_start_hour ?? 18,
+      });
+      setSettingsForm({
+        sunday_multiplier: String(s.sunday_multiplier ?? 1.5), holiday_multiplier: String(s.holiday_multiplier ?? 2),
+        overtime_multiplier: String(s.overtime_multiplier ?? 1.5), weekly_ot_threshold: String(s.weekly_ot_threshold ?? 45),
+        monthly_ot_threshold: String(s.monthly_ot_threshold ?? 195), night_allowance_start_hour: String(s.night_allowance_start_hour ?? 18),
+      });
     }
     setPayrollLoaded(true);
   }
@@ -112,34 +123,106 @@ export default function AttendancePage() {
     return { mult: 1, label: '', type: 'normal' as const };
   }
 
-  // Per-employee totals for the selected month, used on the cards and inside the register drawer
-  function employeeMonthSummary(employeeId: string) {
-    const records = monthAttendance.filter(r => r.employee_id === employeeId);
-    let totalHours = 0, totalPay = 0;
-    const rate = employees.find(e => e.id === employeeId)?.hourly_rate || 0;
-    for (const r of records) {
-      const hrs = r.hours_worked || 0;
-      const { mult } = dayMultiplier(r.work_date);
-      totalHours += hrs;
-      totalPay += hrs * rate * mult;
-    }
-    // Add paid leave hours, day by day, for any approved leave overlapping this month
-    const [y, m] = payrollMonth.split('-').map(Number);
-    const daysInMonth = new Date(y, m, 0).getDate();
-    const empLeave = monthLeave.filter(l => l.employee_id === employeeId && l.status === 'approved' && (l.paid_hours_per_day || 0) > 0);
-    for (const l of empLeave) {
-      for (let d = 1; d <= daysInMonth; d++) {
-        const dateStr = `${payrollMonth}-${String(d).padStart(2, '0')}`;
-        if (dateStr >= l.start_date && dateStr <= l.end_date && !records.some(r => r.work_date === dateStr)) {
-          totalHours += l.paid_hours_per_day || 0;
-          totalPay += (l.paid_hours_per_day || 0) * rate;
-        }
-      }
-    }
-    const outstandingAdvances = advances.filter(a => a.employee_id === employeeId && a.deduct_from_wages && a.repayment_status === 'outstanding').reduce((s, a) => s + Number(a.amount), 0);
-    return { totalHours, totalPay, netPay: totalPay - outstandingAdvances, outstandingAdvances, recordCount: records.length };
+  // Hours worked within the "night" window (e.g. after 18:00) for a single clock-in/out session.
+  // Assumes the session doesn't cross midnight — a session clocking out after midnight will only
+  // count night hours up to 24:00 of the clock-in day.
+  function nightHoursForSession(clockInIso: string, clockOutIso: string, startHour: number) {
+    const inDate = new Date(clockInIso);
+    const outDate = new Date(clockOutIso);
+    const nightStart = new Date(inDate); nightStart.setHours(startHour, 0, 0, 0);
+    const dayEnd = new Date(inDate); dayEnd.setHours(24, 0, 0, 0);
+    const overlapStart = Math.max(inDate.getTime(), nightStart.getTime());
+    const overlapEnd = Math.min(outDate.getTime(), dayEnd.getTime());
+    return overlapEnd > overlapStart ? (overlapEnd - overlapStart) / 3600000 : 0;
   }
 
+  function buildRegisterDays(employeeId: string) {
+    const [y, m] = payrollMonth.split('-').map(Number);
+    const daysInMonth = new Date(y, m, 0).getDate();
+    const todayStr = new Date().toISOString().split('T')[0];
+    const isCurrentMonth = payrollMonth === todayStr.slice(0, 7);
+    const lastDay = isCurrentMonth ? new Date().getDate() : daysInMonth;
+    const rate = employees.find(e => e.id === employeeId)?.hourly_rate || 0;
+    const nightRate = employees.find(e => e.id === employeeId)?.night_allowance_rate || 0;
+    const days = [];
+    for (let d = 1; d <= lastDay; d++) {
+      const dateStr = `${payrollMonth}-${String(d).padStart(2, '0')}`;
+      const sessions = monthAttendance.filter(r => r.employee_id === employeeId && r.work_date === dateStr);
+      const leave = monthLeave.find(l => l.employee_id === employeeId && dateStr >= l.start_date && dateStr <= l.end_date);
+      const { mult, label, type } = dayMultiplier(dateStr);
+      const hours = sessions.reduce((s, r) => s + (r.hours_worked || 0), 0);
+      const nightHours = sessions.reduce((s, r) => s + (r.clock_in && r.clock_out ? nightHoursForSession(r.clock_in, r.clock_out, payrollSettings.night_allowance_start_hour) : 0), 0);
+      const leaveHours = leave && leave.status === 'approved' && sessions.length === 0 ? (leave.paid_hours_per_day || 0) : 0;
+      const firstIn = sessions.length ? sessions.reduce((a, b) => (a.clock_in || '') < (b.clock_in || '') ? a : b).clock_in : null;
+      const lastSession = sessions.length ? sessions.reduce((a, b) => (a.clock_in || '') > (b.clock_in || '') ? a : b) : null;
+      days.push({
+        date: dateStr,
+        dayName: new Date(dateStr + 'T00:00:00').toLocaleDateString('en-ZA', { weekday: 'short' }),
+        hours, mult, label, type, leave, leaveHours, nightHours,
+        sessionCount: sessions.length,
+        pay: sessions.length ? hours * rate * mult + nightHours * nightRate : leaveHours * rate,
+        clockIn: firstIn, clockOut: lastSession?.clock_out, isLate: sessions.some(r => r.is_late), isOpen: sessions.some(r => r.clock_in && !r.clock_out),
+      });
+    }
+    return days.reverse(); // most recent first
+  }
+
+  // Per-employee totals for the selected month: ordinary pay, overtime, Sunday/holiday premiums,
+  // night allowance, and paid leave — all in one place so cards, the register drawer, and the
+  // payslip stay consistent.
+  function employeeMonthSummary(employeeId: string) {
+    const emp = employees.find(e => e.id === employeeId);
+    const rate = emp?.hourly_rate || 0;
+    const nightRate = emp?.night_allowance_rate || 0;
+    const isWeeklyPaid = emp?.pay_frequency === 'weekly';
+    const days = buildRegisterDays(employeeId); // most-recent-first; fine, we don't depend on order below
+
+    let ordinaryHours = 0, sundayHolidayHours = 0, sundayHolidayPay = 0, nightHours = 0, nightPay = 0, leaveHours = 0, leavePay = 0;
+    const ordinaryByWeek: Record<string, number> = {}; // ISO week key -> hours, for weekly-paid OT
+
+    for (const day of days) {
+      nightHours += day.nightHours;
+      nightPay += day.nightHours * nightRate;
+      if (day.leave && day.sessionCount === 0) {
+        leaveHours += day.leaveHours;
+        leavePay += day.leaveHours * rate;
+        continue;
+      }
+      if (day.type === 'sunday' || day.type === 'holiday') {
+        sundayHolidayHours += day.hours;
+        sundayHolidayPay += day.hours * rate * day.mult;
+      } else {
+        ordinaryHours += day.hours;
+        const dt = new Date(day.date + 'T00:00:00');
+        const isoWeekStart = new Date(dt); isoWeekStart.setDate(dt.getDate() - ((dt.getDay() + 6) % 7)); // Monday of that week
+        const weekKey = isoWeekStart.toISOString().split('T')[0];
+        ordinaryByWeek[weekKey] = (ordinaryByWeek[weekKey] || 0) + day.hours;
+      }
+    }
+
+    // Work out overtime hours from the ordinary (non-Sunday/holiday) pool only — Sunday and
+    // holiday hours already carry their own premium so they're excluded from the OT threshold.
+    let otHours = 0;
+    if (isWeeklyPaid) {
+      for (const wk of Object.values(ordinaryByWeek)) {
+        if (wk > payrollSettings.weekly_ot_threshold) otHours += wk - payrollSettings.weekly_ot_threshold;
+      }
+    } else {
+      if (ordinaryHours > payrollSettings.monthly_ot_threshold) otHours = ordinaryHours - payrollSettings.monthly_ot_threshold;
+    }
+    const normalHours = ordinaryHours - otHours;
+    const normalPay = normalHours * rate;
+    const otPay = otHours * rate * payrollSettings.overtime_multiplier;
+
+    const totalHours = ordinaryHours + sundayHolidayHours + leaveHours;
+    const totalPay = normalPay + otPay + sundayHolidayPay + nightPay + leavePay;
+    const outstandingAdvances = advances.filter(a => a.employee_id === employeeId && a.deduct_from_wages && a.repayment_status === 'outstanding').reduce((s, a) => s + Number(a.amount), 0);
+    return {
+      totalHours, totalPay, netPay: totalPay - outstandingAdvances, outstandingAdvances,
+      normalHours, normalPay, otHours, otPay, sundayHolidayHours, sundayHolidayPay,
+      nightHours, nightPay, leaveHours, leavePay,
+    };
+  }
   async function saveHourlyRate(employeeId: string) {
     const rate = parseFloat(rateInput) || 0;
     await supabase.from('employees').update({ hourly_rate: rate }).eq('id', employeeId);
@@ -147,8 +230,26 @@ export default function AttendancePage() {
     await loadEmployees();
   }
 
+  async function saveNightRate(employeeId: string, value: string) {
+    await supabase.from('employees').update({ night_allowance_rate: parseFloat(value) || 0 }).eq('id', employeeId);
+    await loadEmployees();
+  }
+
+  async function savePayFrequency(employeeId: string, value: string) {
+    await supabase.from('employees').update({ pay_frequency: value }).eq('id', employeeId);
+    await loadEmployees();
+  }
+
   async function savePayrollSettings() {
-    const payload = { store_id: STORE_ID, sunday_multiplier: parseFloat(settingsForm.sunday_multiplier) || 1.5, holiday_multiplier: parseFloat(settingsForm.holiday_multiplier) || 2 };
+    const payload = {
+      store_id: STORE_ID,
+      sunday_multiplier: parseFloat(settingsForm.sunday_multiplier) || 1.5,
+      holiday_multiplier: parseFloat(settingsForm.holiday_multiplier) || 2,
+      overtime_multiplier: parseFloat(settingsForm.overtime_multiplier) || 1.5,
+      weekly_ot_threshold: parseFloat(settingsForm.weekly_ot_threshold) || 45,
+      monthly_ot_threshold: parseFloat(settingsForm.monthly_ot_threshold) || 195,
+      night_allowance_start_hour: parseInt(settingsForm.night_allowance_start_hour) || 18,
+    };
     await supabase.from('payroll_settings').upsert(payload);
     setPayrollSettings(payload);
     setShowSettingsModal(false);
@@ -164,32 +265,6 @@ export default function AttendancePage() {
     setShowLeaveModal(false);
     setLeaveForm({ leave_type: 'Sick', start_date: '', end_date: '', days_taken: '1', status: 'approved', reason: '', paid_hours_per_day: '' });
     await loadPayrollData();
-  }
-
-  function buildRegisterDays(employeeId: string) {
-    const [y, m] = payrollMonth.split('-').map(Number);
-    const daysInMonth = new Date(y, m, 0).getDate();
-    const todayStr = new Date().toISOString().split('T')[0];
-    const isCurrentMonth = payrollMonth === todayStr.slice(0, 7);
-    const lastDay = isCurrentMonth ? new Date().getDate() : daysInMonth;
-    const rate = employees.find(e => e.id === employeeId)?.hourly_rate || 0;
-    const days = [];
-    for (let d = 1; d <= lastDay; d++) {
-      const dateStr = `${payrollMonth}-${String(d).padStart(2, '0')}`;
-      const record = monthAttendance.find(r => r.employee_id === employeeId && r.work_date === dateStr);
-      const leave = monthLeave.find(l => l.employee_id === employeeId && dateStr >= l.start_date && dateStr <= l.end_date);
-      const { mult, label, type } = dayMultiplier(dateStr);
-      const hours = record?.hours_worked || 0;
-      const leaveHours = leave && leave.status === 'approved' && !record ? (leave.paid_hours_per_day || 0) : 0;
-      days.push({
-        date: dateStr,
-        dayName: new Date(dateStr + 'T00:00:00').toLocaleDateString('en-ZA', { weekday: 'short' }),
-        hours, mult, label, type, leave, leaveHours,
-        pay: record ? hours * rate * mult : leaveHours * rate,
-        clockIn: record?.clock_in, clockOut: record?.clock_out, isLate: record?.is_late,
-      });
-    }
-    return days.reverse(); // most recent first
   }
 
   async function markAdvanceRepaid(id: string) {
@@ -266,7 +341,7 @@ export default function AttendancePage() {
   }
 
   async function loadEmployees() {
-    const { data } = await supabase.from('employees').select('id, full_name, role, is_active, hourly_rate').eq('store_id', STORE_ID).eq('is_active', true).order('full_name');
+    const { data } = await supabase.from('employees').select('id, full_name, role, is_active, hourly_rate, pay_frequency, night_allowance_rate, phone').eq('store_id', STORE_ID).eq('is_active', true).order('full_name');
     setEmployees(data || []);
   }
 
@@ -298,7 +373,8 @@ export default function AttendancePage() {
     const dayType = todayDayType();
     const currentTime = now.substring(11, 16);
     const todayShifts = shifts.filter(s => s.day_type === dayType && s.is_active);
-    const late = todayShifts.length > 0 && todayShifts.every(s => currentTime > s.start_time);
+    const alreadyHasSessionToday = todayRecords.some(r => r.employee_id === employeeId);
+    const late = !alreadyHasSessionToday && todayShifts.length > 0 && todayShifts.every(s => currentTime > s.start_time);
     await supabase.from('attendance').insert({ employee_id: employeeId, store_id: STORE_ID, work_date: today, clock_in: now, is_late: late });
     await loadTodayRecords();
     setSaving(null);
@@ -340,8 +416,11 @@ export default function AttendancePage() {
 
   const inp = { width: '100%', padding: '10px 14px', borderRadius: 10, border: '1.5px solid #eef2ee', fontSize: 14, outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box' as const };
   const lbl = { display: 'block' as const, fontSize: 13, fontWeight: 600 as const, color: '#555', marginBottom: 6 };
-  const onShiftNow = todayRecords.filter(r => r.clock_in && !r.clock_out).length;
-  const completedToday = todayRecords.filter(r => r.clock_in && r.clock_out).length;
+  const onShiftNow = employees.filter(e => todayRecords.some(r => r.employee_id === e.id && r.clock_in && !r.clock_out)).length;
+  const completedToday = employees.filter(e => {
+    const recs = todayRecords.filter(r => r.employee_id === e.id);
+    return recs.length > 0 && !recs.some(r => r.clock_in && !r.clock_out);
+  }).length;
   const lateToday = todayRecords.filter(r => r.is_late).length;
   const notClockedIn = employees.filter(e => !todayRecords.find(r => r.employee_id === e.id)).length;
   const currentShift = shifts.find(s => { const d = todayDayType(); const now = `${String(new Date().getHours()).padStart(2,'0')}:${String(new Date().getMinutes()).padStart(2,'0')}`; return s.day_type === d && s.is_active && now >= s.start_time && now < s.end_time; });
@@ -410,12 +489,24 @@ export default function AttendancePage() {
       {showSettingsModal && (
         <ModalWrap onClose={() => setShowSettingsModal(false)}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-            <div style={{ fontSize: 18, fontWeight: 700 }}>Pay Rate Multipliers</div>
+            <div style={{ fontSize: 18, fontWeight: 700 }}>Pay Rules</div>
             <button onClick={() => setShowSettingsModal(false)} style={{ background: '#f0f4f0', border: 'none', borderRadius: 8, padding: '6px 14px', cursor: 'pointer' }}>Cancel</button>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <div><label style={lbl}>Sunday Multiplier</label><input type="number" step="0.1" value={settingsForm.sunday_multiplier} onChange={e => setSettingsForm(p => ({ ...p, sunday_multiplier: e.target.value }))} style={inp} /><div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>BCEA default: 1.5x</div></div>
-            <div><label style={lbl}>Public Holiday Multiplier</label><input type="number" step="0.1" value={settingsForm.holiday_multiplier} onChange={e => setSettingsForm(p => ({ ...p, holiday_multiplier: e.target.value }))} style={inp} /><div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>BCEA default: 2x</div></div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: PRIMARY }}>Sunday & Holiday</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div><label style={lbl}>Sunday Multiplier</label><input type="number" step="0.1" value={settingsForm.sunday_multiplier} onChange={e => setSettingsForm(p => ({ ...p, sunday_multiplier: e.target.value }))} style={inp} /><div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>BCEA default: 1.5x</div></div>
+              <div><label style={lbl}>Holiday Multiplier</label><input type="number" step="0.1" value={settingsForm.holiday_multiplier} onChange={e => setSettingsForm(p => ({ ...p, holiday_multiplier: e.target.value }))} style={inp} /><div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>BCEA default: 2x</div></div>
+            </div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: PRIMARY, marginTop: 6 }}>Overtime</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div><label style={lbl}>OT Multiplier</label><input type="number" step="0.1" value={settingsForm.overtime_multiplier} onChange={e => setSettingsForm(p => ({ ...p, overtime_multiplier: e.target.value }))} style={inp} /></div>
+              <div></div>
+              <div><label style={lbl}>Weekly Threshold (hrs)</label><input type="number" step="1" value={settingsForm.weekly_ot_threshold} onChange={e => setSettingsForm(p => ({ ...p, weekly_ot_threshold: e.target.value }))} style={inp} /><div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>For weekly-paid staff</div></div>
+              <div><label style={lbl}>Monthly Threshold (hrs)</label><input type="number" step="1" value={settingsForm.monthly_ot_threshold} onChange={e => setSettingsForm(p => ({ ...p, monthly_ot_threshold: e.target.value }))} style={inp} /><div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>For monthly-paid staff</div></div>
+            </div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: PRIMARY, marginTop: 6 }}>Night Allowance</div>
+            <div><label style={lbl}>Starts From (hour, 24h)</label><input type="number" min="0" max="23" value={settingsForm.night_allowance_start_hour} onChange={e => setSettingsForm(p => ({ ...p, night_allowance_start_hour: e.target.value }))} style={inp} /><div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>Hours worked after this time qualify. Rate per hour is set per employee on their card.</div></div>
           </div>
           <button onClick={savePayrollSettings} style={{ width: '100%', marginTop: 20, padding: '13px', background: PRIMARY, color: '#fff', border: 'none', borderRadius: 12, fontWeight: 700, cursor: 'pointer', fontSize: 15 }}>Save</button>
         </ModalWrap>
@@ -448,7 +539,7 @@ export default function AttendancePage() {
               </div>
 
               <div style={{ padding: '20px 24px', overflowY: 'auto' as const, flex: 1 }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 20 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
                   <div style={{ background: '#fff', borderRadius: 14, padding: 16, border: '1px solid #eef2ee' }}>
                     <div style={{ fontSize: 11, color: '#999', fontWeight: 700, marginBottom: 4 }}>HOURS THIS MONTH</div>
                     <div style={{ fontSize: 22, fontWeight: 800, color: '#333' }}>{formatHM(summary.totalHours)}</div>
@@ -463,6 +554,14 @@ export default function AttendancePage() {
                       <div style={{ textAlign: 'right' as const }}><div style={{ fontSize: 11, color: '#999', fontWeight: 700 }}>NET PAY</div><div style={{ fontSize: 18, fontWeight: 800, color: '#333' }}>R{summary.netPay.toFixed(2)}</div></div>
                     </div>
                   )}
+                </div>
+
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' as const, marginBottom: 20 }}>
+                  <div style={{ background: '#fff', border: '1px solid #eef2ee', borderRadius: 10, padding: '6px 12px', fontSize: 12 }}>Normal: <b>{formatHM(summary.normalHours)}</b> · R{summary.normalPay.toFixed(2)}</div>
+                  {summary.otHours > 0 && <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 10, padding: '6px 12px', fontSize: 12, color: '#dc2626' }}>Overtime: <b>{formatHM(summary.otHours)}</b> · R{summary.otPay.toFixed(2)}</div>}
+                  {summary.sundayHolidayHours > 0 && <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 10, padding: '6px 12px', fontSize: 12, color: '#2563eb' }}>Sunday/Holiday: <b>{formatHM(summary.sundayHolidayHours)}</b> · R{summary.sundayHolidayPay.toFixed(2)}</div>}
+                  {summary.nightHours > 0 && <div style={{ background: '#f5f3ff', border: '1px solid #ddd6fe', borderRadius: 10, padding: '6px 12px', fontSize: 12, color: '#7c3aed' }}>🌙 Night Allowance: <b>{formatHM(summary.nightHours)}</b> · R{summary.nightPay.toFixed(2)}</div>}
+                  {summary.leaveHours > 0 && <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 10, padding: '6px 12px', fontSize: 12, color: '#c2410c' }}>🌴 Paid Leave: <b>{formatHM(summary.leaveHours)}</b> · R{summary.leavePay.toFixed(2)}</div>}
                 </div>
 
                 {empAdvances.filter(a => a.repayment_status === 'outstanding').length > 0 && (
@@ -502,10 +601,11 @@ export default function AttendancePage() {
                             <td style={{ padding: '8px 12px', color: '#374151' }}>{day.date}</td>
                             <td style={{ padding: '8px 12px', color: '#6b7280', fontWeight: 600 }}>{day.dayName}</td>
                             <td style={{ padding: '8px 12px', color: '#374151' }}>{day.clockIn ? new Date(day.clockIn).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : '—'}</td>
-                            <td style={{ padding: '8px 12px', color: '#374151' }}>{day.clockOut ? new Date(day.clockOut).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : '—'}</td>
+                            <td style={{ padding: '8px 12px', color: '#374151' }}>{day.isOpen ? <span style={{ color: '#22c55e', fontWeight: 700 }}>On shift</span> : day.clockOut ? new Date(day.clockOut).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : '—'}{day.sessionCount > 1 && <span style={{ fontSize: 10, color: '#999', marginLeft: 4 }}>({day.sessionCount}x)</span>}</td>
                             <td style={{ padding: '8px 12px', fontWeight: 700, color: '#111' }}>
                               {day.leave ? formatHM(day.leaveHours) : day.hours > 0 ? formatHM(day.hours) : '—'}
                               {day.isLate && <span style={{ fontSize: 10, fontWeight: 700, color: '#f59e0b', marginLeft: 6 }}>LATE</span>}
+                              {day.nightHours > 0 && <span style={{ fontSize: 10, fontWeight: 700, color: '#7c3aed', marginLeft: 6 }}>🌙 {formatHM(day.nightHours)}</span>}
                             </td>
                             <td style={{ padding: '8px 12px' }}>
                               {day.leave ? (
@@ -575,11 +675,14 @@ export default function AttendancePage() {
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 16 }}>
                   {employees.map(emp => {
-                    const record = todayRecords.find(r => r.employee_id === emp.id);
+                    const empRecords = todayRecords.filter(r => r.employee_id === emp.id).sort((a, b) => (a.clock_in || '').localeCompare(b.clock_in || ''));
+                    const openRecord = empRecords.find(r => r.clock_in && !r.clock_out);
                     const rc = ROLE_COLORS[emp.role] || { bg: '#f5f5f5', color: '#424242' };
-                    const isOnShift = record?.clock_in && !record?.clock_out;
-                    const isDone = record?.clock_in && record?.clock_out;
-                    const isSaving = saving === emp.id || saving === record?.id;
+                    const isOnShift = !!openRecord;
+                    const isDone = empRecords.length > 0 && !openRecord;
+                    const totalHoursToday = empRecords.reduce((s, r) => s + (r.hours_worked || 0), 0);
+                    const isSaving = saving === emp.id || saving === openRecord?.id;
+                    const anyLate = empRecords.some(r => r.is_late);
                     return (
                       <div key={emp.id} style={{ background: '#fff', borderRadius: 16, border: `1.5px solid ${isOnShift ? '#bbf7d0' : '#eef2ee'}`, padding: 20, boxShadow: '0 2px 6px rgba(0,0,0,0.04)' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 16 }}>
@@ -591,20 +694,24 @@ export default function AttendancePage() {
                             <div style={{ fontWeight: 700, color: '#333', fontSize: 15 }}>{emp.full_name}</div>
                             <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: rc.bg, color: rc.color }}>{emp.role}</span>
                           </div>
-                          {record?.is_late && <span style={{ fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 20, background: '#fff8e1', color: '#f59e0b' }}>LATE</span>}
+                          {anyLate && <span style={{ fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 20, background: '#fff8e1', color: '#f59e0b' }}>LATE</span>}
                           {isDone && <span style={{ fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 20, background: '#f0f4f0', color: '#666' }}>DONE</span>}
                         </div>
-                        {record ? (
-                          <div>
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>
-                              <div style={{ background: '#f0f7f4', borderRadius: 10, padding: '8px 12px' }}><div style={{ fontSize: 10, color: '#888', fontWeight: 600 }}>IN</div><div style={{ fontWeight: 700, color: PRIMARY }}>{record.clock_in ? new Date(record.clock_in).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : '—'}</div></div>
-                              <div style={{ background: '#f8faf8', borderRadius: 10, padding: '8px 12px' }}><div style={{ fontSize: 10, color: '#888', fontWeight: 600 }}>OUT</div><div style={{ fontWeight: 700, color: record.clock_out ? '#333' : '#ccc' }}>{record.clock_out ? new Date(record.clock_out).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : '—'}</div></div>
-                            </div>
-                            {record.hours_worked ? <div style={{ textAlign: 'center' as const, fontSize: 13, color: '#888', marginBottom: 12 }}>⏱ <strong style={{ color: PRIMARY }}>{formatHM(record.hours_worked)}</strong></div> : null}
-                            {!record.clock_out && <button onClick={() => clockOut(record.id, record.clock_in!)} disabled={isSaving} style={{ width: '100%', padding: '10px', background: DARK, color: '#fff', border: 'none', borderRadius: 10, fontWeight: 700, cursor: 'pointer' }}>{isSaving ? 'Saving...' : '🔴 Clock Out'}</button>}
+                        {empRecords.length > 0 && (
+                          <div style={{ marginBottom: 12, display: 'flex', flexDirection: 'column' as const, gap: 6 }}>
+                            {empRecords.map(rec => (
+                              <div key={rec.id} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                                <div style={{ background: '#f0f7f4', borderRadius: 10, padding: '8px 12px' }}><div style={{ fontSize: 10, color: '#888', fontWeight: 600 }}>IN</div><div style={{ fontWeight: 700, color: PRIMARY }}>{rec.clock_in ? new Date(rec.clock_in).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : '—'}</div></div>
+                                <div style={{ background: '#f8faf8', borderRadius: 10, padding: '8px 12px' }}><div style={{ fontSize: 10, color: '#888', fontWeight: 600 }}>OUT</div><div style={{ fontWeight: 700, color: rec.clock_out ? '#333' : '#22c55e' }}>{rec.clock_out ? new Date(rec.clock_out).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : 'On shift'}</div></div>
+                              </div>
+                            ))}
                           </div>
+                        )}
+                        {totalHoursToday > 0 && <div style={{ textAlign: 'center' as const, fontSize: 13, color: '#888', marginBottom: 12 }}>⏱ <strong style={{ color: PRIMARY }}>{formatHM(totalHoursToday)}</strong>{empRecords.length > 1 ? ` across ${empRecords.length} sessions` : ''}</div>}
+                        {openRecord ? (
+                          <button onClick={() => clockOut(openRecord.id, openRecord.clock_in!)} disabled={isSaving} style={{ width: '100%', padding: '10px', background: DARK, color: '#fff', border: 'none', borderRadius: 10, fontWeight: 700, cursor: 'pointer' }}>{isSaving ? 'Saving...' : '🔴 Clock Out'}</button>
                         ) : (
-                          <button onClick={() => clockIn(emp.id)} disabled={isSaving} style={{ width: '100%', padding: '10px', background: PRIMARY, color: '#fff', border: 'none', borderRadius: 10, fontWeight: 700, cursor: 'pointer' }}>{isSaving ? 'Saving...' : '🟢 Clock In'}</button>
+                          <button onClick={() => clockIn(emp.id)} disabled={isSaving} style={{ width: '100%', padding: '10px', background: PRIMARY, color: '#fff', border: 'none', borderRadius: 10, fontWeight: 700, cursor: 'pointer' }}>{isSaving ? 'Saving...' : empRecords.length > 0 ? '🟢 Clock In Again' : '🟢 Clock In'}</button>
                         )}
                       </div>
                     );
@@ -701,23 +808,43 @@ export default function AttendancePage() {
                               <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: colors.bg, color: colors.color }}>{emp.role}</span>
                             </div>
                           </div>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                            <div>
-                              <div style={{ fontSize: 11, color: '#999', fontWeight: 600 }}>Rate</div>
-                              {editingRate === emp.id ? (
-                                <div style={{ display: 'flex', gap: 4 }} onClick={e => e.stopPropagation()}>
+                          <div style={{ marginBottom: 10 }}>
+                            {editingRate === emp.id ? (
+                              <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 6 }} onClick={e => e.stopPropagation()}>
+                                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                                  <span style={{ fontSize: 11, color: '#999', width: 60 }}>Rate</span>
                                   <input type="number" step="0.01" autoFocus value={rateInput} onChange={e => setRateInput(e.target.value)} style={{ width: 70, padding: '4px 6px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13 }} />
-                                  <button onClick={() => saveHourlyRate(emp.id)} style={{ background: PRIMARY, color: '#fff', border: 'none', borderRadius: 6, padding: '4px 8px', fontSize: 12, cursor: 'pointer' }}>✓</button>
                                 </div>
-                              ) : (
-                                <div onClick={e => { e.stopPropagation(); setEditingRate(emp.id); setRateInput(String(emp.hourly_rate || 0)); }} style={{ fontWeight: 700, fontSize: 14, color: '#333' }}>R{(emp.hourly_rate || 0).toFixed(2)}/hr ✎</div>
-                              )}
-                            </div>
-                            <div style={{ textAlign: 'right' as const }}>
-                              <div style={{ fontSize: 11, color: '#999', fontWeight: 600 }}>Hours MTD</div>
-                              <div style={{ fontWeight: 700, fontSize: 14, color: '#333' }}>{formatHM(summary.totalHours)}</div>
-                            </div>
+                                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                                  <span style={{ fontSize: 11, color: '#999', width: 60 }}>Night/hr</span>
+                                  <input type="number" step="0.01" value={nightRateInput} onChange={e => setNightRateInput(e.target.value)} style={{ width: 70, padding: '4px 6px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13 }} />
+                                </div>
+                                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                                  <span style={{ fontSize: 11, color: '#999', width: 60 }}>Paid</span>
+                                  <select value={payFreqInput} onChange={e => setPayFreqInput(e.target.value)} style={{ padding: '4px 6px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13 }}>
+                                    <option value="monthly">Monthly</option>
+                                    <option value="weekly">Weekly</option>
+                                  </select>
+                                </div>
+                                <button onClick={async () => { await saveHourlyRate(emp.id); await saveNightRate(emp.id, nightRateInput); await savePayFrequency(emp.id, payFreqInput); }} style={{ background: PRIMARY, color: '#fff', border: 'none', borderRadius: 6, padding: '5px 10px', fontSize: 12, cursor: 'pointer', fontWeight: 700 }}>✓ Save</button>
+                              </div>
+                            ) : (
+                              <div onClick={e => { e.stopPropagation(); setEditingRate(emp.id); setRateInput(String(emp.hourly_rate || 0)); setNightRateInput(String(emp.night_allowance_rate || 0)); setPayFreqInput(emp.pay_frequency || 'monthly'); }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                  <span style={{ fontSize: 11, color: '#999', fontWeight: 600 }}>Rate</span>
+                                  <span style={{ fontSize: 11, color: '#999', fontWeight: 600 }}>Hours MTD</span>
+                                </div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                                  <span style={{ fontWeight: 700, fontSize: 14, color: '#333' }}>R{(emp.hourly_rate || 0).toFixed(2)}/hr ✎</span>
+                                  <span style={{ fontWeight: 700, fontSize: 14, color: '#333' }}>{formatHM(summary.totalHours)}</span>
+                                </div>
+                                <div style={{ fontSize: 10, color: '#bbb', marginTop: 2 }}>{(emp.pay_frequency || 'monthly') === 'weekly' ? 'Weekly' : 'Monthly'} paid · Night R{(emp.night_allowance_rate || 0).toFixed(2)}/hr</div>
+                              </div>
+                            )}
                           </div>
+                          {summary.otHours > 0 && (
+                            <div style={{ fontSize: 11, fontWeight: 700, color: '#dc2626', marginBottom: 8, background: '#fef2f2', borderRadius: 6, padding: '3px 8px', display: 'inline-block' }}>⏱ {formatHM(summary.otHours)} overtime</div>
+                          )}
                           <div style={{ background: '#f0f7f4', borderRadius: 10, padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <span style={{ fontSize: 12, color: '#666', fontWeight: 600 }}>{summary.outstandingAdvances > 0 ? 'Net Pay' : 'Earned MTD'}</span>
                             <span style={{ fontWeight: 800, fontSize: 17, color: PRIMARY }}>R{(summary.outstandingAdvances > 0 ? summary.netPay : summary.totalPay).toFixed(2)}</span>
