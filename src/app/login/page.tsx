@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 
 const PRIMARY = '#1a5c38';
@@ -9,10 +9,18 @@ const DARK = '#0a1f12';
 
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [info, setInfo] = useState('');
+
+  useEffect(() => {
+    if (searchParams.get('confirm') === '1') {
+      setInfo('Check your email to confirm your account, then sign in here to finish setting up your business.');
+    }
+  }, [searchParams]);
 
   async function handleLogin() {
     setLoading(true);
@@ -33,8 +41,9 @@ export default function LoginPage() {
       .single();
 
     if (!profile) {
-      setError('Profile not found. Please contact support.');
-      setLoading(false);
+      // Account exists (e.g. they just confirmed their email after signing up) but the
+      // organisation/store/profile bootstrap from signup hasn't run yet — send them to finish it.
+      router.push('/onboarding');
       return;
     }
 
@@ -110,6 +119,12 @@ export default function LoginPage() {
             </div>
           )}
 
+          {info && (
+            <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 10, padding: '12px 16px', marginBottom: 20, color: '#1d4ed8', fontSize: 14 }}>
+              {info}
+            </div>
+          )}
+
           <div style={{ marginBottom: 20 }}>
             <label style={{ display: 'block', fontSize: 14, fontWeight: 600, color: '#333', marginBottom: 8 }}>Email address</label>
             <input
@@ -146,8 +161,8 @@ export default function LoginPage() {
           </button>
 
           <div style={{ marginTop: 32, textAlign: 'center' }}>
-            <span style={{ fontSize: 13, color: '#aaa' }}>Need access? </span>
-            <span style={{ fontSize: 13, color: PRIMARY, fontWeight: 600, cursor: 'pointer' }}>Contact support</span>
+            <span style={{ fontSize: 13, color: '#aaa' }}>New to CompliTrack? </span>
+            <span onClick={() => router.push('/signup')} style={{ fontSize: 13, color: PRIMARY, fontWeight: 600, cursor: 'pointer' }}>Create an account</span>
           </div>
 
           <div style={{ marginTop: 48, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
