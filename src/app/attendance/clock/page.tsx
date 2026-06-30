@@ -78,6 +78,7 @@ export default function ClockKioskPage() {
   const [employees,    setEmployees]    = useState<Employee[]>([]);
   const [todayRecords, setTodayRecords] = useState<AttendanceRecord[]>([]);
   const [shifts,       setShifts]       = useState<{ start_time: string; end_time: string; day_type: string }[]>([]);
+  const [clockTick, setClockTick] = useState(() => new Date());
 
   const [mode,          setMode]          = useState<'idle' | 'scanning' | 'pin' | 'enrolling' | 'success'>('idle');
   const [cameraReady,   setCameraReady]   = useState(false);
@@ -110,6 +111,13 @@ export default function ClockKioskPage() {
       if (resultTimerRef.current) clearTimeout(resultTimerRef.current);
       if (faceCheckRef.current)   clearInterval(faceCheckRef.current);
     };
+  }, []);
+
+  // Kiosk stays open all day — the clock needs to tick on its own, not just whenever
+  // something else happens to trigger a re-render.
+  useEffect(() => {
+    const tick = setInterval(() => setClockTick(new Date()), 1000);
+    return () => clearInterval(tick);
   }, []);
 
   useEffect(() => {
@@ -363,7 +371,7 @@ export default function ClockKioskPage() {
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
           <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: 14 }}>
-            {new Date().toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })} · {new Date().toLocaleDateString('en-ZA', { weekday: 'long', day: 'numeric', month: 'long' })}
+            {clockTick.toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })} · {clockTick.toLocaleDateString('en-ZA', { weekday: 'long', day: 'numeric', month: 'long' })}
           </div>
           <button onClick={() => { setMode('enrolling'); setEnrollStep('select'); setEnrollEmployee(null); setEnrollError(''); }} style={{ background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)', color: 'rgba(255,255,255,0.7)', borderRadius: 8, padding: '6px 14px', cursor: 'pointer', fontSize: 12 }}>
             Enroll Face
