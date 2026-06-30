@@ -11,7 +11,7 @@ const DARK = '#0a1f12';
 type Employee = { id: string; full_name: string; role: string; is_active: boolean; hourly_rate: number | null };
 type AttendanceRecord = { id: string; employee_id: string; work_date: string; clock_in: string | null; clock_out: string | null; hours_worked: number | null; is_late: boolean; notes: string | null };
 type Shift = { id: string; shift_name: string; day_type: string; start_time: string; end_time: string; is_active: boolean };
-type Leave = { id: string; employee_id: string; leave_type: string; start_date: string; end_date: string; days_taken: number; status: string; reason: string | null };
+type Leave = { id: string; employee_id: string; leave_type: string; start_date: string; end_date: string; days_taken: number; status: string; reason: string | null; paid_hours_per_day: number | null };
 type Advance = { id: string; employee_id: string; amount: number; advance_date: string; repayment_status: string; deduct_from_wages: boolean; reason: string | null };
 type Holiday = { id: string; holiday_date: string; name: string };
 type PayrollSettings = { sunday_multiplier: number; holiday_multiplier: number };
@@ -75,7 +75,7 @@ export default function AttendancePage() {
   const [editingRate, setEditingRate] = useState<string | null>(null);
   const [rateInput, setRateInput] = useState('');
   const [showLeaveModal, setShowLeaveModal] = useState(false);
-  const [leaveForm, setLeaveForm] = useState({ leave_type: 'Sick', start_date: '', end_date: '', days_taken: '1', status: 'approved', reason: '' });
+  const [leaveForm, setLeaveForm] = useState({ leave_type: 'Sick', start_date: '', end_date: '', days_taken: '1', status: 'approved', reason: '', paid_hours_per_day: '' });
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [settingsForm, setSettingsForm] = useState({ sunday_multiplier: '1.5', holiday_multiplier: '2' });
 
@@ -121,6 +121,19 @@ export default function AttendancePage() {
       totalHours += hrs;
       totalPay += hrs * rate * mult;
     }
+    // Add paid leave hours, day by day, for any approved leave overlapping this month
+    const [y, m] = payrollMonth.split('-').map(Number);
+    const daysInMonth = new Date(y, m, 0).getDate();
+    const empLeave = monthLeave.filter(l => l.employee_id === employeeId && l.status === 'approved' && (l.paid_hours_per_day || 0) > 0);
+    for (const l of empLeave) {
+      for (let d = 1; d <= daysInMonth; d++) {
+        const dateStr = `${payrollMonth}-${String(d).padStart(2, '0')}`;
+        if (dateStr >= l.start_date && dateStr <= l.end_date && !records.some(r => r.work_date === dateStr)) {
+          totalHours += l.paid_hours_per_day || 0;
+          totalPay += (l.paid_hours_per_day || 0) * rate;
+        }
+      }
+    }
     const outstandingAdvances = advances.filter(a => a.employee_id === employeeId && a.deduct_from_wages && a.repayment_status === 'outstanding').reduce((s, a) => s + Number(a.amount), 0);
     return { totalHours, totalPay, netPay: totalPay - outstandingAdvances, outstandingAdvances, recordCount: records.length };
   }
@@ -144,10 +157,10 @@ export default function AttendancePage() {
     await supabase.from('employee_leave').insert({
       employee_id: selectedPayrollEmployee.id, store_id: STORE_ID, leave_type: leaveForm.leave_type,
       start_date: leaveForm.start_date, end_date: leaveForm.end_date, days_taken: parseFloat(leaveForm.days_taken) || 1,
-      status: leaveForm.status, reason: leaveForm.reason || null,
+      status: leaveForm.status, reason: leaveForm.reason || null, paid_hours_per_day: parseFloat(leaveForm.paid_hours_per_day) || 0,
     });
     setShowLeaveModal(false);
-    setLeaveForm({ leave_type: 'Sick', start_date: '', end_date: '', days_taken: '1', status: 'approved', reason: '' });
+    setLeaveForm({ leave_type: 'Sick', start_date: '', end_date: '', days_taken: '1', status: 'approved', reason: '', paid_hours_per_day: '' });
     await loadPayrollData();
   }
 
@@ -165,11 +178,12 @@ export default function AttendancePage() {
       const leave = monthLeave.find(l => l.employee_id === employeeId && dateStr >= l.start_date && dateStr <= l.end_date);
       const { mult, label, type } = dayMultiplier(dateStr);
       const hours = record?.hours_worked || 0;
+      const leaveHours = leave && leave.status === 'approved' && !record ? (leave.paid_hours_per_day || 0) : 0;
       days.push({
         date: dateStr,
         dayName: new Date(dateStr + 'T00:00:00').toLocaleDateString('en-ZA', { weekday: 'short' }),
-        hours, mult, label, type, leave,
-        pay: hours * rate * mult,
+        hours, mult, label, type, leave, leaveHours,
+        pay: record ? hours * rate * mult : leaveHours * rate,
         clockIn: record?.clock_in, clockOut: record?.clock_out, isLate: record?.is_late,
       });
     }
@@ -329,6 +343,7 @@ export default function AttendancePage() {
               <div><label style={lbl}>End Date *</label><input type="date" value={leaveForm.end_date} onChange={e => setLeaveForm(p => ({ ...p, end_date: e.target.value }))} style={inp} /></div>
             </div>
             <div><label style={lbl}>Status</label><select value={leaveForm.status} onChange={e => setLeaveForm(p => ({ ...p, status: e.target.value }))} style={inp}><option value="approved">Approved</option><option value="pending">Pending</option><option value="declined">Declined</option></select></div>
+            <div><label style={lbl}>Hours to pay per day</label><input type="number" step="0.25" placeholder="e.g. 5 for a 10:00–15:00 shift" value={leaveForm.paid_hours_per_day} onChange={e => setLeaveForm(p => ({ ...p, paid_hours_per_day: e.target.value }))} style={inp} /><div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>Applied to every day in this leave period at their normal hourly rate. Leave at 0 if this leave is unpaid.</div></div>
             <div><label style={lbl}>Reason / Notes</label><textarea value={leaveForm.reason} onChange={e => setLeaveForm(p => ({ ...p, reason: e.target.value }))} rows={2} style={{ ...inp, resize: 'vertical' as const }} /></div>
           </div>
           <button onClick={saveLeave} disabled={!leaveForm.start_date || !leaveForm.end_date} style={{ width: '100%', marginTop: 20, padding: '13px', background: PRIMARY, color: '#fff', border: 'none', borderRadius: 12, fontWeight: 700, cursor: 'pointer', fontSize: 15 }}>Save Leave</button>
@@ -412,7 +427,9 @@ export default function AttendancePage() {
                         </div>
                         <div>
                           {day.leave ? (
-                            <div style={{ fontSize: 13, fontWeight: 600, color: '#c2410c' }}>🌴 {day.leave.leave_type} leave{day.leave.status !== 'approved' ? ` (${day.leave.status})` : ''}</div>
+                            <div style={{ fontSize: 13, fontWeight: 600, color: '#c2410c' }}>
+                              🌴 {day.leave.leave_type} leave{day.leave.status !== 'approved' ? ` (${day.leave.status})` : day.leaveHours > 0 ? ` · ${formatHM(day.leaveHours)} paid` : ' · unpaid'}
+                            </div>
                           ) : day.hours > 0 ? (
                             <div>
                               <span style={{ fontSize: 13, fontWeight: 700, color: '#333' }}>{formatHM(day.hours)}</span>
@@ -424,7 +441,7 @@ export default function AttendancePage() {
                           )}
                         </div>
                       </div>
-                      {day.hours > 0 && !day.leave && <div style={{ fontWeight: 700, color: PRIMARY, fontSize: 14 }}>R{day.pay.toFixed(2)}</div>}
+                      {((day.hours > 0 && !day.leave) || day.leaveHours > 0) && <div style={{ fontWeight: 700, color: PRIMARY, fontSize: 14 }}>R{day.pay.toFixed(2)}</div>}
                     </div>
                   ))}
                 </div>
