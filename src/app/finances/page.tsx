@@ -13,7 +13,7 @@ const COLOUR_PALETTE = ['#10b981','#ef4444','#3b82f6','#f59e0b','#8b5cf6','#06b6
 
 
 const PAYMENT_METHODS = ['bank_transfer', 'cash', 'credit_card', 'debit_order', 'eft', 'cheque']
-const INVOICE_STATUSES = ['draft', 'approved', 'paid']
+const INVOICE_STATUSES = ['draft', 'received', 'paid']
 
 type CashUp = {
   id: string; cash_up_date: string; cash_up_total: number; total_cash: number
@@ -385,7 +385,7 @@ export default function FinancesPage() {
   }
 
 
-  async function saveInvoice() {
+  async function saveInvoice(andReceive: boolean) {
     if (!invForm.supplier) { setError('Supplier is required'); return }
     if (!invForm.invoice_date) { setError('Date is required'); return }
     if (invLines.every(l => !l.amount)) { setError('At least one line item with an amount is required'); return }
@@ -394,6 +394,7 @@ export default function FinancesPage() {
       store_id: STORE_ID,
       organisation_id: ORG_ID,
       ...invForm,
+      status: andReceive ? invForm.status : 'draft',
       due_date: invForm.due_date || null,
       total_amount: lineTotal,
       total_vat: lineVatTotal,
@@ -420,13 +421,14 @@ export default function FinancesPage() {
     }
     setSaving(false); setShowInvForm(false); setEditInv(null)
     await load()
+    if (!andReceive) return
     const savedInvoice: Invoice = {
       id: invoiceId!,
       supplier: invForm.supplier,
       invoice_number: invForm.invoice_number,
       invoice_date: invForm.invoice_date,
       due_date: invForm.due_date,
-      status: invForm.status,
+      status: payload.status,
       payment_method: invForm.payment_method,
       notes: invForm.notes,
       total_amount: lineTotal,
@@ -770,9 +772,11 @@ export default function FinancesPage() {
                   </div>
 
                   <div style={{ display: 'flex', gap: 10 }}>
-                    <button style={btn()} onClick={saveInvoice} disabled={saving}>{saving ? 'Saving…' : 'Save Invoice'}</button>
+                    <button style={btn('#6b7280')} onClick={() => saveInvoice(false)} disabled={saving}>{saving ? 'Saving…' : '💾 Save as Draft'}</button>
+                    <button style={btn()} onClick={() => saveInvoice(true)} disabled={saving}>{saving ? 'Saving…' : '✓ Submit & Receive Stock'}</button>
                     <button style={btn('#6b7280')} onClick={() => { setShowInvForm(false); setEditInv(null) }}>Cancel</button>
                   </div>
+                  <p style={{ fontSize: 12, color: '#9ca3af', marginTop: 8 }}>Save as Draft keeps this invoice editable without touching your stock sheet. Submit & Receive Stock saves it and opens Receive Goods to update stock and pricing.</p>
                 </div>
               )}
 
@@ -800,9 +804,7 @@ export default function FinancesPage() {
                       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                         <span style={{ fontWeight: 800, fontSize: 17, color: '#dc2626' }}>{fmt(Number(inv.total_amount))}</span>
                         <div style={{ display: 'flex', gap: 6 }}>
-                          {inv.status === 'draft' && <button onClick={() => updateInvoiceStatus(inv.id, 'approved')} style={smBtn('#f0fdf4', '#16a34a')}>Approve</button>}
-                          {inv.status === 'approved' && <button onClick={() => openGRV(inv)} style={smBtn('#fef3c7', '#d97706')}>📦 Receive Goods</button>}
-                          {inv.status === 'approved' && <button onClick={() => updateInvoiceStatus(inv.id, 'paid')} style={smBtn('#eff6ff', '#2563eb')}>Mark Paid</button>}
+                          {(inv.status === 'draft' || inv.status === 'approved') && <button onClick={() => openGRV(inv)} style={smBtn('#fef3c7', '#d97706')}>📦 Receive Goods</button>}
                           {inv.status === 'received' && <button onClick={() => updateInvoiceStatus(inv.id, 'paid')} style={smBtn('#eff6ff', '#2563eb')}>Mark Paid</button>}
                           <button onClick={() => openEditInvoice(inv)} style={smBtn('#f3f4f6', '#374151')}>Edit</button>
                           <button onClick={() => setExpandedInv(expandedInv === inv.id ? null : inv.id)} style={smBtn('#f3f4f6', '#374151')}>
