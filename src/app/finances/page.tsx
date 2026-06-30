@@ -384,6 +384,7 @@ export default function FinancesPage() {
       store_id: STORE_ID,
       organisation_id: ORG_ID,
       ...invForm,
+      due_date: invForm.due_date || null,
       total_amount: lineTotal,
       total_vat: lineVatTotal,
     }
