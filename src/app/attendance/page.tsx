@@ -9,13 +9,13 @@ const PRIMARY = '#1a5c38';
 const DARK = '#0a1f12';
 const EMPLOYER_NAME = 'Mochachos Hartswater (Pty) Ltd';
 
-type Employee = { id: string; full_name: string; role: string; is_active: boolean; hourly_rate: number | null; pay_frequency: string | null; night_allowance_rate: number | null; phone: string | null };
+type Employee = { id: string; full_name: string; role: string; is_active: boolean; hourly_rate: number | null; pay_frequency: string | null; night_allowance_rate: number | null; phone: string | null; id_number: string | null };
 type AttendanceRecord = { id: string; employee_id: string; work_date: string; clock_in: string | null; clock_out: string | null; hours_worked: number | null; is_late: boolean; notes: string | null };
 type Shift = { id: string; shift_name: string; day_type: string; start_time: string; end_time: string; is_active: boolean };
 type Leave = { id: string; employee_id: string; leave_type: string; start_date: string; end_date: string; days_taken: number; status: string; reason: string | null; paid_hours_per_day: number | null };
 type Advance = { id: string; employee_id: string; amount: number; advance_date: string; repayment_status: string; deduct_from_wages: boolean; reason: string | null };
 type Holiday = { id: string; holiday_date: string; name: string };
-type PayrollSettings = { sunday_multiplier: number; holiday_multiplier: number; overtime_multiplier: number; weekly_ot_threshold: number; monthly_ot_threshold: number; night_allowance_start_hour: number };
+type PayrollSettings = { sunday_multiplier: number; holiday_multiplier: number; overtime_multiplier: number; weekly_ot_threshold: number; monthly_ot_threshold: number; night_allowance_start_hour: number; uif_employee_rate: number; uif_employer_rate: number; uif_ceiling: number };
 
 const ROLE_COLORS: Record<string, { bg: string; color: string }> = {
   'Store Manager': { bg: '#e8f5e9', color: PRIMARY },
@@ -70,7 +70,7 @@ export default function AttendancePage() {
   const [monthLeave, setMonthLeave] = useState<Leave[]>([]);
   const [advances, setAdvances] = useState<Advance[]>([]);
   const [holidays, setHolidays] = useState<Holiday[]>([]);
-  const [payrollSettings, setPayrollSettings] = useState<PayrollSettings>({ sunday_multiplier: 1.5, holiday_multiplier: 2, overtime_multiplier: 1.5, weekly_ot_threshold: 45, monthly_ot_threshold: 195, night_allowance_start_hour: 18 });
+  const [payrollSettings, setPayrollSettings] = useState<PayrollSettings>({ sunday_multiplier: 1.5, holiday_multiplier: 2, overtime_multiplier: 1.5, weekly_ot_threshold: 45, monthly_ot_threshold: 195, night_allowance_start_hour: 18, uif_employee_rate: 1, uif_employer_rate: 1, uif_ceiling: 17712 });
   const [payrollLoaded, setPayrollLoaded] = useState(false);
   const [selectedPayrollEmployee, setSelectedPayrollEmployee] = useState<Employee | null>(null);
   const [editingRate, setEditingRate] = useState<string | null>(null);
@@ -80,7 +80,7 @@ export default function AttendancePage() {
   const [showLeaveModal, setShowLeaveModal] = useState(false);
   const [leaveForm, setLeaveForm] = useState({ leave_type: 'Sick', start_date: '', end_date: '', days_taken: '1', status: 'approved', reason: '', paid_hours_per_day: '' });
   const [showSettingsModal, setShowSettingsModal] = useState(false);
-  const [settingsForm, setSettingsForm] = useState({ sunday_multiplier: '1.5', holiday_multiplier: '2', overtime_multiplier: '1.5', weekly_ot_threshold: '45', monthly_ot_threshold: '195', night_allowance_start_hour: '18' });
+  const [settingsForm, setSettingsForm] = useState({ sunday_multiplier: '1.5', holiday_multiplier: '2', overtime_multiplier: '1.5', weekly_ot_threshold: '45', monthly_ot_threshold: '195', night_allowance_start_hour: '18', uif_employee_rate: '1', uif_employer_rate: '1', uif_ceiling: '17712' });
 
   async function loadPayrollData() {
     const [py, pm] = payrollMonth.split('-').map(Number);
@@ -104,11 +104,13 @@ export default function AttendancePage() {
         sunday_multiplier: s.sunday_multiplier ?? 1.5, holiday_multiplier: s.holiday_multiplier ?? 2,
         overtime_multiplier: s.overtime_multiplier ?? 1.5, weekly_ot_threshold: s.weekly_ot_threshold ?? 45,
         monthly_ot_threshold: s.monthly_ot_threshold ?? 195, night_allowance_start_hour: s.night_allowance_start_hour ?? 18,
+        uif_employee_rate: s.uif_employee_rate ?? 1, uif_employer_rate: s.uif_employer_rate ?? 1, uif_ceiling: s.uif_ceiling ?? 17712,
       });
       setSettingsForm({
         sunday_multiplier: String(s.sunday_multiplier ?? 1.5), holiday_multiplier: String(s.holiday_multiplier ?? 2),
         overtime_multiplier: String(s.overtime_multiplier ?? 1.5), weekly_ot_threshold: String(s.weekly_ot_threshold ?? 45),
         monthly_ot_threshold: String(s.monthly_ot_threshold ?? 195), night_allowance_start_hour: String(s.night_allowance_start_hour ?? 18),
+        uif_employee_rate: String(s.uif_employee_rate ?? 1), uif_employer_rate: String(s.uif_employer_rate ?? 1), uif_ceiling: String(s.uif_ceiling ?? 17712),
       });
     }
     setPayrollLoaded(true);
@@ -217,11 +219,14 @@ export default function AttendancePage() {
 
     const totalHours = ordinaryHours + sundayHolidayHours + leaveHours;
     const totalPay = normalPay + otPay + sundayHolidayPay + nightPay + leavePay;
+    const uifBase = Math.min(totalPay, payrollSettings.uif_ceiling);
+    const uifEmployee = uifBase * (payrollSettings.uif_employee_rate / 100);
+    const uifEmployer = uifBase * (payrollSettings.uif_employer_rate / 100);
     const outstandingAdvances = advances.filter(a => a.employee_id === employeeId && a.deduct_from_wages && a.repayment_status === 'outstanding').reduce((s, a) => s + Number(a.amount), 0);
     return {
-      totalHours, totalPay, netPay: totalPay - outstandingAdvances, outstandingAdvances,
+      totalHours, totalPay, netPay: totalPay - outstandingAdvances - uifEmployee, outstandingAdvances,
       normalHours, normalPay, otHours, otPay, sundayHolidayHours, sundayHolidayPay,
-      nightHours, nightPay, leaveHours, leavePay,
+      nightHours, nightPay, leaveHours, leavePay, uifEmployee, uifEmployer,
     };
   }
   async function saveHourlyRate(employeeId: string) {
@@ -250,6 +255,9 @@ export default function AttendancePage() {
       weekly_ot_threshold: parseFloat(settingsForm.weekly_ot_threshold) || 45,
       monthly_ot_threshold: parseFloat(settingsForm.monthly_ot_threshold) || 195,
       night_allowance_start_hour: parseInt(settingsForm.night_allowance_start_hour) || 18,
+      uif_employee_rate: parseFloat(settingsForm.uif_employee_rate) || 1,
+      uif_employer_rate: parseFloat(settingsForm.uif_employer_rate) || 1,
+      uif_ceiling: parseFloat(settingsForm.uif_ceiling) || 17712,
     };
     await supabase.from('payroll_settings').upsert(payload);
     setPayrollSettings(payload);
@@ -381,9 +389,11 @@ export default function AttendancePage() {
       <tbody>${lineItems}</tbody></table>
       <div class="totals">
         <div class="row"><span>Gross Pay</span><b>R${summary.totalPay.toFixed(2)}</b></div>
+        <div class="row" style="color:#c2410c"><span>Less: UIF (${payrollSettings.uif_employee_rate}%)</span><b>-R${summary.uifEmployee.toFixed(2)}</b></div>
         ${summary.outstandingAdvances > 0 ? `<div class="row" style="color:#c2410c"><span>Less: Advance Deduction</span><b>-R${summary.outstandingAdvances.toFixed(2)}</b></div>` : ''}
         <div class="row net"><span>Net Pay</span><span>R${summary.netPay.toFixed(2)}</span></div>
       </div>
+      <div style="font-size:11px;color:#999;margin-top:6px">Employer UIF Contribution (${payrollSettings.uif_employer_rate}%): R${summary.uifEmployer.toFixed(2)} — not deducted from employee, shown for payroll records.</div>
       <div class="sign"><div>Employer Signature</div><div>Employee Signature</div></div>
       </body></html>`;
   }
@@ -397,7 +407,7 @@ export default function AttendancePage() {
     const monthLabel = new Date(payrollMonth + '-01').toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' });
     const subject = encodeURIComponent(`Payslip — ${monthLabel}`);
     const body = encodeURIComponent(
-      `Hi ${emp.full_name},\n\nYour payslip for ${monthLabel}:\n\nGross Pay: R${summary.totalPay.toFixed(2)}\n${summary.outstandingAdvances > 0 ? `Advance Deduction: -R${summary.outstandingAdvances.toFixed(2)}\n` : ''}Net Pay: R${summary.netPay.toFixed(2)}\n\nA printable copy is attached.\n\nRegards,\n${EMPLOYER_NAME}`
+      `Hi ${emp.full_name},\n\nYour payslip for ${monthLabel}:\n\nGross Pay: R${summary.totalPay.toFixed(2)}\nUIF Deduction: -R${summary.uifEmployee.toFixed(2)}\n${summary.outstandingAdvances > 0 ? `Advance Deduction: -R${summary.outstandingAdvances.toFixed(2)}\n` : ''}Net Pay: R${summary.netPay.toFixed(2)}\n\nA printable copy is attached.\n\nRegards,\n${EMPLOYER_NAME}`
     );
     window.open(`mailto:?subject=${subject}&body=${body}`, '_blank');
   }
@@ -406,21 +416,22 @@ export default function AttendancePage() {
     if (!emp.phone) { alert(`No phone number on file for ${emp.full_name}. Add one on the People page first.`); return; }
     const monthLabel = new Date(payrollMonth + '-01').toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' });
     const text = encodeURIComponent(
-      `Hi ${emp.full_name}, here's your payslip for ${monthLabel}:\n\nGross Pay: R${summary.totalPay.toFixed(2)}\n${summary.outstandingAdvances > 0 ? `Advance Deduction: -R${summary.outstandingAdvances.toFixed(2)}\n` : ''}Net Pay: R${summary.netPay.toFixed(2)}\n\n- ${EMPLOYER_NAME}`
+      `Hi ${emp.full_name}, here's your payslip for ${monthLabel}:\n\nGross Pay: R${summary.totalPay.toFixed(2)}\nUIF Deduction: -R${summary.uifEmployee.toFixed(2)}\n${summary.outstandingAdvances > 0 ? `Advance Deduction: -R${summary.outstandingAdvances.toFixed(2)}\n` : ''}Net Pay: R${summary.netPay.toFixed(2)}\n\n- ${EMPLOYER_NAME}`
     );
     window.open(`https://wa.me/${formatZaPhone(emp.phone)}?text=${text}`, '_blank');
   }
 
   function exportAllPayrollCSV() {
     const monthLabel = payrollMonth;
-    const rows = [['Employee', 'Role', 'Pay Frequency', 'Rate (R/hr)', 'Normal Hrs', 'Normal Pay', 'OT Hrs', 'OT Pay', 'Sunday/Holiday Hrs', 'Sunday/Holiday Pay', 'Night Hrs', 'Night Pay', 'Leave Hrs', 'Leave Pay', 'Gross Pay', 'Advances', 'Net Pay']];
+    const rows = [['Employee', 'ID Number', 'Role', 'Pay Frequency', 'Rate (R/hr)', 'Normal Hrs', 'Normal Pay', 'OT Hrs', 'OT Pay', 'Sunday/Holiday Hrs', 'Sunday/Holiday Pay', 'Night Hrs', 'Night Pay', 'Leave Hrs', 'Leave Pay', 'Gross Pay', 'UIF Employee', 'UIF Employer', 'Advances', 'Net Pay']];
     for (const emp of employees) {
       const s = employeeMonthSummary(emp.id);
       rows.push([
-        emp.full_name, emp.role, emp.pay_frequency || 'monthly', (emp.hourly_rate || 0).toFixed(2),
+        emp.full_name, emp.id_number || '', emp.role, emp.pay_frequency || 'monthly', (emp.hourly_rate || 0).toFixed(2),
         formatHM(s.normalHours), s.normalPay.toFixed(2), formatHM(s.otHours), s.otPay.toFixed(2),
         formatHM(s.sundayHolidayHours), s.sundayHolidayPay.toFixed(2), formatHM(s.nightHours), s.nightPay.toFixed(2),
-        formatHM(s.leaveHours), s.leavePay.toFixed(2), s.totalPay.toFixed(2), s.outstandingAdvances.toFixed(2), s.netPay.toFixed(2),
+        formatHM(s.leaveHours), s.leavePay.toFixed(2), s.totalPay.toFixed(2), s.uifEmployee.toFixed(2), s.uifEmployer.toFixed(2),
+        s.outstandingAdvances.toFixed(2), s.netPay.toFixed(2),
       ]);
     }
     const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
@@ -435,25 +446,29 @@ export default function AttendancePage() {
     const monthLabel = new Date(payrollMonth + '-01').toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' });
     const rowsHtml = employees.map(emp => {
       const s = employeeMonthSummary(emp.id);
-      return `<tr><td>${emp.full_name}</td><td>${emp.role}</td><td style="text-align:right">${formatHM(s.totalHours)}</td><td style="text-align:right">R${s.totalPay.toFixed(2)}</td><td style="text-align:right">${s.outstandingAdvances > 0 ? '-R' + s.outstandingAdvances.toFixed(2) : '—'}</td><td style="text-align:right"><b>R${s.netPay.toFixed(2)}</b></td></tr>`;
+      return `<tr><td>${emp.full_name}</td><td>${emp.id_number || '—'}</td><td>${emp.role}</td><td style="text-align:right">${formatHM(s.totalHours)}</td><td style="text-align:right">R${s.totalPay.toFixed(2)}</td><td style="text-align:right">R${s.uifEmployee.toFixed(2)}</td><td style="text-align:right">R${s.uifEmployer.toFixed(2)}</td><td style="text-align:right">${s.outstandingAdvances > 0 ? '-R' + s.outstandingAdvances.toFixed(2) : '—'}</td><td style="text-align:right"><b>R${s.netPay.toFixed(2)}</b></td></tr>`;
     }).join('');
     const grandTotal = employees.reduce((sum, emp) => sum + employeeMonthSummary(emp.id).netPay, 0);
+    const grandUifEmployee = employees.reduce((sum, emp) => sum + employeeMonthSummary(emp.id).uifEmployee, 0);
+    const grandUifEmployer = employees.reduce((sum, emp) => sum + employeeMonthSummary(emp.id).uifEmployer, 0);
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Payroll — ${monthLabel}</title>
       <style>
         body{font-family:Arial,sans-serif;padding:32px;color:#111}
         h1{font-size:20px;margin:0 0 2px;color:#1a5c38}
         .sub{color:#666;font-size:13px;margin-bottom:18px}
-        table{width:100%;border-collapse:collapse;font-size:13px}
-        th{background:#1a5c38;color:#fff;text-align:left;padding:8px 10px}
-        td{padding:8px 10px;border-bottom:1px solid #eee}
-        .grand{margin-top:14px;font-size:16px;text-align:right;font-weight:800}
+        table{width:100%;border-collapse:collapse;font-size:12px}
+        th{background:#1a5c38;color:#fff;text-align:left;padding:8px 8px}
+        td{padding:8px 8px;border-bottom:1px solid #eee}
+        .grand{margin-top:14px;font-size:13px;text-align:right}
+        .grand b{font-size:16px}
         @media print{body{padding:10px}}
       </style></head><body>
       <h1>${EMPLOYER_NAME}</h1>
-      <div class="sub">Payroll Summary · ${monthLabel}</div>
-      <table><thead><tr><th>Employee</th><th>Role</th><th style="text-align:right">Hours</th><th style="text-align:right">Gross</th><th style="text-align:right">Advances</th><th style="text-align:right">Net Pay</th></tr></thead>
+      <div class="sub">Payroll Summary · ${monthLabel} · UIF: ${payrollSettings.uif_employee_rate}% employee / ${payrollSettings.uif_employer_rate}% employer, capped at R${payrollSettings.uif_ceiling.toLocaleString()}/month</div>
+      <table><thead><tr><th>Employee</th><th>ID Number</th><th>Role</th><th style="text-align:right">Hours</th><th style="text-align:right">Gross</th><th style="text-align:right">UIF (Emp)</th><th style="text-align:right">UIF (Empr)</th><th style="text-align:right">Advances</th><th style="text-align:right">Net Pay</th></tr></thead>
       <tbody>${rowsHtml}</tbody></table>
-      <div class="grand">Total Payroll: R${grandTotal.toFixed(2)}</div>
+      <div class="grand">Total UIF Employee: R${grandUifEmployee.toFixed(2)} &nbsp;&nbsp; Total UIF Employer: R${grandUifEmployer.toFixed(2)}</div>
+      <div class="grand">Total Net Payroll: <b>R${grandTotal.toFixed(2)}</b></div>
       </body></html>`;
     const win = window.open('', '_blank');
     if (win) { win.document.write(html); win.document.close(); win.focus(); setTimeout(() => win.print(), 300); }
@@ -473,7 +488,7 @@ export default function AttendancePage() {
   }
 
   async function loadEmployees() {
-    const { data } = await supabase.from('employees').select('id, full_name, role, is_active, hourly_rate, pay_frequency, night_allowance_rate, phone').eq('store_id', STORE_ID).eq('is_active', true).order('full_name');
+    const { data } = await supabase.from('employees').select('id, full_name, role, is_active, hourly_rate, pay_frequency, night_allowance_rate, phone, id_number').eq('store_id', STORE_ID).eq('is_active', true).order('full_name');
     setEmployees(data || []);
   }
 
@@ -639,6 +654,12 @@ export default function AttendancePage() {
             </div>
             <div style={{ fontSize: 13, fontWeight: 700, color: PRIMARY, marginTop: 6 }}>Night Allowance</div>
             <div><label style={lbl}>Starts From (hour, 24h)</label><input type="number" min="0" max="23" value={settingsForm.night_allowance_start_hour} onChange={e => setSettingsForm(p => ({ ...p, night_allowance_start_hour: e.target.value }))} style={inp} /><div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>Hours worked after this time qualify. Rate per hour is set per employee on their card.</div></div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: PRIMARY, marginTop: 6 }}>UIF</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div><label style={lbl}>Employee %</label><input type="number" step="0.1" value={settingsForm.uif_employee_rate} onChange={e => setSettingsForm(p => ({ ...p, uif_employee_rate: e.target.value }))} style={inp} /></div>
+              <div><label style={lbl}>Employer %</label><input type="number" step="0.1" value={settingsForm.uif_employer_rate} onChange={e => setSettingsForm(p => ({ ...p, uif_employer_rate: e.target.value }))} style={inp} /></div>
+              <div style={{ gridColumn: '1 / -1' }}><label style={lbl}>Monthly Earnings Ceiling (R)</label><input type="number" step="1" value={settingsForm.uif_ceiling} onChange={e => setSettingsForm(p => ({ ...p, uif_ceiling: e.target.value }))} style={inp} /><div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>SA default is 1% employee + 1% employer, capped at the Dept. of Labour's earnings ceiling — confirm the current figure before relying on this for a real submission.</div></div>
+            </div>
           </div>
           <button onClick={savePayrollSettings} style={{ width: '100%', marginTop: 20, padding: '13px', background: PRIMARY, color: '#fff', border: 'none', borderRadius: 12, fontWeight: 700, cursor: 'pointer', fontSize: 15 }}>Save</button>
         </ModalWrap>
@@ -681,15 +702,16 @@ export default function AttendancePage() {
                     <div style={{ fontSize: 22, fontWeight: 800, color: '#333' }}>{formatHM(summary.totalHours)}</div>
                   </div>
                   <div style={{ background: '#fff', borderRadius: 14, padding: 16, border: '1px solid #eef2ee' }}>
-                    <div style={{ fontSize: 11, color: '#999', fontWeight: 700, marginBottom: 4 }}>EARNED THIS MONTH</div>
-                    <div style={{ fontSize: 22, fontWeight: 800, color: PRIMARY }}>R{summary.totalPay.toFixed(2)}</div>
+                    <div style={{ fontSize: 11, color: '#999', fontWeight: 700, marginBottom: 4 }}>GROSS PAY THIS MONTH</div>
+                    <div style={{ fontSize: 22, fontWeight: 800, color: '#333' }}>R{summary.totalPay.toFixed(2)}</div>
                   </div>
-                  {summary.outstandingAdvances > 0 && (
-                    <div style={{ background: '#fff7ed', borderRadius: 14, padding: 16, border: '1px solid #fed7aa', gridColumn: '1 / -1', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div><div style={{ fontSize: 11, color: '#c2410c', fontWeight: 700 }}>OUTSTANDING ADVANCES</div><div style={{ fontSize: 18, fontWeight: 800, color: '#c2410c' }}>-R{summary.outstandingAdvances.toFixed(2)}</div></div>
-                      <div style={{ textAlign: 'right' as const }}><div style={{ fontSize: 11, color: '#999', fontWeight: 700 }}>NET PAY</div><div style={{ fontSize: 18, fontWeight: 800, color: '#333' }}>R{summary.netPay.toFixed(2)}</div></div>
+                  <div style={{ background: '#fff7ed', borderRadius: 14, padding: 16, border: '1px solid #fed7aa', gridColumn: '1 / -1', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
+                      <div style={{ fontSize: 11, color: '#c2410c', fontWeight: 700 }}>DEDUCTIONS</div>
+                      <div style={{ fontSize: 13, color: '#c2410c' }}>UIF: -R{summary.uifEmployee.toFixed(2)}{summary.outstandingAdvances > 0 ? ` · Advance: -R${summary.outstandingAdvances.toFixed(2)}` : ''}</div>
                     </div>
-                  )}
+                    <div style={{ textAlign: 'right' as const }}><div style={{ fontSize: 11, color: '#999', fontWeight: 700 }}>NET PAY</div><div style={{ fontSize: 20, fontWeight: 800, color: PRIMARY }}>R{summary.netPay.toFixed(2)}</div></div>
+                  </div>
                 </div>
 
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' as const, marginBottom: 20 }}>
@@ -698,6 +720,7 @@ export default function AttendancePage() {
                   {summary.sundayHolidayHours > 0 && <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 10, padding: '6px 12px', fontSize: 12, color: '#2563eb' }}>Sunday/Holiday: <b>{formatHM(summary.sundayHolidayHours)}</b> · R{summary.sundayHolidayPay.toFixed(2)}</div>}
                   {summary.nightHours > 0 && <div style={{ background: '#f5f3ff', border: '1px solid #ddd6fe', borderRadius: 10, padding: '6px 12px', fontSize: 12, color: '#7c3aed' }}>🌙 Night Allowance: <b>{formatHM(summary.nightHours)}</b> · R{summary.nightPay.toFixed(2)}</div>}
                   {summary.leaveHours > 0 && <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 10, padding: '6px 12px', fontSize: 12, color: '#c2410c' }}>🌴 Paid Leave: <b>{formatHM(summary.leaveHours)}</b> · R{summary.leavePay.toFixed(2)}</div>}
+                  <div style={{ background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 10, padding: '6px 12px', fontSize: 12, color: '#6b7280' }}>UIF (Employer): R{summary.uifEmployer.toFixed(2)}</div>
                 </div>
 
                 {empAdvances.filter(a => a.repayment_status === 'outstanding').length > 0 && (
@@ -986,8 +1009,8 @@ export default function AttendancePage() {
                             <div style={{ fontSize: 11, fontWeight: 700, color: '#dc2626', marginBottom: 8, background: '#fef2f2', borderRadius: 6, padding: '3px 8px', display: 'inline-block' }}>⏱ {formatHM(summary.otHours)} overtime</div>
                           )}
                           <div style={{ background: '#f0f7f4', borderRadius: 10, padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <span style={{ fontSize: 12, color: '#666', fontWeight: 600 }}>{summary.outstandingAdvances > 0 ? 'Net Pay' : 'Earned MTD'}</span>
-                            <span style={{ fontWeight: 800, fontSize: 17, color: PRIMARY }}>R{(summary.outstandingAdvances > 0 ? summary.netPay : summary.totalPay).toFixed(2)}</span>
+                            <span style={{ fontSize: 12, color: '#666', fontWeight: 600 }}>Net Pay (after UIF)</span>
+                            <span style={{ fontWeight: 800, fontSize: 17, color: PRIMARY }}>R{summary.netPay.toFixed(2)}</span>
                           </div>
                         </div>
                       );
