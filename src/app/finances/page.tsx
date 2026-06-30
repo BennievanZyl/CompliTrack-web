@@ -240,17 +240,27 @@ export default function FinancesPage() {
       .eq('supplier', inv.supplier)
       .order('description')
     setGrvItems(items || [])
-    // Pre-populate lines from stock items
-    setGrvLines((items || []).map(i => ({
-      stock_item_id: i.id,
-      description: i.description || '',
-      unit: i.unit || 'each',
-      qty_received: '',
-      unit_cost: String(Number(i.cost_price || i.price || 0) || ''),
-      units_per_case: '',
-      case_qty: '',
-      case_price: ''
-    })))
+    // Pre-populate lines from stock items, pulling qty/price straight from this invoice's
+    // line items wherever the description matches (the match chips on the invoice form
+    // already standardize wording to the stock sheet's exact naming).
+    const invLinesForMatch = inv.invoice_lines || []
+    setGrvLines((items || []).map(i => {
+      const norm = (s: string) => s.trim().toLowerCase()
+      const match = invLinesForMatch.find(l => norm(l.description) === norm(i.description || ''))
+      const matchQty = match ? Number(match.qty) || 0 : 0
+      const matchAmount = match ? Number(match.amount) || 0 : 0
+      const matchUnitCost = match && matchQty > 0 ? (matchAmount / matchQty) : 0
+      return {
+        stock_item_id: i.id,
+        description: i.description || '',
+        unit: i.unit || 'each',
+        qty_received: match && matchQty > 0 ? String(matchQty) : '',
+        unit_cost: match && matchUnitCost > 0 ? matchUnitCost.toFixed(4) : String(Number(i.cost_price || i.price || 0) || ''),
+        units_per_case: '',
+        case_qty: '',
+        case_price: ''
+      }
+    }))
     setShowGRV(true)
   }
 
@@ -408,7 +418,22 @@ export default function FinancesPage() {
       const { error: le } = await supabase.from('invoice_lines').insert(lines)
       if (le) { setError(le.message); setSaving(false); return }
     }
-    setSaving(false); setShowInvForm(false); setEditInv(null); load()
+    setSaving(false); setShowInvForm(false); setEditInv(null)
+    await load()
+    const savedInvoice: Invoice = {
+      id: invoiceId!,
+      supplier: invForm.supplier,
+      invoice_number: invForm.invoice_number,
+      invoice_date: invForm.invoice_date,
+      due_date: invForm.due_date,
+      status: invForm.status,
+      payment_method: invForm.payment_method,
+      notes: invForm.notes,
+      total_amount: lineTotal,
+      total_vat: lineVatTotal,
+      invoice_lines: lines as unknown as InvoiceLine[],
+    }
+    openGRV(savedInvoice)
   }
 
   async function deleteInvoice(id: string) {
