@@ -94,6 +94,18 @@ export default function FinancesPage() {
   const [historySearch, setHistorySearch] = useState('')
   const [historyStatus, setHistoryStatus] = useState('All')
   const [month, setMonth] = useState(thisMonth())
+  const [fcMode, setFcMode] = useState<'month' | 'week'>('month')
+  const [fcWeekStart, setFcWeekStart] = useState(() => {
+    const d = new Date(); const day = (d.getDay() + 6) % 7; d.setDate(d.getDate() - day)
+    return d.toISOString().split('T')[0]
+  })
+  const [fcLoading, setFcLoading] = useState(false)
+  const [fcLoaded, setFcLoaded] = useState(false)
+  const [fcData, setFcData] = useState<{
+    openingValue: number; openingDate: string | null; openingMissing: boolean
+    closingValue: number; closingDate: string | null; closingMissing: boolean
+    purchases: number; wastage: number; sales: number
+  } | null>(null)
 
   const [categories, setCategories] = useState<{id:string;name:string;key:string;colour:string}[]>([])
   const [suppliers, setSuppliers] = useState<{id:string;name:string;payment_terms_days:number|null}[]>([])
@@ -191,6 +203,58 @@ export default function FinancesPage() {
   }, [month])
 
   useEffect(() => { load() }, [load])
+
+  function fcPeriodRange(): [string, string] {
+    if (fcMode === 'week') {
+      const start = new Date(fcWeekStart + 'T00:00:00')
+      const end = new Date(start); end.setDate(end.getDate() + 6)
+      return [fcWeekStart, end.toISOString().split('T')[0]]
+    }
+    const [y, m] = month.split('-').map(Number)
+    return [`${month}-01`, new Date(y, m, 0).toISOString().split('T')[0]]
+  }
+
+  async function loadFoodCost() {
+    setFcLoading(true)
+    const [periodStart, periodEnd] = fcPeriodRange()
+
+    // Pull recent completed stock counts so we can find the closest one before/within this period
+    const { data: counts } = await supabase.from('stock_counts')
+      .select('id, count_date, status').eq('store_id', STORE_ID).eq('status', 'completed')
+      .order('count_date', { ascending: false }).limit(100)
+
+    const closing = (counts || []).find(c => c.count_date <= periodEnd) || null
+    const opening = (counts || []).find(c => c.count_date < periodStart) || null
+    const openingMissing = !opening
+    const closingMissing = !closing
+
+    async function countValue(countId: string | undefined) {
+      if (!countId) return 0
+      const { data: lines } = await supabase.from('stock_count_lines').select('actual_qty, unit_cost').eq('stock_count_id', countId)
+      return (lines || []).reduce((s, l) => s + (Number(l.actual_qty) || 0) * (Number(l.unit_cost) || 0), 0)
+    }
+    const [openingValue, closingValue] = await Promise.all([countValue(opening?.id), countValue(closing?.id)])
+
+    const [purchRes, wasteRes, salesRes] = await Promise.all([
+      supabase.from('stock_purchases').select('total_cost').eq('store_id', STORE_ID).gte('purchase_date', periodStart).lte('purchase_date', periodEnd),
+      supabase.from('stock_wastage').select('total_cost').eq('store_id', STORE_ID).gte('wastage_date', periodStart).lte('wastage_date', periodEnd),
+      supabase.from('cash_ups').select('cash_up_total').eq('store_id', STORE_ID).not('status', 'eq', 'draft').gte('cash_up_date', periodStart).lte('cash_up_date', periodEnd),
+    ])
+    const purchases = (purchRes.data || []).reduce((s, p) => s + (Number(p.total_cost) || 0), 0)
+    const wastage = (wasteRes.data || []).reduce((s, w) => s + (Number(w.total_cost) || 0), 0)
+    const sales = (salesRes.data || []).reduce((s, c) => s + (Number(c.cash_up_total) || 0), 0)
+
+    setFcData({
+      openingValue, openingDate: opening?.count_date || null, openingMissing,
+      closingValue, closingDate: closing?.count_date || null, closingMissing,
+      purchases, wastage, sales,
+    })
+    setFcLoading(false)
+    setFcLoaded(true)
+  }
+
+  useEffect(() => { if (tab === 4) loadFoodCost() }, [tab, fcMode, fcWeekStart, month])
+
 
   async function loadHistory() {
     setHistoryLoading(true)
@@ -1035,28 +1099,80 @@ export default function FinancesPage() {
           )}
 
           {/* ── FOOD COST ── */}
-          {tab === 4 && (
-            <div style={{ ...card, textAlign: 'center', padding: 60 }}>
-              <div style={{ fontSize: 48, marginBottom: 12 }}>🍔</div>
-              <h3 style={{ margin: '0 0 8px', fontSize: 20, fontWeight: 700 }}>Food Cost Analysis</h3>
-              <p style={{ color: '#6b7280', fontSize: 14, maxWidth: 400, margin: '0 auto 16px' }}>
-                Compare theoretical vs actual food cost using your Stock Management data.
-              </p>
-              <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, padding: '16px 24px', display: 'inline-block', textAlign: 'left' }}>
-                <p style={{ margin: '0 0 6px', fontWeight: 700, color: '#166534', fontSize: 14 }}>Formula (matches your Excel):</p>
-                <ul style={{ margin: 0, paddingLeft: 20, color: '#374151', fontSize: 13, lineHeight: 2 }}>
-                  <li>Opening Stock Value</li>
-                  <li>+ Purchases (from Stock module)</li>
-                  <li>− Closing Stock Value</li>
-                  <li>− Wastage</li>
-                  <li>= Cost of Sales → Food Cost %</li>
-                </ul>
+          {tab === 4 && (() => {
+            const [periodStart, periodEnd] = fcPeriodRange()
+            const costOfSales = fcData ? fcData.openingValue + fcData.purchases - fcData.closingValue - fcData.wastage : 0
+            const foodCostPct = fcData && fcData.sales > 0 ? (costOfSales / fcData.sales) * 100 : null
+            const row = (label: string, value: number, sign: '+' | '-' | '=' | '') => (
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid #f3f4f6', fontSize: 14 }}>
+                <span style={{ color: '#6b7280' }}>{sign && <span style={{ display: 'inline-block', width: 16, fontWeight: 700, color: '#9ca3af' }}>{sign}</span>}{label}</span>
+                <span style={{ fontWeight: 700 }}>{fmt(value)}</span>
               </div>
-              <div style={{ marginTop: 24 }}>
-                <button style={btn()} onClick={() => router.push('/stock')}>Go to Stock Management →</button>
+            )
+            return (
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
+                  <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Food Cost Analysis</h2>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <div style={{ display: 'flex', background: '#f3f4f6', borderRadius: 10, padding: 3 }}>
+                      {(['month', 'week'] as const).map(m => (
+                        <button key={m} onClick={() => setFcMode(m)} style={{ padding: '6px 16px', borderRadius: 8, border: 'none', background: fcMode === m ? '#1a5c38' : 'transparent', color: fcMode === m ? '#fff' : '#6b7280', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>{m === 'month' ? 'Month' : 'Week'}</button>
+                      ))}
+                    </div>
+                    {fcMode === 'week' && <input type="date" value={fcWeekStart} onChange={e => setFcWeekStart(e.target.value)} style={inp} />}
+                  </div>
+                </div>
+                <p style={{ fontSize: 13, color: '#9ca3af', marginBottom: 16 }}>
+                  {fcMode === 'week' ? `Week of ${periodStart} — ${periodEnd}` : `${new Date(periodStart).toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' })}`}
+                </p>
+
+                {fcLoading ? (
+                  <div style={{ textAlign: 'center', padding: 60, color: '#6b7280' }}>Calculating…</div>
+                ) : !fcData ? null : (
+                  <>
+                    {(fcData.openingMissing || fcData.closingMissing) && (
+                      <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 10, padding: '12px 16px', marginBottom: 16, fontSize: 13, color: '#c2410c' }}>
+                        ⚠️ {fcData.openingMissing && 'No completed stock count found before this period — opening value is treated as R0, which will distort the result. '}
+                        {fcData.closingMissing && 'No completed stock count found for this period — closing value is treated as R0. '}
+                        Run a stock count in Stock Management close to the start and end of each period for an accurate Food Cost %.
+                      </div>
+                    )}
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1.3fr 1fr', gap: 20 }}>
+                      <div style={card}>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: '#374151', marginBottom: 4 }}>Cost of Sales Breakdown</div>
+                        <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 8 }}>
+                          Opening {fcData.openingDate ? `(${fcData.openingDate} count)` : '(no count found)'} · Closing {fcData.closingDate ? `(${fcData.closingDate} count)` : '(no count found)'}
+                        </div>
+                        {row('Opening Stock Value', fcData.openingValue, '')}
+                        {row('Purchases (Stock module)', fcData.purchases, '+')}
+                        {row('Closing Stock Value', fcData.closingValue, '-')}
+                        {row('Wastage', fcData.wastage, '-')}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '14px 0 0', fontSize: 16, fontWeight: 800 }}>
+                          <span>Cost of Sales</span>
+                          <span style={{ color: '#1a5c38' }}>{fmt(costOfSales)}</span>
+                        </div>
+                      </div>
+
+                      <div style={{ ...card, textAlign: 'center', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                        <div style={{ fontSize: 12, color: '#9ca3af', fontWeight: 600, marginBottom: 6 }}>FOOD COST %</div>
+                        <div style={{ fontSize: 44, fontWeight: 800, color: foodCostPct === null ? '#9ca3af' : foodCostPct <= 33 ? '#16a34a' : foodCostPct <= 38 ? '#d97706' : '#dc2626' }}>
+                          {foodCostPct === null ? '—' : `${foodCostPct.toFixed(1)}%`}
+                        </div>
+                        <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 4 }}>{fmt(costOfSales)} ÷ {fmt(fcData.sales)} sales</div>
+                        {fcData.sales === 0 && <div style={{ fontSize: 11, color: '#dc2626', marginTop: 8 }}>No sales recorded for this period</div>}
+                        <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 16, borderTop: '1px solid #f3f4f6', paddingTop: 12 }}>Typical restaurant target: 28–35%</div>
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                <div style={{ marginTop: 20, textAlign: 'center' }}>
+                  <button style={btn('#6b7280')} onClick={() => router.push('/stock')}>Go to Stock Management →</button>
+                </div>
               </div>
-            </div>
-          )}
+            )
+          })()}
 
           {tab === 5 && (
             <div>
