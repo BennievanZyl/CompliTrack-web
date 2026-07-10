@@ -302,19 +302,9 @@ export default function FinancesPage() {
         await supabase.from('pending_invoice_scans').update({ status: 'processing' }).eq('id', payload.new.id)
 
         try {
-          // The browser can fetch from Supabase (same auth context).
-          // Anthropic's servers cannot — they have no credentials.
-          // So: fetch here in the browser → encode to base64 → send to our existing route.
-          const imgRes = await fetch(imageUrl)
-          if (!imgRes.ok) throw new Error(`Failed to fetch image: ${imgRes.status}`)
-          const arrayBuffer = await imgRes.arrayBuffer()
-          const uint8Array = new Uint8Array(arrayBuffer)
-          let b64 = ''
-          const CHUNK = 8192
-          for (let i = 0; i < uint8Array.length; i += CHUNK) {
-            b64 += btoa(String.fromCharCode(...uint8Array.subarray(i, i + CHUNK)))
-          }
-          if (!b64) throw new Error('Image encoding produced empty result')
+          // App sends base64 directly in the row — no storage fetch, no CORS, no signed URL needed.
+          const b64 = payload.new?.image_base64
+          if (!b64) throw new Error('No image data in relay row')
 
           const response = await fetch('/api/scan-invoice', {
             method: 'POST',
