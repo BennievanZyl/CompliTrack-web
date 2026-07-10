@@ -301,13 +301,25 @@ export default function FinancesPage() {
         // Mark as processing
         await supabase.from('pending_invoice_scans').update({ status: 'processing' }).eq('id', payload.new.id)
 
-        // Send the public URL directly to the API — Anthropic fetches it themselves,
-        // avoiding the CORS-corrupted blob that happens when the browser re-fetches it.
         try {
-          const response = await fetch('/api/scan-invoice-url', {
+          // The browser can fetch from Supabase (same auth context).
+          // Anthropic's servers cannot — they have no credentials.
+          // So: fetch here in the browser → encode to base64 → send to our existing route.
+          const imgRes = await fetch(imageUrl)
+          if (!imgRes.ok) throw new Error(`Failed to fetch image: ${imgRes.status}`)
+          const arrayBuffer = await imgRes.arrayBuffer()
+          const uint8Array = new Uint8Array(arrayBuffer)
+          let b64 = ''
+          const CHUNK = 8192
+          for (let i = 0; i < uint8Array.length; i += CHUNK) {
+            b64 += btoa(String.fromCharCode(...uint8Array.subarray(i, i + CHUNK)))
+          }
+          if (!b64) throw new Error('Image encoding produced empty result')
+
+          const response = await fetch('/api/scan-invoice', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ imageUrl })
+            body: JSON.stringify({ base64: b64, mediaType: 'image/jpeg' })
           })
           const data = await response.json()
           if (!response.ok) throw new Error(data.error || 'Scan failed')
