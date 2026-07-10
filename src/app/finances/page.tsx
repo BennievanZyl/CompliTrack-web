@@ -293,18 +293,28 @@ export default function FinancesPage() {
         table: 'pending_invoice_scans',
         filter: `store_id=eq.${STORE_ID}`,
       }, async (payload) => {
-        const imageUrl = payload.new?.image_url
-        if (!imageUrl) return
+        const rowId = payload.new?.id
+        if (!rowId) return
         setDeviceScanStatus('received')
         supabase.removeChannel(channel)
 
         // Mark as processing
-        await supabase.from('pending_invoice_scans').update({ status: 'processing' }).eq('id', payload.new.id)
+        await supabase.from('pending_invoice_scans').update({ status: 'processing' }).eq('id', rowId)
 
         try {
-          // App sends base64 directly in the row — no storage fetch, no CORS, no signed URL needed.
-          const b64 = payload.new?.image_base64
-          if (!b64) throw new Error('No image data in relay row')
+          // Realtime payload.new truncates large columns (64KB limit) so image_base64
+          // won't be in the payload. Fetch the full row directly from the DB instead.
+          const { data: scanRow, error: fetchErr } = await supabase
+            .from('pending_invoice_scans')
+            .select('image_base64')
+            .eq('id', rowId)
+            .single()
+
+          if (fetchErr || !scanRow?.image_base64) {
+            throw new Error('Could not retrieve image data — check the app sent the photo correctly')
+          }
+
+          const b64 = scanRow.image_base64
 
           const response = await fetch('/api/scan-invoice', {
             method: 'POST',
@@ -333,10 +343,10 @@ export default function FinancesPage() {
             })))
           }
           setScanError('')
-          await supabase.from('pending_invoice_scans').update({ status: 'done' }).eq('id', payload.new.id)
+          await supabase.from('pending_invoice_scans').update({ status: 'done' }).eq('id', rowId)
         } catch (err: unknown) {
           setScanError(err instanceof Error ? err.message : 'Device scan failed')
-          await supabase.from('pending_invoice_scans').update({ status: 'error' }).eq('id', payload.new.id)
+          await supabase.from('pending_invoice_scans').update({ status: 'error' }).eq('id', rowId)
         }
         setDeviceScanStatus(null)
       })
