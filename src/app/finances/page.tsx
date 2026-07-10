@@ -529,11 +529,13 @@ export default function FinancesPage() {
         })
       }
       const uint8Array = new Uint8Array(arrayBuffer)
-      let binary = ''
-      for (let i = 0; i < uint8Array.byteLength; i++) {
-        binary += String.fromCharCode(uint8Array[i])
+      // btoa(binary) built char-by-char crashes on large phone images (200-400KB JPEG).
+      // Chunked approach handles arbitrarily large buffers safely.
+      let b64 = ''
+      const CHUNK = 8192
+      for (let i = 0; i < uint8Array.length; i += CHUNK) {
+        b64 += btoa(String.fromCharCode(...uint8Array.subarray(i, i + CHUNK)))
       }
-      const b64 = btoa(binary)
 
       if (!b64) throw new Error('Could not read file')
 
