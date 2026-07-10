@@ -111,7 +111,7 @@ export default function FinancesPage() {
   const [fcOverrideCountThisQuarter, setFcOverrideCountThisQuarter] = useState(0)
 
   const [categories, setCategories] = useState<{id:string;name:string;key:string;colour:string}[]>([])
-  const [suppliers, setSuppliers] = useState<{id:string;name:string;payment_terms_days:number|null}[]>([])
+  const [suppliers, setSuppliers] = useState<{id:string;name:string;payment_terms_days:number|null;invoice_columns:{name:string;maps_to:string|null}[]|null;invoice_vat_included:boolean|null}[]>([])
   const [cashUps, setCashUps] = useState<CashUp[]>([])
   const [invoices, setInvoices] = useState<Invoice[]>([])
   const [quickExp, setQuickExp] = useState<QuickExpense[]>([])
@@ -189,7 +189,7 @@ export default function FinancesPage() {
         .gte('invoice_date', monthStart).lte('invoice_date', monthEnd)
         .order('invoice_date', { ascending: false }),
       supabase.from('expense_categories').select('id, name, key, colour, sort_order').eq('organisation_id', ORG_ID).eq('is_active', true).order('sort_order'),
-      supabase.from('stock_suppliers').select('id, name, payment_terms_days').eq('store_id', STORE_ID).eq('is_active', true).order('sort_order'),
+      supabase.from('stock_suppliers').select('id, name, payment_terms_days, invoice_columns, invoice_vat_included').eq('store_id', STORE_ID).eq('is_active', true).order('sort_order'),
       supabase.from('expenses')
         .select('*').eq('store_id', STORE_ID)
         .gte('expense_date', monthStart).lte('expense_date', monthEnd)
@@ -588,10 +588,19 @@ export default function FinancesPage() {
 
       if (!b64) throw new Error('Could not read file')
 
+      // If a supplier is already selected in the form, pass their invoice template
+      // so the AI knows exactly which column contains the excl-VAT unit price.
+      const matchedSupplier = suppliers.find(s => s.name === invForm.supplier)
+      const supplierTemplate = matchedSupplier?.invoice_columns?.length ? {
+        name: matchedSupplier.name,
+        columns: matchedSupplier.invoice_columns,
+        vatIncluded: matchedSupplier.invoice_vat_included !== false,
+      } : undefined
+
       const response = await fetch('/api/scan-invoice', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ base64: b64, mediaType })
+        body: JSON.stringify({ base64: b64, mediaType, supplierTemplate })
       })
 
       const data = await response.json()
