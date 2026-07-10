@@ -1,5 +1,5 @@
 'use client' // rebuild 08:09:06 // 19:21:58 // 19:21:52 // build 2026-06-29T19:12
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 
@@ -124,6 +124,9 @@ export default function FinancesPage() {
   const [savingGRV, setSavingGRV] = useState(false)
   const [scanning, setScanning] = useState(false)
   const [scanError, setScanError] = useState('')
+  const [showScanChoice, setShowScanChoice] = useState(false)
+  const [deviceScanStatus, setDeviceScanStatus] = useState<'waiting' | 'received' | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const [error, setError] = useState('')
   const [allStockItems, setAllStockItems] = useState<{id:string;description:string;unit:string;supplier:string|null}[]>([])
 
@@ -268,6 +271,59 @@ export default function FinancesPage() {
   }
 
   useEffect(() => { if (tab === 4) loadFoodCost() }, [tab, fcMode, fcWeekStart, month])
+
+  function startDeviceScan() {
+    setShowScanChoice(false)
+    setDeviceScanStatus('waiting')
+    setScanError('')
+
+    // Mark any old pending scans for this store as done so they don't re-trigger
+    supabase.from('pending_invoice_scans')
+      .update({ status: 'done' })
+      .eq('store_id', STORE_ID)
+      .eq('status', 'uploaded')
+      .then(() => {})
+
+    // Listen for a new upload from the app via Realtime
+    const channel = supabase
+      .channel('invoice-scan-relay')
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'pending_invoice_scans',
+        filter: `store_id=eq.${STORE_ID}`,
+      }, async (payload) => {
+        const imageUrl = payload.new?.image_url
+        if (!imageUrl) return
+        setDeviceScanStatus('received')
+        supabase.removeChannel(channel)
+
+        // Mark as processing
+        await supabase.from('pending_invoice_scans').update({ status: 'processing' }).eq('id', payload.new.id)
+
+        // Fetch the image and run it through the existing scan-invoice API
+        try {
+          const imgRes = await fetch(imageUrl)
+          const blob = await imgRes.blob()
+          const file = new File([blob], 'invoice.jpg', { type: 'image/jpeg' })
+          await scanInvoice(file)
+          await supabase.from('pending_invoice_scans').update({ status: 'done' }).eq('id', payload.new.id)
+        } catch {
+          await supabase.from('pending_invoice_scans').update({ status: 'error' }).eq('id', payload.new.id)
+        }
+        setDeviceScanStatus(null)
+      })
+      .subscribe()
+
+    // Auto-cancel after 3 minutes if nothing arrives
+    setTimeout(() => {
+      supabase.removeChannel(channel)
+      setDeviceScanStatus(prev => {
+        if (prev === 'waiting') { setScanError('No photo received from device — make sure you\'re logged into the same store on the app.'); return null; }
+        return prev
+      })
+    }, 180000)
+  }
 
   async function saveFoodCostOverride() {
     if (!fcOverrideField || !fcOverrideForm.value) return
@@ -793,11 +849,11 @@ export default function FinancesPage() {
                 <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Supplier Bills</h2>
                 <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
                   <div style={{ position: 'relative', display: 'inline-block' }}>
-                    <div style={{ ...btn('#6366f1'), pointerEvents: 'none' }}>
-                      {scanning ? '⏳ Scanning...' : '📷 Scan Invoice'}
-                    </div>
-                    <input type="file" accept="image/*,application/pdf"
-                      style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0, cursor: scanning ? 'wait' : 'pointer' }}
+                    <button style={{ ...btn('#6366f1'), pointerEvents: scanning ? 'none' : 'auto', opacity: scanning ? 0.7 : 1 }} onClick={() => !scanning && setShowScanChoice(true)}>
+                      {scanning ? '⏳ Scanning...' : deviceScanStatus === 'waiting' ? '📡 Waiting for device...' : deviceScanStatus === 'received' ? '⚡ Processing...' : '📷 Scan Invoice'}
+                    </button>
+                    <input ref={fileInputRef} type="file" accept="image/*,application/pdf"
+                      style={{ display: 'none' }}
                       onChange={e => { const f = e.target.files?.[0]; if (f) scanInvoice(f) }} />
                   </div>
                   <button style={btn()} onClick={openNewInvoice}>+ New Invoice</button>
@@ -807,6 +863,23 @@ export default function FinancesPage() {
               {scanError && (
                 <div style={{ background: '#fef2f2', color: '#dc2626', padding: '10px 14px', borderRadius: 8, marginBottom: 16, fontSize: 13, fontWeight: 600, border: '1px solid #fecaca' }}>
                   ⚠️ Scan failed: {scanError}
+                </div>
+              )}
+
+              {deviceScanStatus === 'waiting' && (
+                <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 10, padding: '14px 18px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <span style={{ fontSize: 24 }}>📱</span>
+                  <div>
+                    <div style={{ fontWeight: 700, color: '#1d4ed8', fontSize: 14 }}>Waiting for photo from your device</div>
+                    <div style={{ fontSize: 12, color: '#3b82f6', marginTop: 2 }}>Open the CompliTrack app → Supplier Bills → Scan Invoice. The photo will appear here automatically.</div>
+                  </div>
+                  <button onClick={() => setDeviceScanStatus(null)} style={{ marginLeft: 'auto', background: 'none', border: 'none', color: '#93c5fd', cursor: 'pointer', fontSize: 18 }}>×</button>
+                </div>
+              )}
+              {deviceScanStatus === 'received' && (
+                <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, padding: '14px 18px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <span style={{ fontSize: 24 }}>⚡</span>
+                  <div style={{ fontWeight: 700, color: '#166534', fontSize: 14 }}>Photo received — running AI scan...</div>
                 </div>
               )}
 
@@ -1447,6 +1520,35 @@ export default function FinancesPage() {
                 </>
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {showScanChoice && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000, padding: 20 }} onClick={() => setShowScanChoice(false)}>
+          <div style={{ background: '#fff', borderRadius: 20, padding: 32, width: 420, maxWidth: '100%' }} onClick={e => e.stopPropagation()}>
+            <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 6 }}>📷 Scan Invoice</div>
+            <p style={{ fontSize: 13, color: '#888', margin: '0 0 24px' }}>How do you want to capture this invoice?</p>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <button onClick={() => { setShowScanChoice(false); fileInputRef.current?.click() }} style={{ display: 'flex', alignItems: 'center', gap: 16, background: '#f8faf8', border: '1.5px solid #e5e7eb', borderRadius: 14, padding: '16px 20px', cursor: 'pointer', textAlign: 'left', width: '100%' }}>
+                <span style={{ fontSize: 32 }}>🖥️</span>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 15, color: '#111' }}>Upload from PC / Drive</div>
+                  <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>Pick a photo or PDF from your computer or Google Drive</div>
+                </div>
+              </button>
+
+              <button onClick={startDeviceScan} style={{ display: 'flex', alignItems: 'center', gap: 16, background: '#eff6ff', border: '1.5px solid #bfdbfe', borderRadius: 14, padding: '16px 20px', cursor: 'pointer', textAlign: 'left', width: '100%' }}>
+                <span style={{ fontSize: 32 }}>📱</span>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 15, color: '#1d4ed8' }}>Photo Scan from Device</div>
+                  <div style={{ fontSize: 12, color: '#3b82f6', marginTop: 2 }}>Take a photo with your phone — it appears here in seconds</div>
+                </div>
+              </button>
+            </div>
+
+            <button onClick={() => setShowScanChoice(false)} style={{ marginTop: 20, width: '100%', padding: '10px', background: '#f3f4f6', color: '#374151', border: 'none', borderRadius: 10, fontWeight: 600, cursor: 'pointer', fontSize: 14 }}>Cancel</button>
           </div>
         </div>
       )}
