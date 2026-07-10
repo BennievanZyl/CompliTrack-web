@@ -8,7 +8,19 @@ const STORE_ID = '05328298-fc27-4c9f-b091-bb7f6598b601'
 
 type StockCategory = { id: string; name: string; color: string; sort_order: number }
 type StockItem = { id: string; category: string | null; name: string; description: string; unit: string; cost_price: number; price: number; par_level: number; current_qty: number; is_active: boolean; sort_order: number; supplier: string | null; on_daily_sheet: boolean; is_catch_weight: boolean; kg_price: number; avg_weight_kg: number }
-type StockSupplier = { id: string; name: string; contact_name: string | null; phone: string | null; email: string | null; order_day: string | null; notes: string | null; payment_terms_days: number | null; is_active: boolean; sort_order: number }
+type InvoiceColumn = { name: string; maps_to: string | null }
+type StockSupplier = { id: string; name: string; contact_name: string | null; phone: string | null; email: string | null; order_day: string | null; notes: string | null; payment_terms_days: number | null; is_active: boolean; sort_order: number; invoice_columns: InvoiceColumn[] | null; invoice_vat_included: boolean | null }
+const MAPS_TO_OPTIONS = [
+  { value: '', label: '— ignore this column —' },
+  { value: 'description', label: 'Item Description' },
+  { value: 'qty', label: 'Quantity' },
+  { value: 'uom', label: 'Unit of Measure' },
+  { value: 'unit_price_excl', label: 'Unit Price (excl VAT) ← use this for pricing' },
+  { value: 'unit_price_incl', label: 'Unit Price (incl VAT)' },
+  { value: 'total_excl', label: 'Line Total (excl VAT)' },
+  { value: 'vat_amount', label: 'VAT Amount' },
+  { value: 'total_incl', label: 'Line Total (incl VAT)' },
+]
 
 type StockCount = { id: string; count_type: string; count_date: string; status: string; notes: string | null }
 type StockCountLine = { id: string; stock_count_id: string; stock_item_id: string; expected_qty: number; actual_qty: number; unit_cost: number }
@@ -75,6 +87,8 @@ export default function StockPage() {
   const [showSupplierForm, setShowSupplierForm] = useState(false)
   const [editSupplier, setEditSupplier] = useState<StockSupplier | null>(null)
   const [supplierForm, setSupplierForm] = useState({ name: '', contact_name: '', phone: '', email: '', order_day: '', notes: '', payment_terms_days: '7' })
+  const [invoiceColumns, setInvoiceColumns] = useState<InvoiceColumn[]>([])
+  const [invoiceVatIncluded, setInvoiceVatIncluded] = useState(true)
   const [saving, setSaving] = useState(false)
   const [activeCount, setActiveCount] = useState<StockCount | null>(null)
   const [countLines, setCountLines] = useState<StockCountLine[]>([])
@@ -130,14 +144,20 @@ export default function StockPage() {
   async function saveSupplier() {
     if (!supplierForm.name) return
     setSaving(true)
-    const payload = { store_id: STORE_ID, ...supplierForm, payment_terms_days: parseInt(supplierForm.payment_terms_days) || 7, is_active: true, sort_order: suppliers.length + 1 }
+    const payload = {
+      store_id: STORE_ID, ...supplierForm,
+      payment_terms_days: parseInt(supplierForm.payment_terms_days) || 7,
+      is_active: true, sort_order: suppliers.length + 1,
+      invoice_columns: invoiceColumns.length > 0 ? invoiceColumns : null,
+      invoice_vat_included: invoiceVatIncluded,
+    }
     if (editSupplier) {
       await supabase.from('stock_suppliers').update(payload).eq('id', editSupplier.id)
     } else {
       await supabase.from('stock_suppliers').insert(payload)
     }
     setShowSupplierForm(false); setEditSupplier(null)
-    setSupplierForm({ name: '', contact_name: '', phone: '', email: '', order_day: '', notes: '', payment_terms_days: '7' })
+    setSupplierForm({ name: '', contact_name: '', phone: '', email: '', order_day: '', notes: '', payment_terms_days: '7' }); setInvoiceColumns([]); setInvoiceVatIncluded(true)
     setSaving(false); await loadAll()
   }
 
@@ -665,7 +685,7 @@ export default function StockPage() {
                   <div style={{ fontSize: '18px', fontWeight: 800, color: '#111' }}>Suppliers</div>
                   <div style={{ fontSize: '13px', color: '#9ca3af' }}>Manage your suppliers — used across stock items, orders and counts</div>
                 </div>
-                <button onClick={() => { setEditSupplier(null); setSupplierForm({ name: '', contact_name: '', phone: '', email: '', order_day: '', notes: '', payment_terms_days: '7' }); setShowSupplierForm(true) }}
+                <button onClick={() => { setEditSupplier(null); setSupplierForm({ name: '', contact_name: '', phone: '', email: '', order_day: '', notes: '', payment_terms_days: '7' }); setInvoiceColumns([]); setInvoiceVatIncluded(true); setShowSupplierForm(true) }}
                   style={{ padding: '10px 18px', background: '#1a5c38', color: 'white', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: 800, cursor: 'pointer' }}>+ Add Supplier</button>
               </div>
               {suppliers.length === 0 ? (
@@ -691,7 +711,7 @@ export default function StockPage() {
                       </div>
                       <div style={{ fontSize: '12px', color: '#9ca3af' }}>{items.filter(i => i.supplier === s.name).length} items</div>
                       <div style={{ display: 'flex', gap: '8px' }}>
-                        <button onClick={() => { setEditSupplier(s); setSupplierForm({ name: s.name, contact_name: s.contact_name||'', phone: s.phone||'', email: s.email||'', order_day: s.order_day||'', notes: s.notes||'', payment_terms_days: String(s.payment_terms_days ?? 7) }); setShowSupplierForm(true) }}
+                        <button onClick={() => { setEditSupplier(s); setSupplierForm({ name: s.name, contact_name: s.contact_name||'', phone: s.phone||'', email: s.email||'', order_day: s.order_day||'', notes: s.notes||'', payment_terms_days: String(s.payment_terms_days ?? 7) }); setInvoiceColumns(s.invoice_columns || []); setInvoiceVatIncluded(s.invoice_vat_included !== false); setShowSupplierForm(true) }}
                           style={{ background: '#eff6ff', color: '#2563eb', border: 'none', borderRadius: '8px', padding: '6px 12px', cursor: 'pointer', fontSize: '12px', fontWeight: 600 }}>Edit</button>
                         <button onClick={() => deleteSupplier(s.id)}
                           style={{ background: '#fef2f2', color: '#dc2626', border: 'none', borderRadius: '8px', padding: '6px 12px', cursor: 'pointer', fontSize: '12px', fontWeight: 600 }}>Remove</button>
@@ -1043,6 +1063,40 @@ export default function StockPage() {
           </div>
           <div><label style={LABEL}>Payment Terms (days)</label><input type="number" min="0" step="1" value={supplierForm.payment_terms_days} onChange={e => setSupplierForm(f => ({ ...f, payment_terms_days: e.target.value }))} placeholder="7" style={INPUT} /><div style={{ fontSize: '12px', color: '#9ca3af', marginTop: '4px' }}>Used to auto-calculate the Due Date on invoices from this supplier</div></div>
           <div><label style={LABEL}>Notes</label><input value={supplierForm.notes} onChange={e => setSupplierForm(f => ({ ...f, notes: e.target.value }))} placeholder="e.g. Order by 10am" style={INPUT} /></div>
+
+          <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: 16, marginTop: 4 }}>
+            <div style={{ fontSize: '13px', fontWeight: 700, color: '#1a5c38', marginBottom: 8 }}>📋 Invoice Column Template</div>
+            <div style={{ fontSize: '12px', color: '#9ca3af', marginBottom: 12 }}>Define the columns on this supplier's invoice so the AI knows exactly where to find the excl-VAT price. Add columns left to right as they appear on the invoice.</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+              <label style={{ fontSize: '13px', fontWeight: 600, color: '#374151' }}>Prices on invoice are:</label>
+              <select value={invoiceVatIncluded ? 'incl' : 'excl'} onChange={e => setInvoiceVatIncluded(e.target.value === 'incl')} style={{ ...INPUT, width: 'auto', padding: '6px 10px' }}>
+                <option value="incl">Incl & Excl VAT shown (most common)</option>
+                <option value="excl">Excl VAT only</option>
+              </select>
+            </div>
+            {invoiceColumns.map((col, i) => (
+              <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 1.5fr auto', gap: 6, marginBottom: 6, alignItems: 'center' }}>
+                <input
+                  value={col.name}
+                  onChange={e => setInvoiceColumns(cols => cols.map((c, idx) => idx === i ? { ...c, name: e.target.value } : c))}
+                  placeholder={`Column ${i + 1} name`}
+                  style={{ ...INPUT, padding: '6px 10px', fontSize: '13px' }}
+                />
+                <select
+                  value={col.maps_to || ''}
+                  onChange={e => setInvoiceColumns(cols => cols.map((c, idx) => idx === i ? { ...c, maps_to: e.target.value || null } : c))}
+                  style={{ ...INPUT, padding: '6px 10px', fontSize: '12px' }}
+                >
+                  {MAPS_TO_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+                <button onClick={() => setInvoiceColumns(cols => cols.filter((_, idx) => idx !== i))} style={{ background: '#fef2f2', color: '#dc2626', border: 'none', borderRadius: 8, width: 30, height: 30, cursor: 'pointer', fontWeight: 700 }}>×</button>
+              </div>
+            ))}
+            <button onClick={() => setInvoiceColumns(cols => [...cols, { name: '', maps_to: null }])} style={{ fontSize: '13px', color: '#1a5c38', background: '#f0f7f4', border: '1px dashed #1a5c38', borderRadius: 8, padding: '6px 14px', cursor: 'pointer', fontWeight: 600, marginTop: 4 }}>+ Add Column</button>
+            {invoiceColumns.length > 0 && invoiceColumns.some(c => c.maps_to === 'unit_price_excl') && (
+              <div style={{ fontSize: '12px', color: '#16a34a', marginTop: 8, background: '#f0fdf4', borderRadius: 6, padding: '6px 10px' }}>✓ AI will extract unit price from "{invoiceColumns.find(c => c.maps_to === 'unit_price_excl')?.name}" column</div>
+            )}
+          </div>
         </div>
         <div style={{ padding: '16px 28px 24px', display: 'flex', gap: '12px' }}>
           <button onClick={() => { setShowSupplierForm(false); setEditSupplier(null) }} style={{ flex: 1, border: '1.5px solid #e5e7eb', color: '#374151', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: 700, cursor: 'pointer', background: 'white' }}>Cancel</button>
