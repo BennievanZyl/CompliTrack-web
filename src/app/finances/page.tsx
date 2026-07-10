@@ -319,7 +319,7 @@ export default function FinancesPage() {
             if (!imgRes.ok) throw new Error(`Image fetch failed: ${imgRes.status} — try updating the app`)
             const buf = await imgRes.arrayBuffer()
             const uint8 = new Uint8Array(buf)
-            const CHUNK = 8192
+            const CHUNK = 8190  // must be divisible by 3 to avoid = padding mid-string
             for (let i = 0; i < uint8.length; i += CHUNK) {
               b64 += btoa(String.fromCharCode(...uint8.subarray(i, i + CHUNK)))
             }
@@ -581,7 +581,7 @@ export default function FinancesPage() {
       // btoa(binary) built char-by-char crashes on large phone images (200-400KB JPEG).
       // Chunked approach handles arbitrarily large buffers safely.
       let b64 = ''
-      const CHUNK = 8192
+      const CHUNK = 8190  // must be divisible by 3 to avoid = padding mid-string
       for (let i = 0; i < uint8Array.length; i += CHUNK) {
         b64 += btoa(String.fromCharCode(...uint8Array.subarray(i, i + CHUNK)))
       }
