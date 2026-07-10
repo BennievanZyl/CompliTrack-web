@@ -314,33 +314,16 @@ export default function FinancesPage() {
           let b64 = scanRow?.image_base64 || ''
 
           if (!b64 && scanRow?.image_url) {
-            // Old app version: uploaded to storage, need to fetch via signed URL.
-            // Parse the storage path from the URL to generate a short-lived signed URL
-            // that the browser's auth session can access.
-            const url = scanRow.image_url
-            const marker = '/object/public/'
-            const altMarker = '/object/'
-            let storagePath = ''
-            if (url.includes(marker)) {
-              const afterMarker = url.split(marker)[1]
-              const bucket = afterMarker.split('/')[0]
-              storagePath = afterMarker.slice(bucket.length + 1).split('?')[0]
-              const { data: signed } = await supabase.storage
-                .from(bucket).createSignedUrl(storagePath, 120)
-              if (signed?.signedUrl) {
-                const imgRes = await fetch(signed.signedUrl)
-                if (!imgRes.ok) throw new Error(`Storage fetch failed: ${imgRes.status}`)
-                const buf = await imgRes.arrayBuffer()
-                const uint8 = new Uint8Array(buf)
-                const CHUNK = 8192
-                for (let i = 0; i < uint8.length; i += CHUNK) {
-                  b64 += btoa(String.fromCharCode(...uint8.subarray(i, i + CHUNK)))
-                }
-              }
+            // Old app version: uploaded to storage (bucket is now public, direct fetch works)
+            const imgRes = await fetch(scanRow.image_url)
+            if (!imgRes.ok) throw new Error(`Image fetch failed: ${imgRes.status} — try updating the app`)
+            const buf = await imgRes.arrayBuffer()
+            const uint8 = new Uint8Array(buf)
+            const CHUNK = 8192
+            for (let i = 0; i < uint8.length; i += CHUNK) {
+              b64 += btoa(String.fromCharCode(...uint8.subarray(i, i + CHUNK)))
             }
-            if (!b64) throw new Error(
-              'Old app version detected — base64 missing and storage URL unreachable. Please update the app and try again.'
-            )
+            if (!b64) throw new Error('Image encoding failed')
           }
 
           if (!b64) throw new Error('No image data found in relay row')
