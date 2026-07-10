@@ -8,6 +8,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'No image provided' }, { status: 400 })
     }
 
+    console.log('[scan-invoice] base64 length:', base64.length, 'mediaType:', mediaType)
+
     const apiKey = process.env.ANTHROPIC_API_KEY
     if (!apiKey) {
       return NextResponse.json({ error: 'API key not configured' }, { status: 500 })
@@ -44,7 +46,8 @@ export async function POST(req: NextRequest) {
     if (!response.ok) {
       const errText = await response.text()
       console.error('Anthropic error:', response.status, errText)
-      return NextResponse.json({ error: 'AI error ' + response.status }, { status: 500 })
+      // Return the actual error detail so we can debug it on screen
+      return NextResponse.json({ error: 'AI error ' + response.status + ': ' + errText.slice(0, 300) }, { status: 500 })
     }
 
     const result = await response.json()
