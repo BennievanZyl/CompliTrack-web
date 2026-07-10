@@ -301,14 +301,39 @@ export default function FinancesPage() {
         // Mark as processing
         await supabase.from('pending_invoice_scans').update({ status: 'processing' }).eq('id', payload.new.id)
 
-        // Fetch the image and run it through the existing scan-invoice API
+        // Send the public URL directly to the API — Anthropic fetches it themselves,
+        // avoiding the CORS-corrupted blob that happens when the browser re-fetches it.
         try {
-          const imgRes = await fetch(imageUrl)
-          const blob = await imgRes.blob()
-          const file = new File([blob], 'invoice.jpg', { type: 'image/jpeg' })
-          await scanInvoice(file)
+          const response = await fetch('/api/scan-invoice-url', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ imageUrl })
+          })
+          const data = await response.json()
+          if (!response.ok) throw new Error(data.error || 'Scan failed')
+
+          setShowInvForm(true)
+          if (data.supplier) setInvForm(f => ({ ...f, supplier: data.supplier }))
+          if (data.invoice_number) setInvForm(f => ({ ...f, invoice_number: data.invoice_number }))
+          if (data.invoice_date) setInvForm(f => ({ ...f, invoice_date: data.invoice_date }))
+          if (data.due_date) {
+            setInvForm(f => ({ ...f, due_date: data.due_date }))
+          } else if (data.supplier && data.invoice_date) {
+            const sup = suppliers.find(s => s.name === data.supplier)
+            if (sup) setInvForm(f => ({ ...f, due_date: addDays(data.invoice_date, sup.payment_terms_days ?? 7) }))
+          }
+          if (data.notes) setInvForm(f => ({ ...f, notes: data.notes }))
+          if (data.lines?.length) {
+            setInvLines(data.lines.map((l: {description?: string; qty?: number; uom?: string; unit_price?: number; amount?: number; vat_amount?: number}) => ({
+              category_key: defaultCatKey, description: l.description || '', qty: Number(l.qty) || 1,
+              uom: l.uom || 'each', unit_price: Number(l.unit_price) || 0,
+              amount: Number(l.amount) || 0, vat_amount: Number(l.vat_amount) || 0,
+            })))
+          }
+          setScanError('')
           await supabase.from('pending_invoice_scans').update({ status: 'done' }).eq('id', payload.new.id)
-        } catch {
+        } catch (err: unknown) {
+          setScanError(err instanceof Error ? err.message : 'Device scan failed')
           await supabase.from('pending_invoice_scans').update({ status: 'error' }).eq('id', payload.new.id)
         }
         setDeviceScanStatus(null)
