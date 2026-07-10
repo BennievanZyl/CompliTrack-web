@@ -302,19 +302,48 @@ export default function FinancesPage() {
         await supabase.from('pending_invoice_scans').update({ status: 'processing' }).eq('id', rowId)
 
         try {
-          // Realtime payload.new truncates large columns (64KB limit) so image_base64
-          // won't be in the payload. Fetch the full row directly from the DB instead.
+          // Fetch full row — Realtime payload truncates large columns
           const { data: scanRow, error: fetchErr } = await supabase
             .from('pending_invoice_scans')
-            .select('image_base64')
+            .select('image_base64, image_url')
             .eq('id', rowId)
             .single()
 
-          if (fetchErr || !scanRow?.image_base64) {
-            throw new Error('Could not retrieve image data — check the app sent the photo correctly')
+          if (fetchErr) throw new Error('Could not retrieve scan row: ' + fetchErr.message)
+
+          let b64 = scanRow?.image_base64 || ''
+
+          if (!b64 && scanRow?.image_url) {
+            // Old app version: uploaded to storage, need to fetch via signed URL.
+            // Parse the storage path from the URL to generate a short-lived signed URL
+            // that the browser's auth session can access.
+            const url = scanRow.image_url
+            const marker = '/object/public/'
+            const altMarker = '/object/'
+            let storagePath = ''
+            if (url.includes(marker)) {
+              const afterMarker = url.split(marker)[1]
+              const bucket = afterMarker.split('/')[0]
+              storagePath = afterMarker.slice(bucket.length + 1).split('?')[0]
+              const { data: signed } = await supabase.storage
+                .from(bucket).createSignedUrl(storagePath, 120)
+              if (signed?.signedUrl) {
+                const imgRes = await fetch(signed.signedUrl)
+                if (!imgRes.ok) throw new Error(`Storage fetch failed: ${imgRes.status}`)
+                const buf = await imgRes.arrayBuffer()
+                const uint8 = new Uint8Array(buf)
+                const CHUNK = 8192
+                for (let i = 0; i < uint8.length; i += CHUNK) {
+                  b64 += btoa(String.fromCharCode(...uint8.subarray(i, i + CHUNK)))
+                }
+              }
+            }
+            if (!b64) throw new Error(
+              'Old app version detected — base64 missing and storage URL unreachable. Please update the app and try again.'
+            )
           }
 
-          const b64 = scanRow.image_base64
+          if (!b64) throw new Error('No image data found in relay row')
 
           const response = await fetch('/api/scan-invoice', {
             method: 'POST',
