@@ -555,7 +555,7 @@ export default function FinancesPage() {
     load()
   }
 
-  async function scanInvoice(file: File) {
+  async function scanInvoice(file: File, supplierArg?: string) {
     setScanning(true)
     setScanError('')
     try {
@@ -564,8 +564,6 @@ export default function FinancesPage() {
         : file.type === 'image/webp' ? 'image/webp'
         : 'image/jpeg'
 
-      // Read file as ArrayBuffer. Falls back to FileReader if direct read fails
-      // (common with OneDrive "Files On-Demand" placeholders that haven't downloaded yet).
       let arrayBuffer: ArrayBuffer
       try {
         arrayBuffer = await file.arrayBuffer()
@@ -580,19 +578,16 @@ export default function FinancesPage() {
         })
       }
       const uint8Array = new Uint8Array(arrayBuffer)
-      // btoa(binary) built char-by-char crashes on large phone images (200-400KB JPEG).
-      // Chunked approach handles arbitrarily large buffers safely.
       let b64 = ''
-      const CHUNK = 8190  // must be divisible by 3 to avoid = padding mid-string
+      const CHUNK = 8190
       for (let i = 0; i < uint8Array.length; i += CHUNK) {
         b64 += btoa(String.fromCharCode(...uint8Array.subarray(i, i + CHUNK)))
       }
 
       if (!b64) throw new Error('Could not read file')
 
-      // Read from ref — always the current value, not a stale closure snapshot
-      const chosenSupplier = scanSupplierRef.current
-      const supplierName = (chosenSupplier && chosenSupplier !== '__other__') ? chosenSupplier : ''
+      // supplierArg is passed directly from the call site — zero closure/ref ambiguity
+      const supplierName = (supplierArg && supplierArg !== '__other__') ? supplierArg : ''
       const matchedSupplier = suppliers.find(s => s.name === supplierName)
       const supplierTemplate = matchedSupplier?.invoice_columns?.length ? {
         name: matchedSupplier.name,
@@ -613,8 +608,8 @@ export default function FinancesPage() {
       setShowInvForm(true)
       // Supplier: pre-selected value ALWAYS wins over AI-detected name.
       // If user picked "Other/Unknown", use whatever the AI detected.
-      const preSelected = chosenSupplier && chosenSupplier !== '__other__'
-      const resolvedSupplier = preSelected ? chosenSupplier : (data.supplier || '')
+      const preSelected = supplierArg && supplierArg !== '__other__'
+      const resolvedSupplier = preSelected ? supplierArg : (data.supplier || '')
       // Always explicitly set supplier — even if it was already set in the modal onChange,
       // this ensures it's correct after all the async work completes.
       setInvForm(f => ({
@@ -920,14 +915,20 @@ export default function FinancesPage() {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                 <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Supplier Bills</h2>
                 <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                  <div style={{ position: 'relative', display: 'inline-block' }}>
-                    <button style={{ ...btn('#6366f1'), pointerEvents: scanning ? 'none' : 'auto', opacity: scanning ? 0.7 : 1 }} onClick={() => { if (!scanning) { const s = invForm.supplier || ''; setScanSupplier(s); scanSupplierRef.current = s; setShowScanChoice(true) } }}>
-                      {scanning ? '⏳ Scanning...' : deviceScanStatus === 'waiting' ? '📡 Waiting for device...' : deviceScanStatus === 'received' ? '⚡ Processing...' : '📷 Scan Invoice'}
-                    </button>
-                    <input ref={fileInputRef} type="file" accept="image/*,application/pdf"
-                      style={{ display: 'none' }}
-                      onChange={e => { const f = e.target.files?.[0]; if (f) scanInvoice(f) }} />
-                  </div>
+                  {showInvForm && (
+                    <div style={{ position: 'relative', display: 'inline-block' }}>
+                      <button style={{ ...btn('#6366f1'), pointerEvents: scanning ? 'none' : 'auto', opacity: scanning ? 0.7 : 1 }} onClick={() => { if (!scanning) { const s = invForm.supplier || ''; setScanSupplier(s); scanSupplierRef.current = s; setShowScanChoice(true) } }}>
+                        {scanning ? '⏳ Scanning...' : deviceScanStatus === 'waiting' ? '📡 Waiting for device...' : deviceScanStatus === 'received' ? '⚡ Processing...' : '📷 Scan Invoice'}
+                      </button>
+                      <input ref={fileInputRef} type="file" accept="image/*,application/pdf"
+                        style={{ display: 'none' }}
+                        onChange={e => {
+                          const f = e.target.files?.[0]
+                          // Pass the supplier directly as a parameter — no ref/closure ambiguity
+                          if (f) scanInvoice(f, scanSupplierRef.current)
+                        }} />
+                    </div>
+                  )}
                   <button style={btn()} onClick={openNewInvoice}>+ New Invoice</button>
                 </div>
               </div>
