@@ -497,6 +497,7 @@ export default function FinancesPage() {
   }
 
   function updateLine(i: number, field: keyof InvoiceLine, value: string | number) {
+    setInvLines(lines => lines.map((l, idx) => {
       if (idx !== i) return l
       const updated = { ...l, [field]: value }
       // Auto-calc VAT when amount changes
