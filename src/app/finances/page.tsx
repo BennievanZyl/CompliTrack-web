@@ -1,5 +1,5 @@
 'use client' // rebuild 08:09:06 // 19:21:58 // 19:21:52 // build 2026-06-29T19:12
-import { useState, useEffect, useCallback, useRef } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 
@@ -1119,7 +1119,8 @@ export default function FinancesPage() {
                             const matches = line.description.trim().length > 2 ? matchStockItems(line.description, allStockItems) : []
                             const descCol = activeCols.find(c => c.field === 'description')
                             return (
-                              <div key={i} style={{ marginBottom: 8 }}>
+                              <React.Fragment key={i}>
+                                <div style={{ marginBottom: 8 }}>
                                 <div style={{ display: 'grid', gridTemplateColumns: gridCols, gap: 8, alignItems: 'center' }}>
                                   <div>
                                     <select value={line.category_key} onChange={e => updateLine(i, 'category_key', e.target.value)} style={{ ...inp, padding: '8px 10px' }}>
@@ -1145,7 +1146,6 @@ export default function FinancesPage() {
                               {matches.length > 0 && (
                                 <div style={{ display: 'grid', gridTemplateColumns: `1.4fr ${activeCols.map(() => '1fr').join(' ')} auto`, gap: 8, marginTop: 4 }}>
                                   <div />
-                                  {/* Stock match chips sit under the description column */}
                                   <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', gridColumn: descCol ? '2' : '2' }}>
                                     <span style={{ fontSize: 11, color: '#9ca3af' }}>Match to your stock sheet:</span>
                                     {matches.map(m => (
@@ -1157,8 +1157,8 @@ export default function FinancesPage() {
                                   </div>
                                 </div>
                               )}
-                            </div>
-                          )
+                              </React.Fragment>
+                            )
                         })}
                         </>
                       )
