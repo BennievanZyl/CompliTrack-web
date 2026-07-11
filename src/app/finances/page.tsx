@@ -1021,8 +1021,18 @@ export default function FinancesPage() {
                       <h4 style={{ margin: 0, fontSize: 14, fontWeight: 700 }}>Line Items</h4>
                       <button style={btn()} onClick={addLine}>+ Add Line</button>
                     </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 2fr 0.7fr 1fr 1fr auto', gap: 8, marginBottom: 8 }}>
-                      {['Category', 'Description', 'Qty', 'Amount (incl VAT)', 'VAT Amount', ''].map(h => (
+                    {(() => {
+                      const sup = suppliers.find(s => s.name === invForm.supplier)
+                      const priceCol = sup?.invoice_columns?.find(c => c.maps_to === 'unit_price_excl')
+                      if (sup?.invoice_columns?.length && priceCol) return (
+                        <div style={{ fontSize: 12, color: '#16a34a', background: '#f0fdf4', borderRadius: 6, padding: '5px 10px', marginBottom: 10 }}>
+                          ✓ {sup.name} template active — scanning will read unit price from {priceCol.name ? `"${priceCol.name}"` : `column ${sup.invoice_columns.indexOf(priceCol) + 1}`} (excl VAT)
+                        </div>
+                      )
+                      return null
+                    })()}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 2fr 0.6fr 0.9fr 0.9fr 0.8fr auto', gap: 8, marginBottom: 8 }}>
+                      {['Category', 'Description', 'Qty', 'Unit Price (excl)', 'Total (incl VAT)', 'VAT Amount', ''].map(h => (
                         <div key={h} style={{ fontSize: 12, fontWeight: 600, color: '#6b7280' }}>{h}</div>
                       ))}
                     </div>
@@ -1030,7 +1040,7 @@ export default function FinancesPage() {
                       const matches = line.description.trim().length > 2 ? matchStockItems(line.description, allStockItems) : []
                       return (
                       <div key={i} style={{ marginBottom: 8 }}>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 2fr 0.7fr 1fr 1fr auto', gap: 8, alignItems: 'center' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 2fr 0.6fr 0.9fr 0.9fr 0.8fr auto', gap: 8, alignItems: 'center' }}>
                           <div>
                             <select value={line.category_key} onChange={e => updateLine(i, 'category_key', e.target.value)} style={{ ...inp, padding: '8px 10px' }}>
                               {sortedCategories.map(c => <option key={c.key} value={c.key}>{c.name}</option>)}
@@ -1039,6 +1049,7 @@ export default function FinancesPage() {
                           </div>
                           <input type="text" placeholder="Description" value={line.description} onChange={e => updateLine(i, 'description', e.target.value)} style={{ ...inp, padding: '8px 10px' }} />
                           <input type="number" step="0.01" placeholder="1" value={line.qty || ''} onChange={e => updateLine(i, 'qty', e.target.value)} style={{ ...inp, padding: '8px 10px' }} />
+                          <input type="number" step="0.01" placeholder="0.00" value={line.unit_price || ''} onChange={e => updateLine(i, 'unit_price', e.target.value)} style={{ ...inp, padding: '8px 10px' }} />
                           <input type="number" step="0.01" placeholder="0.00" value={line.amount || ''} onChange={e => updateLine(i, 'amount', e.target.value)} style={{ ...inp, padding: '8px 10px' }} />
                           <input type="number" step="0.01" placeholder="0.00" value={line.vat_amount || ''} onChange={e => updateLine(i, 'vat_amount', e.target.value)} style={{ ...inp, padding: '8px 10px' }} />
                           <button onClick={() => removeLine(i)} disabled={invLines.length === 1}
