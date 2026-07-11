@@ -339,14 +339,18 @@ export default function FinancesPage() {
           if (!response.ok) throw new Error(data.error || 'Scan failed')
 
           setShowInvForm(true)
-          if (data.supplier) setInvForm(f => ({ ...f, supplier: data.supplier }))
+          // Supplier is already set from pre-selection — never override it with AI-detected name.
+          // Only fill in fields the user hasn't provided yet.
           if (data.invoice_number) setInvForm(f => ({ ...f, invoice_number: data.invoice_number }))
           if (data.invoice_date) setInvForm(f => ({ ...f, invoice_date: data.invoice_date }))
           if (data.due_date) {
             setInvForm(f => ({ ...f, due_date: data.due_date }))
-          } else if (data.supplier && data.invoice_date) {
-            const sup = suppliers.find(s => s.name === data.supplier)
-            if (sup) setInvForm(f => ({ ...f, due_date: addDays(data.invoice_date, sup.payment_terms_days ?? 7) }))
+          } else if (data.invoice_date) {
+            // Use pre-selected supplier for due date calc, not AI-detected name
+            setInvForm(f => {
+              const sup = suppliers.find(s => s.name === f.supplier)
+              return { ...f, due_date: sup ? addDays(data.invoice_date, sup.payment_terms_days ?? 7) : f.due_date }
+            })
           }
           if (data.notes) setInvForm(f => ({ ...f, notes: data.notes }))
           if (data.lines?.length) {
@@ -604,17 +608,12 @@ export default function FinancesPage() {
       const data = await response.json()
       if (!response.ok) throw new Error(data.error || 'Scan failed')
 
-      // Pre-fill the invoice form
+      // Pre-fill the invoice form — supplier is already set from pre-selection (modal onChange),
+      // so we NEVER change it here. Only fill fields the user hasn't touched yet.
       setShowInvForm(true)
-      // Supplier: pre-selected value ALWAYS wins over AI-detected name.
-      // If user picked "Other/Unknown", use whatever the AI detected.
-      const preSelected = supplierArg && supplierArg !== '__other__'
-      const resolvedSupplier = preSelected ? supplierArg : (data.supplier || '')
-      // Always explicitly set supplier — even if it was already set in the modal onChange,
-      // this ensures it's correct after all the async work completes.
       setInvForm(f => ({
         ...f,
-        supplier: resolvedSupplier,
+        // Keep whatever supplier is already set — don't let AI-detected name override pre-selection
         invoice_number: data.invoice_number || f.invoice_number,
         invoice_date: data.invoice_date || f.invoice_date,
         notes: data.notes || f.notes,
@@ -622,8 +621,11 @@ export default function FinancesPage() {
       if (data.due_date) {
         setInvForm(f => ({ ...f, due_date: data.due_date }))
       } else if (data.invoice_date) {
-        const sup = suppliers.find(s => s.name === resolvedSupplier)
-        if (sup) setInvForm(f => ({ ...f, due_date: addDays(data.invoice_date, sup.payment_terms_days ?? 7) }))
+        // Calculate due date from the pre-selected supplier's payment terms
+        setInvForm(f => {
+          const sup = suppliers.find(s => s.name === f.supplier)
+          return sup ? { ...f, due_date: addDays(data.invoice_date, sup.payment_terms_days ?? 7) } : f
+        })
       }
       if (data.lines && data.lines.length > 0) {
         setInvLines(data.lines.map((l: {description?: string; qty?: number; uom?: string; unit_price?: number; amount?: number; vat_amount?: number}) => ({
@@ -1613,10 +1615,16 @@ export default function FinancesPage() {
                   const val = e.target.value
                   setScanSupplier(val)
                   scanSupplierRef.current = val
-                  // Set supplier in form immediately so dropdown shows the right supplier
-                  // before the file dialog even opens
                   if (val && val !== '__other__') {
-                    setInvForm(f => ({ ...f, supplier: val }))
+                    const sup = suppliers.find(s => s.name === val)
+                    // Open the invoice form immediately and set supplier + payment terms
+                    setShowInvForm(true)
+                    setInvForm(f => ({
+                      ...f,
+                      supplier: val,
+                      // Auto-set due date if invoice date is already filled
+                      due_date: sup && f.invoice_date ? addDays(f.invoice_date, sup.payment_terms_days ?? 7) : f.due_date,
+                    }))
                   } else if (val === '__other__') {
                     setInvForm(f => ({ ...f, supplier: '' }))
                   }
