@@ -125,6 +125,7 @@ export default function FinancesPage() {
   const [scanning, setScanning] = useState(false)
   const [scanError, setScanError] = useState('')
   const [showScanChoice, setShowScanChoice] = useState(false)
+  const [scanSupplier, setScanSupplier] = useState('')
   const [deviceScanStatus, setDeviceScanStatus] = useState<'waiting' | 'received' | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [error, setError] = useState('')
@@ -588,9 +589,9 @@ export default function FinancesPage() {
 
       if (!b64) throw new Error('Could not read file')
 
-      // If a supplier is already selected in the form, pass their invoice template
-      // so the AI knows exactly which column contains the excl-VAT unit price.
-      const matchedSupplier = suppliers.find(s => s.name === invForm.supplier)
+      // Use whichever supplier is known — form supplier takes priority, then the pre-selected scan supplier
+      const supplierName = invForm.supplier || scanSupplier
+      const matchedSupplier = suppliers.find(s => s.name === supplierName)
       const supplierTemplate = matchedSupplier?.invoice_columns?.length ? {
         name: matchedSupplier.name,
         columns: matchedSupplier.invoice_columns,
@@ -606,15 +607,16 @@ export default function FinancesPage() {
       const data = await response.json()
       if (!response.ok) throw new Error(data.error || 'Scan failed')
 
-      // Pre-fill the invoice form
+      // Pre-fill the invoice form — use the pre-selected supplier (more reliable than AI guessing)
       setShowInvForm(true)
-      if (data.supplier) setInvForm(f => ({ ...f, supplier: data.supplier }))
+      const resolvedSupplier = (scanSupplier && scanSupplier !== '__other__') ? scanSupplier : (data.supplier || '')
+      if (resolvedSupplier) setInvForm(f => ({ ...f, supplier: resolvedSupplier }))
       if (data.invoice_number) setInvForm(f => ({ ...f, invoice_number: data.invoice_number }))
       if (data.invoice_date) setInvForm(f => ({ ...f, invoice_date: data.invoice_date }))
       if (data.due_date) {
         setInvForm(f => ({ ...f, due_date: data.due_date }))
-      } else if (data.supplier && data.invoice_date) {
-        const sup = suppliers.find(s => s.name === data.supplier)
+      } else if (data.invoice_date) {
+        const sup = suppliers.find(s => s.name === resolvedSupplier)
         if (sup) setInvForm(f => ({ ...f, due_date: addDays(data.invoice_date, sup.payment_terms_days ?? 7) }))
       }
       if (data.notes) setInvForm(f => ({ ...f, notes: data.notes }))
@@ -909,7 +911,7 @@ export default function FinancesPage() {
                 <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Supplier Bills</h2>
                 <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
                   <div style={{ position: 'relative', display: 'inline-block' }}>
-                    <button style={{ ...btn('#6366f1'), pointerEvents: scanning ? 'none' : 'auto', opacity: scanning ? 0.7 : 1 }} onClick={() => !scanning && setShowScanChoice(true)}>
+                    <button style={{ ...btn('#6366f1'), pointerEvents: scanning ? 'none' : 'auto', opacity: scanning ? 0.7 : 1 }} onClick={() => { if (!scanning) { setScanSupplier(invForm.supplier || ''); setShowScanChoice(true) } }}>
                       {scanning ? '⏳ Scanning...' : deviceScanStatus === 'waiting' ? '📡 Waiting for device...' : deviceScanStatus === 'received' ? '⚡ Processing...' : '📷 Scan Invoice'}
                     </button>
                     <input ref={fileInputRef} type="file" accept="image/*,application/pdf"
@@ -1586,29 +1588,75 @@ export default function FinancesPage() {
 
       {showScanChoice && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000, padding: 20 }} onClick={() => setShowScanChoice(false)}>
-          <div style={{ background: '#fff', borderRadius: 20, padding: 32, width: 420, maxWidth: '100%' }} onClick={e => e.stopPropagation()}>
+          <div style={{ background: '#fff', borderRadius: 20, padding: 32, width: 440, maxWidth: '100%' }} onClick={e => e.stopPropagation()}>
             <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 6 }}>📷 Scan Invoice</div>
-            <p style={{ fontSize: 13, color: '#888', margin: '0 0 24px' }}>How do you want to capture this invoice?</p>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <button onClick={() => { setShowScanChoice(false); fileInputRef.current?.click() }} style={{ display: 'flex', alignItems: 'center', gap: 16, background: '#f8faf8', border: '1.5px solid #e5e7eb', borderRadius: 14, padding: '16px 20px', cursor: 'pointer', textAlign: 'left', width: '100%' }}>
-                <span style={{ fontSize: 32 }}>🖥️</span>
+            {/* Step 1 — Supplier selection */}
+            <div style={{ marginBottom: 20 }}>
+              <label style={{ fontSize: 13, fontWeight: 700, color: '#374151', display: 'block', marginBottom: 6 }}>
+                1. Which supplier is this invoice from?
+              </label>
+              <select
+                value={scanSupplier}
+                onChange={e => setScanSupplier(e.target.value)}
+                style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: `2px solid ${scanSupplier ? '#1a5c38' : '#e5e7eb'}`, fontSize: 14, background: '#fff' }}
+                autoFocus
+              >
+                <option value="">— Select supplier first —</option>
+                {suppliers.map(s => <option key={s.id} value={s.name}>{s.name}{s.invoice_columns?.length ? ' ✓' : ''}</option>)}
+                <option value="__other__">Other / Unknown</option>
+              </select>
+              {scanSupplier && scanSupplier !== '__other__' && (() => {
+                const sup = suppliers.find(s => s.name === scanSupplier)
+                const priceCol = sup?.invoice_columns?.find(c => c.maps_to === 'unit_price_excl')
+                return sup?.invoice_columns?.length ? (
+                  <div style={{ fontSize: 12, color: '#16a34a', marginTop: 6, background: '#f0fdf4', borderRadius: 6, padding: '5px 10px' }}>
+                    ✓ {sup.invoice_columns.length}-column template loaded{priceCol?.name ? ` — price from "${priceCol.name}" column` : ''}
+                  </div>
+                ) : (
+                  <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 6 }}>
+                    No column template set for this supplier — AI will use general rules. Set one in Stock → Suppliers → Edit.
+                  </div>
+                )
+              })()}
+            </div>
+
+            {/* Step 2 — Scan method */}
+            <label style={{ fontSize: 13, fontWeight: 700, color: '#374151', display: 'block', marginBottom: 8 }}>2. How do you want to capture it?</label>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <button
+                onClick={() => {
+                  if (scanSupplier && scanSupplier !== '__other__') setInvForm(f => ({ ...f, supplier: scanSupplier }))
+                  setShowScanChoice(false)
+                  fileInputRef.current?.click()
+                }}
+                disabled={!scanSupplier}
+                style={{ display: 'flex', alignItems: 'center', gap: 16, background: scanSupplier ? '#f8faf8' : '#f3f4f6', border: `1.5px solid ${scanSupplier ? '#e5e7eb' : '#f0f0f0'}`, borderRadius: 14, padding: '14px 18px', cursor: scanSupplier ? 'pointer' : 'not-allowed', textAlign: 'left', width: '100%', opacity: scanSupplier ? 1 : 0.5 }}
+              >
+                <span style={{ fontSize: 28 }}>🖥️</span>
                 <div>
-                  <div style={{ fontWeight: 700, fontSize: 15, color: '#111' }}>Upload from PC / Drive</div>
-                  <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>Pick a photo or PDF from your computer or Google Drive</div>
+                  <div style={{ fontWeight: 700, fontSize: 14, color: '#111' }}>Upload from PC / Drive</div>
+                  <div style={{ fontSize: 12, color: '#888', marginTop: 1 }}>Pick a photo or PDF from your computer</div>
                 </div>
               </button>
 
-              <button onClick={startDeviceScan} style={{ display: 'flex', alignItems: 'center', gap: 16, background: '#eff6ff', border: '1.5px solid #bfdbfe', borderRadius: 14, padding: '16px 20px', cursor: 'pointer', textAlign: 'left', width: '100%' }}>
-                <span style={{ fontSize: 32 }}>📱</span>
+              <button
+                onClick={() => {
+                  if (scanSupplier && scanSupplier !== '__other__') setInvForm(f => ({ ...f, supplier: scanSupplier }))
+                  startDeviceScan()
+                }}
+                disabled={!scanSupplier}
+                style={{ display: 'flex', alignItems: 'center', gap: 16, background: scanSupplier ? '#eff6ff' : '#f3f4f6', border: `1.5px solid ${scanSupplier ? '#bfdbfe' : '#f0f0f0'}`, borderRadius: 14, padding: '14px 18px', cursor: scanSupplier ? 'pointer' : 'not-allowed', textAlign: 'left', width: '100%', opacity: scanSupplier ? 1 : 0.5 }}
+              >
+                <span style={{ fontSize: 28 }}>📱</span>
                 <div>
-                  <div style={{ fontWeight: 700, fontSize: 15, color: '#1d4ed8' }}>Photo Scan from Device</div>
-                  <div style={{ fontSize: 12, color: '#3b82f6', marginTop: 2 }}>Take a photo with your phone — it appears here in seconds</div>
+                  <div style={{ fontWeight: 700, fontSize: 14, color: '#1d4ed8' }}>Photo Scan from Device</div>
+                  <div style={{ fontSize: 12, color: '#3b82f6', marginTop: 1 }}>Take a photo with your phone — appears here in seconds</div>
                 </div>
               </button>
             </div>
 
-            <button onClick={() => setShowScanChoice(false)} style={{ marginTop: 20, width: '100%', padding: '10px', background: '#f3f4f6', color: '#374151', border: 'none', borderRadius: 10, fontWeight: 600, cursor: 'pointer', fontSize: 14 }}>Cancel</button>
+            <button onClick={() => setShowScanChoice(false)} style={{ marginTop: 16, width: '100%', padding: '10px', background: '#f3f4f6', color: '#374151', border: 'none', borderRadius: 10, fontWeight: 600, cursor: 'pointer', fontSize: 14 }}>Cancel</button>
           </div>
         </div>
       )}
