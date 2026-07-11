@@ -100,6 +100,9 @@ export default function StockPage() {
   const [aiLoading, setAILoading] = useState(false)
   const [aiResults, setAIResults] = useState<{ name: string; qty: number; unit: string }[]>([])
   const [showAddItem, setShowAddItem] = useState(false)
+  const [showInlineCat, setShowInlineCat] = useState(false)
+  const [newCatName, setNewCatName] = useState('')
+  const [savingCat, setSavingCat] = useState(false)
   const [showAddPurchase, setShowAddPurchase] = useState(false)
   const [showAddWastage, setShowAddWastage] = useState(false)
   const [showAddIssue, setShowAddIssue] = useState(false)
@@ -377,6 +380,18 @@ export default function StockPage() {
     if (!categoryForm.name) return
     await supabase.from('stock_categories').insert({ store_id: STORE_ID, name: categoryForm.name, color: categoryForm.color, sort_order: categories.length + 1 })
     setCategoryForm({ name: '', color: '#1a5c38' }); setShowAddCategory(false); await loadAll()
+  }
+
+  async function saveInlineCategory() {
+    if (!newCatName.trim()) return
+    setSavingCat(true)
+    const { data: newCat } = await supabase.from('stock_categories')
+      .insert({ store_id: STORE_ID, name: newCatName.trim(), color: '#1a5c38', sort_order: categories.length + 1 })
+      .select().single()
+    await loadAll()
+    // Auto-select the newly created category in the item form
+    if (newCat) setItemForm(f => ({ ...f, category_id: newCat.id }))
+    setNewCatName(''); setShowInlineCat(false); setSavingCat(false)
   }
 
   async function deleteItem(id: string) {
@@ -733,7 +748,7 @@ export default function StockPage() {
                       style={{ padding: '10px 36px 10px 14px', border: '1.5px solid #e5e7eb', borderRadius: '10px', fontSize: '13px', width: '200px', outline: 'none' }} />
                     {itemSearch && <button onClick={() => setItemSearch('')} style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#9ca3af', fontSize: '16px' }}>✕</button>}
                   </div>
-                <button onClick={() => { setEditItem(null); setItemForm({ name: '', description: '', category_id: 'goods', unit: 'each', cost_price: '', par_level: '', supplier: 'Other', on_daily_sheet: false }); setShowAddItem(true) }} style={{ padding: '10px 18px', background: '#1a5c38', color: 'white', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: 800, cursor: 'pointer' }}>+ Add Item</button>
+                <button onClick={() => { setEditItem(null); setItemForm({ name: '', description: '', category_id: categories[0]?.id || '', unit: 'each', cost_price: '', par_level: '', supplier: 'Other', on_daily_sheet: false }); setShowAddItem(true) }} style={{ padding: '10px 18px', background: '#1a5c38', color: 'white', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: 800, cursor: 'pointer' }}>+ Add Item</button>
                 </div>
               </div>
               {/* Supplier filter */}
@@ -843,17 +858,25 @@ export default function StockPage() {
       </Modal>
 
       {/* Add/Edit Item Modal */}
-      <Modal show={showAddItem} onClose={() => { setShowAddItem(false); setEditItem(null) }} title={editItem ? 'Edit Item' : 'Add Stock Item'}>
+      <Modal show={showAddItem} onClose={() => { setShowAddItem(false); setEditItem(null); setShowInlineCat(false); setNewCatName('') }} title={editItem ? 'Edit Item' : 'Add Stock Item'}>
         <div style={{ padding: '20px 28px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
           <div><label style={LABEL}>Item Name *</label><input value={itemForm.name} onChange={e => setItemForm(f => ({ ...f, name: e.target.value, description: e.target.value }))} placeholder="e.g. Chicken Breasts" style={INPUT} /></div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-            <div><label style={LABEL}>Category</label><select value={itemForm.category_id} onChange={e => setItemForm(f => ({ ...f, category_id: e.target.value }))} style={INPUT}>
-              <option value="goods">Goods</option>
-              <option value="beverages">Beverages</option>
-              <option value="packaging">Packaging</option>
-              <option value="basting">Basting & Sauces</option>
-              <option value="other">Other</option>
-            </select></div>
+            <div>
+              <label style={LABEL}>Category</label>
+              <select value={itemForm.category_id} onChange={e => setItemForm(f => ({ ...f, category_id: e.target.value }))} style={INPUT}>
+                {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+              {!showInlineCat ? (
+                <button type="button" onClick={() => setShowInlineCat(true)} style={{ fontSize: '11px', color: '#1a5c38', background: 'none', border: 'none', cursor: 'pointer', padding: '4px 0', fontWeight: 700 }}>+ New Category</button>
+              ) : (
+                <div style={{ display: 'flex', gap: 6, marginTop: 6, alignItems: 'center' }}>
+                  <input autoFocus value={newCatName} onChange={e => setNewCatName(e.target.value)} onKeyDown={e => e.key === 'Enter' && saveInlineCategory()} placeholder="Category name" style={{ ...INPUT, padding: '6px 10px', fontSize: '13px', flex: 1 }} />
+                  <button onClick={saveInlineCategory} disabled={savingCat || !newCatName.trim()} style={{ background: '#1a5c38', color: '#fff', border: 'none', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>{savingCat ? '…' : 'Add'}</button>
+                  <button onClick={() => { setShowInlineCat(false); setNewCatName('') }} style={{ background: '#f0f0f0', color: '#666', border: 'none', borderRadius: 8, padding: '6px 10px', cursor: 'pointer', fontSize: 13 }}>✕</button>
+                </div>
+              )}
+            </div>
             <div><label style={LABEL}>Supplier</label><select value={itemForm.supplier} onChange={e => setItemForm(f => ({ ...f, supplier: e.target.value }))} style={INPUT}>
               {suppliers.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
             </select></div>
