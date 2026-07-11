@@ -126,6 +126,7 @@ export default function FinancesPage() {
   const [scanError, setScanError] = useState('')
   const [showScanChoice, setShowScanChoice] = useState(false)
   const [scanSupplier, setScanSupplier] = useState('')
+  const scanSupplierRef = useRef('') // ref mirrors state — always readable in async closures without stale value issues
   const [deviceScanStatus, setDeviceScanStatus] = useState<'waiting' | 'received' | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [error, setError] = useState('')
@@ -589,8 +590,9 @@ export default function FinancesPage() {
 
       if (!b64) throw new Error('Could not read file')
 
-      // Use whichever supplier is known — form supplier takes priority, then the pre-selected scan supplier
-      const supplierName = invForm.supplier || scanSupplier
+      // Read from ref — always the current value, not a stale closure snapshot
+      const chosenSupplier = scanSupplierRef.current
+      const supplierName = (chosenSupplier && chosenSupplier !== '__other__') ? chosenSupplier : ''
       const matchedSupplier = suppliers.find(s => s.name === supplierName)
       const supplierTemplate = matchedSupplier?.invoice_columns?.length ? {
         name: matchedSupplier.name,
@@ -609,7 +611,7 @@ export default function FinancesPage() {
 
       // Pre-fill the invoice form — use the pre-selected supplier (more reliable than AI guessing)
       setShowInvForm(true)
-      const resolvedSupplier = (scanSupplier && scanSupplier !== '__other__') ? scanSupplier : (data.supplier || '')
+      const resolvedSupplier = (chosenSupplier && chosenSupplier !== '__other__') ? chosenSupplier : (data.supplier || '')
       if (resolvedSupplier) setInvForm(f => ({ ...f, supplier: resolvedSupplier }))
       if (data.invoice_number) setInvForm(f => ({ ...f, invoice_number: data.invoice_number }))
       if (data.invoice_date) setInvForm(f => ({ ...f, invoice_date: data.invoice_date }))
@@ -911,7 +913,7 @@ export default function FinancesPage() {
                 <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Supplier Bills</h2>
                 <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
                   <div style={{ position: 'relative', display: 'inline-block' }}>
-                    <button style={{ ...btn('#6366f1'), pointerEvents: scanning ? 'none' : 'auto', opacity: scanning ? 0.7 : 1 }} onClick={() => { if (!scanning) { setScanSupplier(invForm.supplier || ''); setShowScanChoice(true) } }}>
+                    <button style={{ ...btn('#6366f1'), pointerEvents: scanning ? 'none' : 'auto', opacity: scanning ? 0.7 : 1 }} onClick={() => { if (!scanning) { const s = invForm.supplier || ''; setScanSupplier(s); scanSupplierRef.current = s; setShowScanChoice(true) } }}>
                       {scanning ? '⏳ Scanning...' : deviceScanStatus === 'waiting' ? '📡 Waiting for device...' : deviceScanStatus === 'received' ? '⚡ Processing...' : '📷 Scan Invoice'}
                     </button>
                     <input ref={fileInputRef} type="file" accept="image/*,application/pdf"
@@ -1598,7 +1600,7 @@ export default function FinancesPage() {
               </label>
               <select
                 value={scanSupplier}
-                onChange={e => setScanSupplier(e.target.value)}
+                onChange={e => { setScanSupplier(e.target.value); scanSupplierRef.current = e.target.value }}
                 style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: `2px solid ${scanSupplier ? '#1a5c38' : '#e5e7eb'}`, fontSize: 14, background: '#fff' }}
                 autoFocus
               >
@@ -1626,7 +1628,7 @@ export default function FinancesPage() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               <button
                 onClick={() => {
-                  if (scanSupplier && scanSupplier !== '__other__') setInvForm(f => ({ ...f, supplier: scanSupplier }))
+                  if (scanSupplierRef.current && scanSupplierRef.current !== '__other__') setInvForm(f => ({ ...f, supplier: scanSupplierRef.current }))
                   setShowScanChoice(false)
                   fileInputRef.current?.click()
                 }}
@@ -1642,7 +1644,7 @@ export default function FinancesPage() {
 
               <button
                 onClick={() => {
-                  if (scanSupplier && scanSupplier !== '__other__') setInvForm(f => ({ ...f, supplier: scanSupplier }))
+                  if (scanSupplierRef.current && scanSupplierRef.current !== '__other__') setInvForm(f => ({ ...f, supplier: scanSupplierRef.current }))
                   startDeviceScan()
                 }}
                 disabled={!scanSupplier}
