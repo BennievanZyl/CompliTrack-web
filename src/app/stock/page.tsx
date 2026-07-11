@@ -778,19 +778,23 @@ export default function StockPage() {
                   </button>
                 ))}
               </div>
-              {['goods','beverages','packaging','basting','other'].map(catKey => {
+              {categories.map(cat => {
                 const filteredBySupplier = supplierFilter === 'All' ? items : items.filter(i => (i.supplier || 'Other') === supplierFilter)
-                const catLabels: Record<string,string> = { goods: 'Goods', beverages: 'Beverages', packaging: 'Packaging', basting: 'Basting & Sauces', other: 'Other' }
-                const catColors: Record<string,string> = { goods: '#16a34a', beverages: '#2563eb', packaging: '#d97706', basting: '#dc2626', other: '#6b7280' }
                 const searchFiltered = itemSearch ? (filteredBySupplier || []).filter(i => (i.description || i.name || '').toLowerCase().includes(itemSearch.toLowerCase())) : (filteredBySupplier || [])
-                const catItems = searchFiltered.filter(i => i.category === catKey)
+                // Match items by UUID (new items) or by legacy name/slug (old items)
+                const catItems = searchFiltered.filter(i =>
+                  i.category === cat.id ||
+                  (i.category && cat.name && i.category.toLowerCase() === cat.name.toLowerCase()) ||
+                  (i.category && cat.name && cat.name.toLowerCase().replace(/[^a-z]/g,'').includes((i.category||'').toLowerCase().replace(/[^a-z]/g,'')))
+                )
                 if (!catItems.length) return null
+                const catColor = cat.color || '#6b7280'
                 return (
-                  <div key={catKey} style={{ background: 'white', borderRadius: '20px', border: '1.5px solid #eef2ee', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
+                  <div key={cat.id} style={{ background: 'white', borderRadius: '20px', border: '1.5px solid #eef2ee', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
                     <div style={{ padding: '12px 20px', background: '#f9fafb', display: 'flex', alignItems: 'center', gap: '10px', borderBottom: '1px solid #e5e7eb' }}>
-                      <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: catColors[catKey] }} />
-                      <div style={{ fontWeight: 700, fontSize: '14px', color: '#111' }}>{catLabels[catKey]}</div>
-                      <span style={{ fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '100px', background: catColors[catKey] + '20', color: catColors[catKey] }}>{catItems.length}</span>
+                      <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: catColor }} />
+                      <div style={{ fontWeight: 700, fontSize: '14px', color: '#111' }}>{cat.name}</div>
+                      <span style={{ fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '100px', background: catColor + '20', color: catColor }}>{catItems.length}</span>
                     </div>
                     <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                       <thead><tr style={{ background: '#fafafa' }}>{['Item', 'Unit', 'On Hand', 'Cost Price', 'Par Level', ''].map(h => <th key={h} style={{ padding: '10px 16px', textAlign: 'left', fontSize: '11px', fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{h}</th>)}</tr></thead>
