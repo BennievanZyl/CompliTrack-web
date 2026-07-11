@@ -364,16 +364,33 @@ export default function StockPage() {
   }
 
   async function saveItem() {
-    if (!itemForm.name && !itemForm.description) return
+    if (!itemForm.name.trim() && !itemForm.description.trim()) { alert('Item name is required'); return }
     setSaving(true)
     const calcPrice = itemForm.is_catch_weight
       ? parseFloat(itemForm.kg_price || '0') * parseFloat(itemForm.avg_weight_kg || '0')
       : parseFloat(itemForm.cost_price || '0')
-    const payload = { store_id: STORE_ID, name: itemForm.name, description: itemForm.name || itemForm.description, category: itemForm.category_id || 'goods', unit: itemForm.unit, price: calcPrice, is_active: true, supplier: itemForm.supplier || 'Other', on_daily_sheet: itemForm.on_daily_sheet, is_catch_weight: itemForm.is_catch_weight, kg_price: parseFloat(itemForm.kg_price || '0'), avg_weight_kg: parseFloat(itemForm.avg_weight_kg || '0') }
-    if (editItem) { await supabase.from('stock_items').update(payload).eq('id', editItem.id) }
-    else { await supabase.from('stock_items').insert(payload) }
-    setItemForm({ name: '', description: '', category_id: 'goods', unit: 'each', cost_price: '', par_level: '' })
-    setShowAddItem(false); setEditItem(null); await loadAll(); setSaving(false)
+    const payload = {
+      store_id: STORE_ID,
+      name: itemForm.name.trim() || itemForm.description.trim(),
+      description: itemForm.name.trim() || itemForm.description.trim(),
+      category: itemForm.category_id,
+      unit: itemForm.unit,
+      price: calcPrice,
+      cost_price: calcPrice,
+      par_level: parseFloat(itemForm.par_level || '0'),
+      is_active: true,
+      supplier: itemForm.supplier || 'Other',
+      on_daily_sheet: itemForm.on_daily_sheet,
+      is_catch_weight: itemForm.is_catch_weight,
+      kg_price: parseFloat(itemForm.kg_price || '0'),
+      avg_weight_kg: parseFloat(itemForm.avg_weight_kg || '0')
+    }
+    let error = null
+    if (editItem) { const res = await supabase.from('stock_items').update(payload).eq('id', editItem.id); error = res.error }
+    else { const res = await supabase.from('stock_items').insert(payload); error = res.error }
+    if (error) { alert('Error saving item: ' + error.message); setSaving(false); return }
+    setItemForm({ name: '', description: '', category_id: categories[0]?.id || '', unit: 'each', cost_price: '', par_level: '', supplier: 'Other', on_daily_sheet: false, is_catch_weight: false, kg_price: '', avg_weight_kg: '' })
+    setShowAddItem(false); setEditItem(null); setShowInlineCat(false); await loadAll(); setSaving(false)
   }
 
   async function saveCategory() {
@@ -804,21 +821,30 @@ export default function StockPage() {
                             </td>
                             <td style={{ padding: '12px 16px' }}>
                               <div style={{ display: 'flex', gap: '6px' }}>
-                                <button onClick={() => { setEditItem(item); setItemForm({
-              name: item.description || item.name || '',
-              description: item.description || '',
-              category_id: item.category || 'goods',
-              unit: item.unit || 'each',
-              cost_price: item.is_catch_weight
-                ? String(((Number(item.kg_price) || 0) * (Number(item.avg_weight_kg) || 0)).toFixed(2))
-                : String(Number(item.price) || 0),
-              par_level: String(Number(item.par_level) || 0),
-              supplier: item.supplier || 'Other',
-              on_daily_sheet: item.on_daily_sheet || false,
-              is_catch_weight: item.is_catch_weight || false,
-              kg_price: String(Number(item.kg_price) || ''),
-              avg_weight_kg: String(Number(item.avg_weight_kg) || '')
-            }); setShowAddItem(true) }} style={{ fontSize: '12px', color: '#1d4ed8', background: '#eff6ff', border: 'none', borderRadius: '8px', padding: '5px 10px', cursor: 'pointer', fontWeight: 600 }}>Edit</button>
+                                <button onClick={() => {
+                                  setEditItem(item)
+                                  // item.category may be a UUID (new) or a name/slug (old).
+                                  // Try to match to a known category by id first, then by name.
+                                  const catMatch = categories.find(c => c.id === item.category)
+                                    || categories.find(c => c.name.toLowerCase() === (item.category || '').toLowerCase())
+                                    || categories.find(c => c.name.toLowerCase().includes((item.category || '').toLowerCase().replace(/_/g,' ')))
+                                  setItemForm({
+                                    name: item.description || item.name || '',
+                                    description: item.description || '',
+                                    category_id: catMatch?.id || categories[0]?.id || '',
+                                    unit: item.unit || 'each',
+                                    cost_price: item.is_catch_weight
+                                      ? String(((Number(item.kg_price) || 0) * (Number(item.avg_weight_kg) || 0)).toFixed(2))
+                                      : String(Number(item.price) || 0),
+                                    par_level: String(Number(item.par_level) || 0),
+                                    supplier: item.supplier || 'Other',
+                                    on_daily_sheet: item.on_daily_sheet || false,
+                                    is_catch_weight: item.is_catch_weight || false,
+                                    kg_price: String(Number(item.kg_price) || ''),
+                                    avg_weight_kg: String(Number(item.avg_weight_kg) || '')
+                                  })
+                                  setShowAddItem(true)
+                                }} style={{ fontSize: '12px', color: '#1d4ed8', background: '#eff6ff', border: 'none', borderRadius: '8px', padding: '5px 10px', cursor: 'pointer', fontWeight: 600 }}>Edit</button>
                                 <button onClick={() => deleteItem(item.id)} style={{ fontSize: '12px', color: '#dc2626', background: '#fee2e2', border: 'none', borderRadius: '8px', padding: '5px 8px', cursor: 'pointer', fontWeight: 700 }}>✕</button>
                               </div>
                             </td>
