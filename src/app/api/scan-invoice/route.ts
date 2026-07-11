@@ -20,12 +20,18 @@ export async function POST(req: NextRequest) {
     let columnGuidance = ''
     if (supplierTemplate?.columns?.length) {
       const cols = supplierTemplate.columns as { name: string; maps_to: string | null }[]
-      const colList = cols.map((c: { name: string; maps_to: string | null }, i: number) =>
-        `  Column ${i + 1}: "${c.name}"${c.maps_to ? ` → ${c.maps_to}` : ''}`
-      ).join('\n')
+      const colList = cols.map((c: { name: string; maps_to: string | null }, i: number) => {
+        const label = c.name ? `"${c.name}"` : `(unnamed)`
+        const meaning = c.maps_to || 'ignore'
+        return `  Column ${i + 1}: ${label} → ${meaning}`
+      }).join('\n')
       const priceCol = cols.find((c: { name: string; maps_to: string | null }) => c.maps_to === 'unit_price_excl')
+      const priceColNum = priceCol ? cols.indexOf(priceCol) + 1 : null
+      const priceRef = priceCol ? (priceCol.name ? `"${priceCol.name}" (column ${priceColNum})` : `column ${priceColNum}`) : null
       const qtyCol = cols.find((c: { name: string; maps_to: string | null }) => c.maps_to === 'qty')
-      columnGuidance = `\n\nSUPPLIER INVOICE LAYOUT FOR "${supplierTemplate.name}":\nThis supplier always uses these columns:\n${colList}\n${priceCol ? `\nCRITICAL: Extract unit_price from "${priceCol.name}" column only. Do NOT use any incl-VAT or total-incl column for unit_price.` : ''}${qtyCol ? `\nExtract qty from "${qtyCol.name}" column.` : ''}${supplierTemplate.vatIncluded === false ? '\nThis supplier quotes prices excluding VAT already.' : '\nAlways use the excl-VAT unit price column, never the incl-VAT column.'}`
+      const qtyColNum = qtyCol ? cols.indexOf(qtyCol) + 1 : null
+      const qtyRef = qtyCol ? (qtyCol.name ? `"${qtyCol.name}" (column ${qtyColNum})` : `column ${qtyColNum}`) : null
+      columnGuidance = `\n\nSUPPLIER INVOICE LAYOUT FOR "${supplierTemplate.name}" (${cols.length} columns total):\nCount the columns left to right on the invoice — they always appear in this order:\n${colList}\n${priceRef ? `\nCRITICAL: Extract unit_price from ${priceRef} only. Do NOT use any incl-VAT or total-incl column for unit_price.` : ''}\n${qtyRef ? `Extract qty from ${qtyRef}.` : ''}${supplierTemplate.vatIncluded === false ? '\nThis supplier quotes prices excluding VAT already.' : '\nAlways use the excl-VAT column, never the incl-VAT or total column.'}`
     }
 
     const prompt = `Extract ALL line items from this invoice. Return ONLY raw JSON (no markdown):
