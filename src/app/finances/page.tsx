@@ -1133,8 +1133,27 @@ export default function FinancesPage() {
                                       type={col.type}
                                       step={col.type === 'number' ? '0.01' : undefined}
                                       placeholder={col.placeholder}
-                                      value={col.type === 'number' ? (line[col.field] as number || '') : (line[col.field] as string || '')}
-                                      onChange={e => updateLine(i, col.field, col.type === 'number' ? e.target.value : e.target.value)}
+                                      type="text"
+                                      inputMode="decimal"
+                                      value={col.type === 'number'
+                                        ? (Number(line[col.field]) > 0 || Number(line[col.field]) < 0
+                                            ? Number(line[col.field]).toFixed(2)
+                                            : '')
+                                        : (line[col.field] as string || '')}
+                                      onChange={e => {
+                                        // Allow free typing — only store if it's a valid partial number
+                                        const raw = e.target.value
+                                        if (col.type === 'number') {
+                                          // Accept digits, dot, comma (SA decimal separator)
+                                          updateLine(i, col.field, raw.replace(',', '.'))
+                                        } else {
+                                          updateLine(i, col.field, raw)
+                                        }
+                                      }}
+                                      onBlur={col.type === 'number' ? (e => {
+                                        const val = parseFloat(e.target.value.replace(',', '.'))
+                                        if (!isNaN(val)) updateLine(i, col.field, val)
+                                      }) : undefined}
                                       style={{ ...inp, padding: '8px 10px' }}
                                     />
                                   ))}
