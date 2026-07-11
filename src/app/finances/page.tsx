@@ -609,19 +609,27 @@ export default function FinancesPage() {
       const data = await response.json()
       if (!response.ok) throw new Error(data.error || 'Scan failed')
 
-      // Pre-fill the invoice form — use the pre-selected supplier (more reliable than AI guessing)
+      // Pre-fill the invoice form
       setShowInvForm(true)
-      const resolvedSupplier = (chosenSupplier && chosenSupplier !== '__other__') ? chosenSupplier : (data.supplier || '')
-      if (resolvedSupplier) setInvForm(f => ({ ...f, supplier: resolvedSupplier }))
-      if (data.invoice_number) setInvForm(f => ({ ...f, invoice_number: data.invoice_number }))
-      if (data.invoice_date) setInvForm(f => ({ ...f, invoice_date: data.invoice_date }))
+      // Supplier: pre-selected value ALWAYS wins over AI-detected name.
+      // If user picked "Other/Unknown", use whatever the AI detected.
+      const preSelected = chosenSupplier && chosenSupplier !== '__other__'
+      const resolvedSupplier = preSelected ? chosenSupplier : (data.supplier || '')
+      // Always explicitly set supplier — even if it was already set in the modal onChange,
+      // this ensures it's correct after all the async work completes.
+      setInvForm(f => ({
+        ...f,
+        supplier: resolvedSupplier,
+        invoice_number: data.invoice_number || f.invoice_number,
+        invoice_date: data.invoice_date || f.invoice_date,
+        notes: data.notes || f.notes,
+      }))
       if (data.due_date) {
         setInvForm(f => ({ ...f, due_date: data.due_date }))
       } else if (data.invoice_date) {
         const sup = suppliers.find(s => s.name === resolvedSupplier)
         if (sup) setInvForm(f => ({ ...f, due_date: addDays(data.invoice_date, sup.payment_terms_days ?? 7) }))
       }
-      if (data.notes) setInvForm(f => ({ ...f, notes: data.notes }))
       if (data.lines && data.lines.length > 0) {
         setInvLines(data.lines.map((l: {description?: string; qty?: number; uom?: string; unit_price?: number; amount?: number; vat_amount?: number}) => ({
           category_key: defaultCatKey,
@@ -1600,7 +1608,18 @@ export default function FinancesPage() {
               </label>
               <select
                 value={scanSupplier}
-                onChange={e => { setScanSupplier(e.target.value); scanSupplierRef.current = e.target.value }}
+                onChange={e => {
+                  const val = e.target.value
+                  setScanSupplier(val)
+                  scanSupplierRef.current = val
+                  // Set supplier in form immediately so dropdown shows the right supplier
+                  // before the file dialog even opens
+                  if (val && val !== '__other__') {
+                    setInvForm(f => ({ ...f, supplier: val }))
+                  } else if (val === '__other__') {
+                    setInvForm(f => ({ ...f, supplier: '' }))
+                  }
+                }}
                 style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: `2px solid ${scanSupplier ? '#1a5c38' : '#e5e7eb'}`, fontSize: 14, background: '#fff' }}
                 autoFocus
               >
