@@ -35,16 +35,18 @@ export async function POST(req: NextRequest) {
     }
 
     const prompt = `Extract ALL line items from this invoice. Return ONLY raw JSON (no markdown):
-{ "supplier": string, "invoice_number": string, "invoice_date": "YYYY-MM-DD", "due_date": "YYYY-MM-DD or null", "notes": string, "lines": [{ "description": string, "qty": number, "uom": string, "unit_price": number, "amount": number, "vat_amount": number, "category_key": string }] }
+{ "supplier": string, "invoice_number": string, "invoice_date": "YYYY-MM-DD", "due_date": "YYYY-MM-DD or null", "notes": string, "lines": [{ "description": string, "qty": number, "uom": string, "unit_price": number, "amount": number, "vat_amount": number, "category_key": string, "case_size": number | null, "case_uom": string | null }] }
 
 For each line:
-- description = item name only (no qty)
-- qty = quantity ordered
-- uom = unit of measure (KG/CASE/BKT/Unit etc)
-- unit_price = PRICE PER UNIT EXCLUDING VAT. CRITICAL: if the invoice shows both excl-VAT and incl-VAT columns, you MUST use the excl-VAT column. Never use "Total Incl" or "Incl VAT" as the unit price.
+- description = clean item name ONLY — strip out any size/weight/volume info (e.g. "Mexican Chips Spice" not "Mexican Chips Spice 4 kg", "MOC Dynamite Sauce" not "MOC Dynamite Sauce (250ml)")
+- qty = number of cases/units ordered (the quantity column)
+- uom = the outer unit being ordered (CASE, BOX, BAG, EACH, etc.)
+- unit_price = PRICE PER UNIT EXCLUDING VAT. CRITICAL: use excl-VAT column only, never Total Incl or incl-VAT column.
 - amount = Total Incl VAT for that line
 - vat_amount = VAT amount for that line
 - category_key: cost_of_sales for food/meat/frozen/dairy, packaging for packaging, cleaning for cleaning, other for rest
+- case_size = the SIZE per unit extracted from the item description (e.g. "Mexican Chips Spice 4 kg" → case_size: 4, "MOC Whip 20 L" → case_size: 20, "Sauce 250ml" → case_size: 250). Return null if no size found.
+- case_uom = the UNIT of the case_size extracted from the description (e.g. "kg", "L", "ml", "g"). Return null if none found. IMPORTANT: if case_uom is "ml", convert case_size to litres (divide by 1000) and set case_uom to "L" — so "250ml" becomes case_size: 0.25, case_uom: "L". If no size info found, return case_size: null, case_uom: null.
 ${columnGuidance}
 Extract EVERY visible line item. If date not found use ${today}. Return raw JSON only.`
 
