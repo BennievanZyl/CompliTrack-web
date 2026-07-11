@@ -24,6 +24,7 @@ type InvoiceLine = {
   id?: string; category_key: string; description: string
   qty: number; uom: string; unit_price: number
   amount: number; vat_amount: number
+  case_size?: number | null; case_uom?: string | null
 }
 type Invoice = {
   id: string; supplier: string; invoice_number: string; invoice_date: string
@@ -354,10 +355,11 @@ export default function FinancesPage() {
           }
           if (data.notes) setInvForm(f => ({ ...f, notes: data.notes }))
           if (data.lines?.length) {
-            setInvLines(data.lines.map((l: {description?: string; qty?: number; uom?: string; unit_price?: number; amount?: number; vat_amount?: number}) => ({
+            setInvLines(data.lines.map((l: {description?: string; qty?: number; uom?: string; unit_price?: number; amount?: number; vat_amount?: number; case_size?: number | null; case_uom?: string | null}) => ({
               category_key: defaultCatKey, description: l.description || '', qty: Number(l.qty) || 1,
               uom: l.uom || 'each', unit_price: Number(l.unit_price) || 0,
               amount: Number(l.amount) || 0, vat_amount: Number(l.vat_amount) || 0,
+              case_size: l.case_size ?? null, case_uom: l.case_uom ?? null,
             })))
           }
           setScanError('')
@@ -523,12 +525,42 @@ export default function FinancesPage() {
     // line items wherever the description matches (the match chips on the invoice form
     // already standardize wording to the stock sheet's exact naming).
     const invLinesForMatch = inv.invoice_lines || []
+    const BULK_UNITS = ['kg', 'g', 'l', 'liter', 'litre', 'liters', 'litres']
     setGrvLines((items || []).map(i => {
       const norm = (s: string) => s.trim().toLowerCase()
       const match = invLinesForMatch.find(l => norm(l.description) === norm(i.description || ''))
       const matchQty = match ? Number(match.qty) || 0 : 0
       const matchAmount = match ? Number(match.amount) || 0 : 0
-      const matchUnitCost = match && matchQty > 0 ? (matchAmount / matchQty) : 0
+      // Use unit_price from invoice line if available (excl-VAT unit cost per case),
+      // otherwise fall back to amount/qty then stock item's stored price.
+      const matchUnitCost = match?.unit_price && Number(match.unit_price) > 0
+        ? Number(match.unit_price)
+        : match && matchQty > 0 ? (matchAmount / matchQty) : 0
+
+      // Auto-detect case mode: if the stock item is tracked in a bulk unit (kg/L)
+      // and the invoice line has a case_size, pre-fill the case breakdown fields.
+      const stockUnitIsBulk = BULK_UNITS.includes((i.unit || '').toLowerCase())
+      const caseSize = match?.case_size ? Number(match.case_size) : null
+      const caseSizeMatchesUnit = caseSize && match?.case_uom
+        && BULK_UNITS.includes((match.case_uom || '').toLowerCase())
+
+      if (match && matchQty > 0 && stockUnitIsBulk && caseSizeMatchesUnit && caseSize) {
+        // Case mode: cases received × kg(L)/case = total qty in stock unit
+        const totalQty = matchQty * caseSize
+        const costPerUnit = matchUnitCost > 0 ? matchUnitCost / caseSize : 0
+        return {
+          stock_item_id: i.id,
+          description: i.description || '',
+          unit: i.unit || 'each',
+          qty_received: totalQty.toFixed(3),
+          unit_cost: costPerUnit > 0 ? costPerUnit.toFixed(4) : String(Number(i.cost_price || i.price || 0) || ''),
+          units_per_case: String(caseSize),
+          case_qty: String(matchQty),
+          case_price: matchUnitCost > 0 ? matchUnitCost.toFixed(2) : '',
+        }
+      }
+
+      // Default: simple qty / unit cost (units/each items or no case_size info)
       return {
         stock_item_id: i.id,
         description: i.description || '',
@@ -662,7 +694,7 @@ export default function FinancesPage() {
         })
       }
       if (data.lines && data.lines.length > 0) {
-        setInvLines(data.lines.map((l: {description?: string; qty?: number; uom?: string; unit_price?: number; amount?: number; vat_amount?: number}) => ({
+        setInvLines(data.lines.map((l: {description?: string; qty?: number; uom?: string; unit_price?: number; amount?: number; vat_amount?: number; case_size?: number | null; case_uom?: string | null}) => ({
           category_key: defaultCatKey,
           description: l.description || '',
           qty: Number(l.qty) || 1,
@@ -670,6 +702,8 @@ export default function FinancesPage() {
           unit_price: Number(l.unit_price) || 0,
           amount: Number(l.amount) || 0,
           vat_amount: Number(l.vat_amount) || 0,
+          case_size: l.case_size ?? null,
+          case_uom: l.case_uom ?? null,
         })))
       }
     } catch (e: unknown) {
@@ -712,6 +746,7 @@ export default function FinancesPage() {
       category_key: l.category_key, description: l.description,
       qty: Number(l.qty) || 1, uom: l.uom || 'each', unit_price: Number(l.unit_price) || 0,
       amount: Number(l.amount), vat_amount: Number(l.vat_amount || 0),
+      case_size: l.case_size ?? null, case_uom: l.case_uom ?? null,
     }))
     if (lines.length) {
       const { error: le } = await supabase.from('invoice_lines').insert(lines)
