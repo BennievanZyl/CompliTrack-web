@@ -463,10 +463,8 @@ export default function FinancesPage() {
 
   function addLine() { setInvLines(l => [...l, emptyLine(defaultCatKey)]) }
   function removeLine(i: number) { setInvLines(l => l.filter((_, idx) => idx !== i)) }
-  function updateLine(i: number, field: keyof InvoiceLine, value: string | number) {
 
   // Maps a supplier template maps_to value to the internal InvoiceLine field and input type.
-  // This drives both the column headers and which field each input writes to.
   type ColDef = { header: string; field: keyof InvoiceLine; type: 'text' | 'number'; placeholder: string }
   const MAPS_TO_FIELD: Record<string, Omit<ColDef, 'header'>> = {
     'description':     { field: 'description', type: 'text',   placeholder: 'Item description' },
@@ -490,15 +488,15 @@ export default function FinancesPage() {
     if (!sup?.invoice_columns?.length) return DEFAULT_COLS
     const cols: ColDef[] = []
     for (const c of sup.invoice_columns) {
-      if (!c.maps_to || !MAPS_TO_FIELD[c.maps_to]) continue // skip ignore columns
+      if (!c.maps_to || !MAPS_TO_FIELD[c.maps_to]) continue
       const def = MAPS_TO_FIELD[c.maps_to]
-      // Avoid duplicate destination fields (e.g. two columns both mapping to amount)
       if (cols.some(existing => existing.field === def.field)) continue
       cols.push({ header: c.name || c.maps_to, ...def })
     }
     return cols.length >= 2 ? cols : DEFAULT_COLS
   }
-    setInvLines(lines => lines.map((l, idx) => {
+
+  function updateLine(i: number, field: keyof InvoiceLine, value: string | number) {
       if (idx !== i) return l
       const updated = { ...l, [field]: value }
       // Auto-calc VAT when amount changes
