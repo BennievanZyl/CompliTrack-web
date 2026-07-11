@@ -462,6 +462,40 @@ export default function FinancesPage() {
   function addLine() { setInvLines(l => [...l, emptyLine(defaultCatKey)]) }
   function removeLine(i: number) { setInvLines(l => l.filter((_, idx) => idx !== i)) }
   function updateLine(i: number, field: keyof InvoiceLine, value: string | number) {
+
+  // Maps a supplier template maps_to value to the internal InvoiceLine field and input type.
+  // This drives both the column headers and which field each input writes to.
+  type ColDef = { header: string; field: keyof InvoiceLine; type: 'text' | 'number'; placeholder: string }
+  const MAPS_TO_FIELD: Record<string, Omit<ColDef, 'header'>> = {
+    'description':     { field: 'description', type: 'text',   placeholder: 'Item description' },
+    'qty':             { field: 'qty',          type: 'number', placeholder: '1' },
+    'uom':             { field: 'uom',          type: 'text',   placeholder: 'kg' },
+    'unit_price_excl': { field: 'unit_price',   type: 'number', placeholder: '0.00' },
+    'unit_price_incl': { field: 'amount',       type: 'number', placeholder: '0.00' },
+    'vat_amount':      { field: 'vat_amount',   type: 'number', placeholder: '0.00' },
+    'total_incl':      { field: 'amount',       type: 'number', placeholder: '0.00' },
+    'total_excl':      { field: 'unit_price',   type: 'number', placeholder: '0.00' },
+  }
+  const DEFAULT_COLS: ColDef[] = [
+    { header: 'Description',       field: 'description', type: 'text',   placeholder: 'Item description' },
+    { header: 'Qty',               field: 'qty',         type: 'number', placeholder: '1' },
+    { header: 'Unit Price (excl)', field: 'unit_price',  type: 'number', placeholder: '0.00' },
+    { header: 'Total (incl VAT)',  field: 'amount',      type: 'number', placeholder: '0.00' },
+    { header: 'VAT Amount',        field: 'vat_amount',  type: 'number', placeholder: '0.00' },
+  ]
+  function getInvoiceColumns(): ColDef[] {
+    const sup = suppliers.find(s => s.name === invForm.supplier)
+    if (!sup?.invoice_columns?.length) return DEFAULT_COLS
+    const cols: ColDef[] = []
+    for (const c of sup.invoice_columns) {
+      if (!c.maps_to || !MAPS_TO_FIELD[c.maps_to]) continue // skip ignore columns
+      const def = MAPS_TO_FIELD[c.maps_to]
+      // Avoid duplicate destination fields (e.g. two columns both mapping to amount)
+      if (cols.some(existing => existing.field === def.field)) continue
+      cols.push({ header: c.name || c.maps_to, ...def })
+    }
+    return cols.length >= 2 ? cols : DEFAULT_COLS
+  }
     setInvLines(lines => lines.map((l, idx) => {
       if (idx !== i) return l
       const updated = { ...l, [field]: value }
@@ -1022,56 +1056,78 @@ export default function FinancesPage() {
                       <button style={btn()} onClick={addLine}>+ Add Line</button>
                     </div>
                     {(() => {
+                      const activeCols = getInvoiceColumns()
                       const sup = suppliers.find(s => s.name === invForm.supplier)
-                      const priceCol = sup?.invoice_columns?.find(c => c.maps_to === 'unit_price_excl')
-                      if (sup?.invoice_columns?.length && priceCol) return (
-                        <div style={{ fontSize: 12, color: '#16a34a', background: '#f0fdf4', borderRadius: 6, padding: '5px 10px', marginBottom: 10 }}>
-                          ✓ {sup.name} template active — scanning will read unit price from {priceCol.name ? `"${priceCol.name}"` : `column ${sup.invoice_columns.indexOf(priceCol) + 1}`} (excl VAT)
-                        </div>
-                      )
-                      return null
-                    })()}
-                    <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 2fr 0.6fr 0.9fr 0.9fr 0.8fr auto', gap: 8, marginBottom: 8 }}>
-                      {['Category', 'Description', 'Qty', 'Unit Price (excl)', 'Total (incl VAT)', 'VAT Amount', ''].map(h => (
-                        <div key={h} style={{ fontSize: 12, fontWeight: 600, color: '#6b7280' }}>{h}</div>
-                      ))}
-                    </div>
-                    {invLines.map((line, i) => {
-                      const matches = line.description.trim().length > 2 ? matchStockItems(line.description, allStockItems) : []
+                      const hasTemplate = sup?.invoice_columns?.length && activeCols !== DEFAULT_COLS
+                      // CSS grid: Category column + one per template col + delete button
+                      const gridCols = `1.4fr ${activeCols.map(() => '1fr').join(' ')} auto`
+
                       return (
-                      <div key={i} style={{ marginBottom: 8 }}>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 2fr 0.6fr 0.9fr 0.9fr 0.8fr auto', gap: 8, alignItems: 'center' }}>
-                          <div>
-                            <select value={line.category_key} onChange={e => updateLine(i, 'category_key', e.target.value)} style={{ ...inp, padding: '8px 10px' }}>
-                              {sortedCategories.map(c => <option key={c.key} value={c.key}>{c.name}</option>)}
-                            </select>
-                            {i === 0 && <button type="button" onClick={() => setShowQuickCat(true)} style={{ fontSize: '11px', color: '#1a5c38', background: 'none', border: 'none', cursor: 'pointer', padding: '2px 0', fontWeight: '600' }}>+ New Category</button>}
-                          </div>
-                          <input type="text" placeholder="Description" value={line.description} onChange={e => updateLine(i, 'description', e.target.value)} style={{ ...inp, padding: '8px 10px' }} />
-                          <input type="number" step="0.01" placeholder="1" value={line.qty || ''} onChange={e => updateLine(i, 'qty', e.target.value)} style={{ ...inp, padding: '8px 10px' }} />
-                          <input type="number" step="0.01" placeholder="0.00" value={line.unit_price || ''} onChange={e => updateLine(i, 'unit_price', e.target.value)} style={{ ...inp, padding: '8px 10px' }} />
-                          <input type="number" step="0.01" placeholder="0.00" value={line.amount || ''} onChange={e => updateLine(i, 'amount', e.target.value)} style={{ ...inp, padding: '8px 10px' }} />
-                          <input type="number" step="0.01" placeholder="0.00" value={line.vat_amount || ''} onChange={e => updateLine(i, 'vat_amount', e.target.value)} style={{ ...inp, padding: '8px 10px' }} />
-                          <button onClick={() => removeLine(i)} disabled={invLines.length === 1}
-                            style={{ background: '#fef2f2', color: '#dc2626', border: 'none', borderRadius: 6, padding: '8px 12px', cursor: 'pointer', fontSize: 16, fontWeight: 700 }}>×</button>
-                        </div>
-                        {matches.length > 0 && (
-                          <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 2fr 0.7fr 1fr 1fr auto', gap: 8, marginTop: 4 }}>
-                            <div />
-                            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-                              <span style={{ fontSize: 11, color: '#9ca3af' }}>Match to your stock sheet:</span>
-                              {matches.map(m => (
-                                <button key={m.id} type="button" onClick={() => updateLine(i, 'description', m.description)}
-                                  style={{ fontSize: 11, background: '#eff6ff', color: '#2563eb', border: '1px solid #bfdbfe', borderRadius: 12, padding: '3px 10px', cursor: 'pointer', fontWeight: 600 }}>
-                                  {m.description}
-                                </button>
-                              ))}
+                        <>
+                          {hasTemplate && (
+                            <div style={{ fontSize: 12, color: '#16a34a', background: '#f0fdf4', borderRadius: 6, padding: '6px 12px', marginBottom: 10 }}>
+                              ✓ Showing {sup!.name} invoice columns — matches their physical invoice layout
                             </div>
+                          )}
+
+                          {/* Column headers */}
+                          <div style={{ display: 'grid', gridTemplateColumns: gridCols, gap: 8, marginBottom: 8 }}>
+                            <div style={{ fontSize: 12, fontWeight: 600, color: '#6b7280' }}>Category</div>
+                            {activeCols.map(col => (
+                              <div key={col.header} style={{ fontSize: 12, fontWeight: 600, color: '#6b7280' }}>{col.header}</div>
+                            ))}
+                            <div />
                           </div>
-                        )}
-                      </div>
-                    )})}
-                    <div style={{ borderTop: '2px solid #e5e7eb', marginTop: 8, paddingTop: 12, display: 'flex', justifyContent: 'flex-end', gap: 24, fontSize: 14 }}>
+
+                          {/* Line rows */}
+                          {invLines.map((line, i) => {
+                            const matches = line.description.trim().length > 2 ? matchStockItems(line.description, allStockItems) : []
+                            const descCol = activeCols.find(c => c.field === 'description')
+                            return (
+                              <div key={i} style={{ marginBottom: 8 }}>
+                                <div style={{ display: 'grid', gridTemplateColumns: gridCols, gap: 8, alignItems: 'center' }}>
+                                  <div>
+                                    <select value={line.category_key} onChange={e => updateLine(i, 'category_key', e.target.value)} style={{ ...inp, padding: '8px 10px' }}>
+                                      {sortedCategories.map(c => <option key={c.key} value={c.key}>{c.name}</option>)}
+                                    </select>
+                                    {i === 0 && <button type="button" onClick={() => setShowQuickCat(true)} style={{ fontSize: '11px', color: '#1a5c38', background: 'none', border: 'none', cursor: 'pointer', padding: '2px 0', fontWeight: '600' }}>+ New Category</button>}
+                                  </div>
+                                  {activeCols.map(col => (
+                                    <input
+                                      key={col.header}
+                                      type={col.type}
+                                      step={col.type === 'number' ? '0.01' : undefined}
+                                      placeholder={col.placeholder}
+                                      value={col.type === 'number' ? (line[col.field] as number || '') : (line[col.field] as string || '')}
+                                      onChange={e => updateLine(i, col.field, col.type === 'number' ? e.target.value : e.target.value)}
+                                      style={{ ...inp, padding: '8px 10px' }}
+                                    />
+                                  ))}
+                                  <button onClick={() => removeLine(i)} disabled={invLines.length === 1}
+                                    style={{ background: '#fef2f2', color: '#dc2626', border: 'none', borderRadius: 6, padding: '8px 12px', cursor: 'pointer', fontSize: 16, fontWeight: 700 }}>×</button>
+                                </div>
+                              </div>
+                              {matches.length > 0 && (
+                                <div style={{ display: 'grid', gridTemplateColumns: `1.4fr ${activeCols.map(() => '1fr').join(' ')} auto`, gap: 8, marginTop: 4 }}>
+                                  <div />
+                                  {/* Stock match chips sit under the description column */}
+                                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', gridColumn: descCol ? '2' : '2' }}>
+                                    <span style={{ fontSize: 11, color: '#9ca3af' }}>Match to your stock sheet:</span>
+                                    {matches.map(m => (
+                                      <button key={m.id} type="button" onClick={() => updateLine(i, 'description', m.description)}
+                                        style={{ fontSize: 11, background: '#eff6ff', color: '#2563eb', border: '1px solid #bfdbfe', borderRadius: 12, padding: '3px 10px', cursor: 'pointer', fontWeight: 600 }}>
+                                        {m.description}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )
+                        })}
+                        </>
+                      )
+                    })()}                    <div style={{ borderTop: '2px solid #e5e7eb', marginTop: 8, paddingTop: 12, display: 'flex', justifyContent: 'flex-end', gap: 24, fontSize: 14 }}>
                       <span style={{ color: '#6b7280' }}>VAT: <strong>{fmt(lineVatTotal)}</strong></span>
                       <span style={{ fontWeight: 800, fontSize: 16 }}>Total: <span style={{ color: '#1a5c38' }}>{fmt(lineTotal)}</span></span>
                     </div>
