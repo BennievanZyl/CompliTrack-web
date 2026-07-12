@@ -413,9 +413,7 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
   // fixed — it must be signed off again afterwards to re-lock it.
   async function reopenForEditing() {
     if (!cashUp?.id) return;
-    if (!confirm('Reopen this signed-off cash up for editing?
-
-It will return to Draft status until it is signed off again.')) return;
+    if (!confirm('Reopen this signed-off cash up for editing? It will return to Draft status until it is signed off again.')) return;
     setSaving(true);
     try {
       await supabase.from('cash_ups').update({ status: 'draft' }).eq('id', cashUp.id);
