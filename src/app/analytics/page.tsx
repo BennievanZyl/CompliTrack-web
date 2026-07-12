@@ -118,7 +118,8 @@ export default function AnalyticsPage(){
       supabase.from('expenses').select('amount,category_key').eq('store_id',STORE_ID).gte('expense_date',lmStart).lte('expense_date',lmEnd),
       lmInvIds.length?supabase.from('invoice_lines').select('amount,vat_amount,category_key').in('invoice_id',lmInvIds):Promise.resolve({data:[]}),
       supabase.from('wage_payments').select('gross_pay').eq('store_id',STORE_ID).gte('paid_date',lmStart).lte('paid_date',lmEnd),
-      supabase.from('daily_sessions').select('session_date,id').eq('store_id',STORE_ID).gte('session_date',start).lte('session_date',end).order('session_date'),
+      // Compliance: fetch last 14 daily sessions regardless of selected period (rolling window)
+      supabase.from('daily_sessions').select('session_date,id').eq('store_id',STORE_ID).eq('session_type','daily').order('session_date',{ascending:false}).limit(14),
     ])
 
     const dailyCashUps:Record<string,number>={}
@@ -147,8 +148,11 @@ export default function AnalyticsPage(){
     const expByCat:Record<string,{name:string;total:number;color:string}>= {}
     const COLORS=['#3b82f6','#8b5cf6','#06b6d4','#f59e0b','#84cc16','#ec4899','#14b8a6','#f97316','#a855f7','#0ea5e9']
     let ci=0
+    // Keys that represent food/product cost — excluded from operating expenses (already in food cost calc)
+    const isFoodCostKey=(k:string)=>!k||['cost_of_sales','stock_cogs','cogs'].includes(k)||k.toLowerCase().includes('cog')||k.toLowerCase().startsWith('stock_c')
     const addExp=(key:string,name:string,amt:number)=>{
-      const k=key||'other';if(k==='cost_of_sales')return
+      const k=key||'other'
+      if(isFoodCostKey(k))return
       if(!expByCat[k]){expByCat[k]={name:name||k,total:0,color:COLORS[ci%COLORS.length]};ci++}
       expByCat[k].total+=amt
     }
@@ -162,9 +166,9 @@ export default function AnalyticsPage(){
 
     const lmWages=(lmWagesRes.data||[]).reduce((s:number,r:any)=>s+Number(r.gross_pay||0),0)
     let lmOpExp=0
-    for(const e of lmExpRes.data||[]){if((e.category_key||'other')!=='cost_of_sales')lmOpExp+=Number(e.amount||0)}
+    for(const e of lmExpRes.data||[]){if(!isFoodCostKey(e.category_key||'other'))lmOpExp+=Number(e.amount||0)}
     for(const l of lmInvLinesRes.data||[]){
-      if((l.category_key||'other')==='cost_of_sales')continue
+      if(isFoodCostKey(l.category_key||'other'))continue
       const exVat=Number(l.amount||0)-Number(l.vat_amount||0)
       lmOpExp+=(exVat>0?exVat:Number(l.amount||0))
     }
