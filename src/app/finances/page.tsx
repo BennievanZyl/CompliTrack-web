@@ -1699,7 +1699,12 @@ export default function FinancesPage() {
                   </div>
                   <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 8 }}>For case/box items: fill in Cases, Kg per Case, and Case Price — Qty and R/unit will work out automatically. For simple items, just type Qty and R/unit directly.</div>
                   <div style={{ maxHeight: 420, overflowY: 'auto' }}>
-                    {grvLines.map((line, i) => (
+                    {grvLines.map((line, i) => {
+                       // Catch weight: stock tracked in "each" but received/priced by kg
+                       // e.g. Chicken - bought 141.46 kg at R38.70/kg, but you received 100 birds
+                       const isCatchWeight = ['each','unit','units','pcs','pieces'].includes((line.unit||'').toLowerCase())
+                         && (line.case_qty === '' && parseFloat(line.qty_received) > 0 && parseFloat(line.qty_received) !== Math.round(parseFloat(line.qty_received)))
+                       return (
                        <div key={line.stock_item_id} style={{ borderTop: '1px solid #f3f4f6', padding: '10px 0' }}>
                          <div style={{ display: 'grid', gridTemplateColumns: '1.7fr 65px 65px 75px 70px 80px 90px', gap: 6, alignItems: 'center' }}>
                            <div>
@@ -1724,12 +1729,12 @@ export default function FinancesPage() {
                            <input type="number" step="0.1" min="0" placeholder="0"
                              value={line.qty_received}
                              onChange={e => setGrvLines(ls => ls.map((l,idx) => idx===i ? {...l, qty_received: e.target.value} : l))}
-                             title="Quantity that actually goes onto your stock sheet (auto-filled from case breakdown, or type directly)"
+                             title="Quantity that goes onto your stock sheet — for catch weight items, enter number of UNITS (birds/pieces), not kg"
                              style={{ padding: '6px 6px', border: `1.5px solid ${parseFloat(line.qty_received) > 0 ? '#16a34a' : '#e5e7eb'}`, borderRadius: 8, fontSize: 14, textAlign: 'center' as const, outline: 'none', background: parseFloat(line.qty_received) > 0 ? '#f0fdf4' : '#fff' }} />
                            <input type="number" step="0.01" min="0" placeholder="unit cost"
                              value={line.unit_cost}
                              onChange={e => setGrvLines(ls => ls.map((l,idx) => idx===i ? {...l, unit_cost: e.target.value} : l))}
-                             title="Cost per unit on your stock sheet (auto-filled from case price ÷ kg-per-case, or type directly)"
+                             title="Cost per unit on your stock sheet"
                              style={{ padding: '6px 6px', border: '1.5px solid #e5e7eb', borderRadius: 8, fontSize: 13, outline: 'none' }} />
                            {parseFloat(line.unit_cost) > 0 ? (
                              <button onClick={async () => {
@@ -1739,12 +1744,73 @@ export default function FinancesPage() {
                                alert('Stock price updated to R' + parseFloat(line.unit_cost).toFixed(4) + ' per ' + line.unit)
                              }} style={{ background: '#1a5c38', color: 'white', border: 'none', borderRadius: 8, padding: '6px 8px', fontSize: 11, cursor: 'pointer', fontWeight: 700 }}>
                                Update price
-
                              </button>
                            ) : <div />}
                          </div>
+                         {/* Catch weight helper — shows when stock is "each" but qty looks like kg (decimal) */}
+                         {['each','unit','units','pcs'].includes((line.unit||'').toLowerCase()) && parseFloat(line.qty_received) > 0 && (
+                           <div style={{ marginTop: 8, background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, padding: '10px 12px' }}>
+                             <div style={{ fontSize: 12, fontWeight: 700, color: '#92400e', marginBottom: 6 }}>
+                               ⚖️ Catch Weight — stock tracked in <strong>{line.unit}</strong>
+                             </div>
+                             <div style={{ fontSize: 12, color: '#78350f', marginBottom: 8 }}>
+                               Invoice qty shows <strong>{line.qty_received} kg</strong> at <strong>R{parseFloat(line.unit_cost||'0').toFixed(2)}/kg</strong>. 
+                               How many actual {line.unit}s did you receive? Enter below to calculate cost per {line.unit}.
+                             </div>
+                             <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' as const }}>
+                               <div>
+                                 <div style={{ fontSize: 11, color: '#92400e', marginBottom: 2 }}>Total KG received</div>
+                                 <input type="number" step="0.01"
+                                   defaultValue={line.qty_received}
+                                   placeholder="kg"
+                                   onBlur={e => {
+                                     const totalKg = parseFloat(e.target.value) || 0
+                                     const unitInput = e.target.closest('div.catch-weight-row')?.querySelector('input.unit-count') as HTMLInputElement
+                                     const units = unitInput ? parseFloat(unitInput.value) || 0 : 0
+                                     if (units > 0 && totalKg > 0) {
+                                       const kgPerUnit = totalKg / units
+                                       const costPerUnit = parseFloat(line.unit_cost || '0') * kgPerUnit
+                                       setGrvLines(ls => ls.map((l, idx) => idx === i ? { ...l, qty_received: String(units), unit_cost: costPerUnit.toFixed(4) } : l))
+                                     }
+                                   }}
+                                   style={{ width: 80, padding: '6px 8px', border: '1.5px solid #fde68a', borderRadius: 8, fontSize: 13 }} />
+                               </div>
+                               <div style={{ color: '#92400e', fontSize: 16, marginTop: 14 }}>÷</div>
+                               <div className="catch-weight-row">
+                                 <div style={{ fontSize: 11, color: '#92400e', marginBottom: 2 }}>Number of {line.unit}s</div>
+                                 <input type="number" step="1" min="1"
+                                   className="unit-count"
+                                   placeholder="e.g. 100"
+                                   onChange={e => {
+                                     const units = parseFloat(e.target.value) || 0
+                                     const totalKg = parseFloat(line.qty_received) || 0
+                                     const pricePerKg = parseFloat(line.unit_cost || '0')
+                                     if (units > 0 && totalKg > 0 && pricePerKg > 0) {
+                                       const kgPerUnit = totalKg / units
+                                       const costPerUnit = pricePerKg * kgPerUnit
+                                       setGrvLines(ls => ls.map((l, idx) => idx === i ? { ...l, qty_received: String(units), unit_cost: costPerUnit.toFixed(4) } : l))
+                                     }
+                                   }}
+                                   style={{ width: 80, padding: '6px 8px', border: '1.5px solid #16a34a', borderRadius: 8, fontSize: 13, background: '#f0fdf4' }} />
+                               </div>
+                               <div style={{ color: '#92400e', fontSize: 16, marginTop: 14 }}>=</div>
+                               <div>
+                                 <div style={{ fontSize: 11, color: '#92400e', marginBottom: 2 }}>Cost per {line.unit}</div>
+                                 <div style={{ padding: '6px 10px', background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8, fontSize: 13, fontWeight: 700, minWidth: 80 }}>
+                                   {parseFloat(line.unit_cost) > 0 && parseFloat(line.qty_received) > 0
+                                     ? 'R' + parseFloat(line.unit_cost).toFixed(2)
+                                     : '—'}
+                                 </div>
+                               </div>
+                               <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 14 }}>
+                                 Qty and unit cost above update automatically
+                               </div>
+                             </div>
+                           </div>
+                         )}
                        </div>
-                    ))}
+                       )
+                    })}
                   </div>
                   <div style={{ borderTop: '2px solid #e5e7eb', marginTop: 16, paddingTop: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span style={{ fontSize: 13, color: '#6b7280' }}>
