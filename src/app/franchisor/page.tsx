@@ -80,19 +80,24 @@ export default function FranchisorPage() {
     const monthStart = today.slice(0, 7) + '-01';
     const statsMap: Record<string, StoreStats> = {};
     await Promise.all(storeList.map(async (store) => {
-      const [sessionRes, salesRes, expRes, purchRes, wastRes] = await Promise.all([
+      const [sessionRes, salesRes, expRes, purchRes, wastRes, invoicesRes] = await Promise.all([
         supabase.from('daily_sessions').select('id, status, duration_seconds').eq('store_id', store.id).eq('session_date', today).eq('session_type', 'daily').maybeSingle(),
         supabase.from('cash_ups').select('cash_up_total').eq('store_id', store.id).neq('status', 'draft').gte('cash_up_date', monthStart).lte('cash_up_date', today),
         supabase.from('expenses').select('amount').eq('store_id', store.id).gte('expense_date', monthStart).lte('expense_date', today),
         supabase.from('stock_purchases').select('total_cost').eq('store_id', store.id).gte('purchase_date', monthStart).lte('purchase_date', today),
         supabase.from('stock_wastage').select('total_cost').eq('store_id', store.id).gte('wastage_date', monthStart).lte('wastage_date', today),
+        // Supplier bills (received/paid invoices) - the main source of operating expenses
+        supabase.from('invoices').select('total_amount').eq('store_id', store.id).in('status', ['received', 'paid']).gte('invoice_date', monthStart).lte('invoice_date', today),
       ]);
       const session = sessionRes.data;
       const sales_mtd = (salesRes.data || []).reduce((s: number, r: any) => s + Number(r.cash_up_total || 0), 0);
-      const sales_mtd_excl_vat = sales_mtd / 1.15; // Convert to ex-VAT for accurate food cost %
-      const expenses_mtd = (expRes.data || []).reduce((s: number, r: any) => s + Number(r.amount || 0), 0);
+      const sales_mtd_excl_vat = sales_mtd / 1.15;
+      const quickExp = (expRes.data || []).reduce((s: number, r: any) => s + Number(r.amount || 0), 0);
+      const invExp = (invoicesRes.data || []).reduce((s: number, r: any) => s + Number(r.total_amount || 0), 0);
       const purchases = (purchRes.data || []).reduce((s: number, r: any) => s + Number(r.total_cost || 0), 0);
       const wastage = (wastRes.data || []).reduce((s: number, r: any) => s + Number(r.total_cost || 0), 0);
+      // Total expenses = quick expenses + supplier invoices + stock purchases
+      const expenses_mtd = quickExp + invExp + purchases;
       const food_cost_pct = sales_mtd_excl_vat > 0 ? (purchases - wastage) / sales_mtd_excl_vat * 100 : null;
       if (!session) {
         statsMap[store.id] = { store_id: store.id, session_id: null, status: null, total: 0, completed: 0, uniform_photos: 0, temp_violations: 0, duration_seconds: null, sales_mtd, expenses_mtd, food_cost_pct };
@@ -389,7 +394,7 @@ export default function FranchisorPage() {
                     const health = !hasSession ? 'none' : s?.status === 'signed_off' && p === 100 ? 'excellent' : p >= 70 ? 'good' : 'poor';
                     const borderColor = health === 'excellent' ? '#c8e6c9' : health === 'good' ? '#fde68a' : health === 'poor' ? '#fca5a5' : '#eef2ee';
                     const fmtR = (n: number) => 'R ' + (n || 0).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-                    const profitEst = (s?.sales_mtd || 0) - (s?.expenses_mtd || 0);
+                    const profitEst = (s?.sales_mtd || 0) / 1.15 - (s?.expenses_mtd || 0);
                     return (
                       <div key={store.id} onClick={() => window.open(`/dashboard?store=${store.id}`, '_blank')} style={{ background: '#fff', borderRadius: 16, border: `1.5px solid ${borderColor}`, padding: '16px 20px', cursor: 'pointer', boxShadow: '0 2px 6px rgba(0,0,0,0.04)', transition: 'transform 0.15s, box-shadow 0.15s', display: 'flex', alignItems: 'stretch', gap: 0 }}
                         onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 6px 20px rgba(0,0,0,0.1)'; }}
@@ -436,7 +441,7 @@ export default function FranchisorPage() {
                         <div style={{ flex: 1, display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 0 }}>
                           {[
                             { label: 'Sales MTD', value: fmtR(s?.sales_mtd || 0), sub: new Date().toLocaleDateString('en-ZA', { month: 'short' }), color: '#111' },
-                            { label: 'Expenses MTD', value: fmtR(s?.expenses_mtd || 0), sub: s?.sales_mtd ? ((s.expenses_mtd / s.sales_mtd) * 100).toFixed(1) + '% of sales' : '—', color: '#374151' },
+                            { label: 'Expenses MTD', value: fmtR(s?.expenses_mtd || 0), sub: s?.sales_mtd ? ((s.expenses_mtd / (s.sales_mtd / 1.15)) * 100).toFixed(1) + '% of sales' : '—', color: '#374151' },
                             { label: 'Food Cost', value: s?.food_cost_pct != null ? s.food_cost_pct.toFixed(1) + '%' : '—', sub: s?.food_cost_pct != null ? (s.food_cost_pct <= 35 ? '✓ On target' : '⚠️ Above target') : 'No data', color: s?.food_cost_pct != null ? (s.food_cost_pct <= 35 ? '#16a34a' : s.food_cost_pct <= 40 ? '#d97706' : '#dc2626') : '#9ca3af' },
                             { label: 'Est. Profit', value: fmtR(profitEst), sub: s?.sales_mtd ? ((profitEst / s.sales_mtd) * 100).toFixed(1) + '% margin' : '—', color: profitEst >= 0 ? '#16a34a' : '#dc2626' },
                             { label: 'Analytics', value: '📊', sub: 'View full report', color: PRIMARY, link: true },
