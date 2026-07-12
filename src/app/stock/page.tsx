@@ -815,6 +815,8 @@ export default function StockPage() {
                 )
                 if (!catItems.length) return null
                 const catColor = cat.color || '#6b7280'
+                // Stock value for this section = on-hand qty x cost price, summed across its items.
+                const catStockValue = catItems.reduce((sum, item) => sum + Number(item.current_qty || 0) * (Number(item.cost_price) || Number(item.price) || 0), 0)
                 return (
                   <div key={cat.id} style={{ background: 'white', borderRadius: '20px', border: '1.5px solid #eef2ee', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
                     <div style={{ padding: '12px 20px', background: '#f9fafb', display: 'flex', alignItems: 'center', gap: '10px', borderBottom: '1px solid #e5e7eb' }}>
@@ -881,6 +883,10 @@ export default function StockPage() {
                         ))}
                       </tbody>
                     </table>
+                    <div style={{ padding: '12px 20px', background: '#f9fafb', borderTop: '1px solid #e5e7eb', display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ fontSize: '12px', fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Section Stock Value</span>
+                      <span style={{ fontSize: '15px', fontWeight: 800, color: '#111' }}>{formatCurrency(catStockValue)}</span>
+                    </div>
                   </div>
                 )
               })}
