@@ -123,7 +123,7 @@ export default function FinancesPage() {
   const [grvItems, setGrvItems] = useState<{id:string;description:string;unit:string;supplier:string|null}[]>([])
   const [grvLines, setGrvLines] = useState<{stock_item_id:string;description:string;unit:string;qty_received:string;unit_cost:string;units_per_case:string;case_qty:string;case_price:string}[]>([])
   const [savingGRV, setSavingGRV] = useState(false)
-  const [scanning, setScanning] = useState(false)
+  const [editingValues, setEditingValues] = useState<Record<string, string>>({})
   const [scanError, setScanError] = useState('')
   const [showScanChoice, setShowScanChoice] = useState(false)
   const [scanSupplier, setScanSupplier] = useState('')
@@ -1140,30 +1140,44 @@ export default function FinancesPage() {
                                         {['each','kg','g','L','ml','box','case','bag','bottle','can','tray','bunch','carton','pkt','pair','roll','sheet','set'].map(u => <option key={u} value={u}>{u}</option>)}
                                       </select>
                                     )
-                                    // Number fields: show raw value while typing, format on blur only
-                                    if (col.type === 'number') return (
-                                      <input
-                                        key={col.header}
-                                        type="text"
-                                        inputMode="decimal"
-                                        placeholder={col.placeholder}
-                                        // Show raw number string — no toFixed during editing
-                                        defaultValue={Number(line[col.field]) > 0 || Number(line[col.field]) < 0 ? String(line[col.field]) : ''}
-                                        key={`${col.header}-${i}-${line[col.field]}`}
-                                        onChange={e => {
-                                          const raw = e.target.value.replace(',', '.')
-                                          updateLine(i, col.field, raw)
-                                        }}
-                                        onBlur={e => {
-                                          const val = parseFloat(e.target.value.replace(',', '.'))
-                                          if (!isNaN(val)) {
-                                            updateLine(i, col.field, val)
-                                            e.target.value = val.toFixed(2)
-                                          }
-                                        }}
-                                        style={{ ...inp, padding: '8px 10px' }}
-                                      />
-                                    )
+                                    // Number fields: controlled with separate editing state to allow free typing
+                                    if (col.type === 'number') {
+                                      const editKey = `${i}-${col.field}`
+                                      const isEditing = editKey in editingValues
+                                      const displayVal = isEditing
+                                        ? editingValues[editKey]
+                                        : (Number(line[col.field]) > 0 || Number(line[col.field]) < 0
+                                            ? Number(line[col.field]).toFixed(2)
+                                            : '')
+                                      return (
+                                        <input
+                                          key={`${col.header}-${i}`}
+                                          type="text"
+                                          inputMode="decimal"
+                                          placeholder={col.placeholder}
+                                          value={displayVal}
+                                          onChange={e => {
+                                            const raw = e.target.value.replace(',', '.')
+                                            setEditingValues(ev => ({ ...ev, [editKey]: raw }))
+                                          }}
+                                          onFocus={e => {
+                                            // Enter editing mode with raw value
+                                            const raw = Number(line[col.field]) > 0 || Number(line[col.field]) < 0
+                                              ? String(line[col.field])
+                                              : ''
+                                            setEditingValues(ev => ({ ...ev, [editKey]: raw }))
+                                            e.target.select()
+                                          }}
+                                          onBlur={e => {
+                                            // Commit value and exit editing mode
+                                            const val = parseFloat(e.target.value.replace(',', '.'))
+                                            updateLine(i, col.field, isNaN(val) ? 0 : val)
+                                            setEditingValues(ev => { const n = { ...ev }; delete n[editKey]; return n })
+                                          }}
+                                          style={{ ...inp, padding: '8px 10px' }}
+                                        />
+                                      )
+                                    }
                                     // Text fields: controlled as normal
                                     return (
                                       <input
