@@ -780,6 +780,8 @@ export default function FinancesPage() {
     setSaving(false); setShowInvForm(false); setEditInv(null)
     await load()
     if (!andReceive) return
+    // CRITICAL: never re-open GRV for invoices already received or paid
+    if (editInv && (editInv.status === 'received' || editInv.status === 'paid')) return
     const savedInvoice: Invoice = {
       id: invoiceId!,
       supplier: invForm.supplier,
@@ -1254,11 +1256,25 @@ export default function FinancesPage() {
                     </div>
                   </div>
 
+                  {/* Warning banner when editing an already-received invoice */}
+                  {editInv && (editInv.status === 'received' || editInv.status === 'paid') && (
+                    <div style={{ background: '#fef9c3', border: '1.5px solid #fde68a', borderRadius: 10, padding: '10px 14px', marginBottom: 12, fontSize: 13, color: '#92400e' }}>
+                      ⚠️ <strong>This invoice has already been received.</strong> Saving will update the invoice record only — stock quantities and prices will <strong>not</strong> be changed again.
+                    </div>
+                  )}
+
                   <div style={{ display: 'flex', gap: 10 }}>
                     <button style={btn('#6b7280')} onClick={() => saveInvoice(false)} disabled={saving}>{saving ? 'Saving…' : '💾 Save as Draft'}</button>
                     {(() => {
+                      const alreadyReceived = editInv && (editInv.status === 'received' || editInv.status === 'paid')
                       const sup = suppliers.find(s => s.name === invForm.supplier)
                       const deliversStock = !sup || sup.delivers_stock !== false
+                      // Already received — show Save Changes only, never re-open GRV
+                      if (alreadyReceived) return (
+                        <button style={btn('#374151')} onClick={() => saveInvoice(false)} disabled={saving}>
+                          {saving ? 'Saving…' : '✓ Save Changes'}
+                        </button>
+                      )
                       return (
                         <button style={btn()} onClick={() => saveInvoice(true)} disabled={saving}>
                           {saving ? 'Saving…' : deliversStock ? '✓ Submit & Receive Stock' : '✓ Submit Bill'}
@@ -1269,6 +1285,8 @@ export default function FinancesPage() {
                   </div>
                   <p style={{ fontSize: 12, color: '#9ca3af', marginTop: 8 }}>
                     {(() => {
+                      const alreadyReceived = editInv && (editInv.status === 'received' || editInv.status === 'paid')
+                      if (alreadyReceived) return 'Editing a received invoice updates the record only — no stock changes will be made.'
                       const sup = suppliers.find(s => s.name === invForm.supplier)
                       return (!sup || sup.delivers_stock !== false)
                         ? 'Save as Draft keeps this invoice editable without touching your stock sheet. Submit & Receive Stock saves it and opens Receive Goods to update stock and pricing.'
