@@ -8,7 +8,7 @@ const PRIMARY = '#1a5c38';
 const DARK = '#0a1f12';
 
 type Store = { id: string; name: string; address: string; city: string; is_active: boolean; manager_name: string | null; };
-type StoreStats = { store_id: string; session_id: string | null; status: string | null; total: number; completed: number; uniform_photos: number; temp_violations: number; started_at: string | null; duration_seconds: number | null; };
+type StoreStats = { store_id: string; session_id: string | null; status: string | null; total: number; completed: number; uniform_photos: number; temp_violations: number; started_at: string | null; duration_seconds: number | null; sales_mtd: number; expenses_mtd: number; food_cost_pct: number | null; };
 type Profile = { organisation_id: string; full_name: string; franchisor_id: string; role: string; };
 
 function formatDuration(seconds: number): string {
@@ -148,21 +148,34 @@ export default function OrgPage() {
 
   async function loadStats(storeList: Store[]) {
     const today = new Date().toISOString().split('T')[0];
+    const monthStart = today.slice(0, 7) + '-01';
     const statsMap: Record<string, StoreStats> = {};
 
     await Promise.all(storeList.map(async (store) => {
-      const { data: session } = await supabase
-        .from('daily_sessions').select('id, status, started_at, duration_seconds')
-        .eq('store_id', store.id)
-        .eq('session_date', today)
-        .eq('session_type', 'daily')
-        .maybeSingle();
+      const [sessionRes, salesRes, expRes, invoicesRes, purchRes, wastRes] = await Promise.all([
+        supabase.from('daily_sessions').select('id, status, started_at, duration_seconds').eq('store_id', store.id).eq('session_date', today).eq('session_type', 'daily').maybeSingle(),
+        supabase.from('cash_ups').select('cash_up_total').eq('store_id', store.id).neq('status', 'draft').gte('cash_up_date', monthStart).lte('cash_up_date', today),
+        supabase.from('expenses').select('amount').eq('store_id', store.id).gte('expense_date', monthStart).lte('expense_date', today),
+        supabase.from('invoices').select('total_amount').eq('store_id', store.id).in('status', ['received', 'paid']).gte('invoice_date', monthStart).lte('invoice_date', today),
+        supabase.from('stock_purchases').select('total_cost').eq('store_id', store.id).gte('purchase_date', monthStart).lte('purchase_date', today),
+        supabase.from('stock_wastage').select('total_cost').eq('store_id', store.id).gte('wastage_date', monthStart).lte('wastage_date', today),
+      ]);
+      const session = sessionRes.data;
+      const sales_mtd = (salesRes.data || []).reduce((s: number, r: any) => s + Number(r.cash_up_total || 0), 0);
+      const sales_excl_vat = sales_mtd / 1.15;
+      const quickExp = (expRes.data || []).reduce((s: number, r: any) => s + Number(r.amount || 0), 0);
+      const invExp = (invoicesRes.data || []).reduce((s: number, r: any) => s + Number(r.total_amount || 0), 0);
+      const purchases = (purchRes.data || []).reduce((s: number, r: any) => s + Number(r.total_cost || 0), 0);
+      const wastage = (wastRes.data || []).reduce((s: number, r: any) => s + Number(r.total_cost || 0), 0);
+      const expenses_mtd = quickExp + invExp + purchases;
+      const food_cost_pct = sales_excl_vat > 0 ? (purchases - wastage) / sales_excl_vat * 100 : null;
 
       if (!session) {
         statsMap[store.id] = {
           store_id: store.id, session_id: null, status: null,
           total: 0, completed: 0, uniform_photos: 0,
-          temp_violations: 0, started_at: null, duration_seconds: null
+          temp_violations: 0, started_at: null, duration_seconds: null,
+          sales_mtd, expenses_mtd, food_cost_pct
         };
         return;
       }
@@ -182,6 +195,7 @@ export default function OrgPage() {
         temp_violations: violationRes.data?.length || 0,
         started_at: session.started_at,
         duration_seconds: session.duration_seconds,
+        sales_mtd, expenses_mtd, food_cost_pct,
       };
     }));
 
@@ -300,7 +314,7 @@ export default function OrgPage() {
               </div>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 20 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               {stores.map(store => {
                 const s = stats[store.id];
                 const p = s ? pct(s) : 0;
@@ -311,65 +325,75 @@ export default function OrgPage() {
                   : p >= 70 ? '#fde68a'
                   : '#fca5a5';
 
+                const fmtR = (n: number) => 'R\u00a0' + (n || 0).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                const profitEst = (s?.sales_mtd || 0) / 1.15 - (s?.expenses_mtd || 0);
                 return (
                   <div
                     key={store.id}
                     onClick={() => window.open(`/dashboard?store=${store.id}`, '_blank')}
-                    style={{ background: '#fff', borderRadius: 20, border: `1.5px solid ${borderColor}`, padding: 24, cursor: 'pointer', boxShadow: '0 2px 8px rgba(0,0,0,0.04)', transition: 'transform 0.15s, box-shadow 0.15s' }}
+                    style={{ background: '#fff', borderRadius: 20, border: `1.5px solid ${borderColor}`, padding: '16px 20px', cursor: 'pointer', boxShadow: '0 2px 8px rgba(0,0,0,0.04)', transition: 'transform 0.15s, box-shadow 0.15s', display: 'flex', alignItems: 'stretch', gap: 0 }}
                     onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 6px 20px rgba(0,0,0,0.1)'; }}
                     onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.04)'; }}
                   >
-                    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 16 }}>
-                      <div>
-                        <div style={{ fontWeight: 700, color: '#333', fontSize: 16, marginBottom: 4 }}>{store.name}</div>
-                        <div style={{ fontSize: 13, color: '#888' }}>{store.city || store.address}</div>
-                        {store.manager_name && (
-                          <div style={{ fontSize: 12, color: '#aaa', marginTop: 2 }}>Manager: {store.manager_name}</div>
-                        )}
+                    {/* Left: store identity + compliance */}
+                    <div style={{ minWidth: 240, paddingRight: 20, borderRight: '1px solid #f0f0f0' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+                        <div>
+                          <div style={{ fontWeight: 700, color: '#333', fontSize: 15, marginBottom: 2 }}>{store.name}</div>
+                          <div style={{ fontSize: 12, color: '#888' }}>{store.city || store.address}</div>
+                          {store.manager_name && <div style={{ fontSize: 11, color: '#aaa' }}>Manager: {store.manager_name}</div>}
+                        </div>
+                        <span style={{ fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 20, whiteSpace: 'nowrap' as const, background: !hasSession ? '#f3f4f6' : s?.status === 'signed_off' ? '#e8f5e9' : '#fff8e1', color: !hasSession ? '#9ca3af' : s?.status === 'signed_off' ? PRIMARY : '#f59e0b' }}>
+                          {!hasSession ? 'NO SESSION' : s?.status === 'signed_off' ? 'SIGNED OFF' : 'IN PROGRESS'}
+                        </span>
                       </div>
-                      <span style={{ fontSize: 11, fontWeight: 700, padding: '4px 10px', borderRadius: 20, whiteSpace: 'nowrap' as const, background: !hasSession ? '#f3f4f6' : s?.status === 'signed_off' ? '#e8f5e9' : '#fff8e1', color: !hasSession ? '#9ca3af' : s?.status === 'signed_off' ? PRIMARY : '#f59e0b' }}>
-                        {!hasSession ? 'NO SESSION' : s?.status === 'signed_off' ? 'SIGNED OFF' : 'IN PROGRESS'}
-                      </span>
+                      {hasSession && s ? (
+                        <>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                            <span style={{ fontSize: 11, color: '#888' }}>{s.completed}/{s.total} tasks</span>
+                            <span style={{ fontSize: 14, fontWeight: 800, color }}>{p}%</span>
+                          </div>
+                          <div style={{ height: 6, background: '#eef2ee', borderRadius: 3, marginBottom: 8 }}>
+                            <div style={{ height: '100%', width: `${p}%`, background: color, borderRadius: 3 }} />
+                          </div>
+                          <div style={{ display: 'flex', gap: 6 }}>
+                            <div style={{ flex: 1, textAlign: 'center' as const, background: '#f8faf8', borderRadius: 6, padding: '4px 0' }}>
+                              <div style={{ fontSize: 13, fontWeight: 700 }}>{s.uniform_photos}</div>
+                              <div style={{ fontSize: 9, color: '#aaa' }}>Uniforms</div>
+                            </div>
+                            <div style={{ flex: 1, textAlign: 'center' as const, background: s.temp_violations > 0 ? '#fdecea' : '#f8faf8', borderRadius: 6, padding: '4px 0' }}>
+                              <div style={{ fontSize: 13, fontWeight: 700, color: s.temp_violations > 0 ? '#ef4444' : '#333' }}>{s.temp_violations}</div>
+                              <div style={{ fontSize: 9, color: '#aaa' }}>Violations</div>
+                            </div>
+                          </div>
+                        </>
+                      ) : (
+                        <div style={{ color: '#ddd', fontSize: 12, marginTop: 8 }}>No compliance session today</div>
+                      )}
                     </div>
 
-                    {hasSession && s ? (
-                      <div>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                          <span style={{ fontSize: 13, color: '#666' }}>Compliance</span>
-                          <span style={{ fontSize: 14, fontWeight: 700, color }}>{p}%</span>
+                    {/* Right: Financial KPIs */}
+                    <div style={{ flex: 1, display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 0 }}>
+                      {[
+                        { label: 'Sales MTD', value: fmtR(s?.sales_mtd || 0), sub: new Date().toLocaleDateString('en-ZA', { month: 'short', year: 'numeric' }), color: '#111' },
+                        { label: 'Expenses MTD', value: fmtR(s?.expenses_mtd || 0), sub: s?.sales_mtd ? ((s.expenses_mtd / (s.sales_mtd / 1.15)) * 100).toFixed(1) + '% of sales' : '—', color: '#374151' },
+                        { label: 'Food Cost', value: s?.food_cost_pct != null ? s.food_cost_pct.toFixed(1) + '%' : '—', sub: s?.food_cost_pct != null ? (s.food_cost_pct <= 35 ? '✓ On target' : '⚠️ Above target') : 'No stock data', color: s?.food_cost_pct != null ? (s.food_cost_pct <= 35 ? '#16a34a' : s.food_cost_pct <= 40 ? '#d97706' : '#dc2626') : '#9ca3af' },
+                        { label: 'Est. Profit', value: fmtR(profitEst), sub: s?.sales_mtd ? ((profitEst / (s.sales_mtd / 1.15)) * 100).toFixed(1) + '% margin' : '—', color: profitEst >= 0 ? '#16a34a' : '#dc2626' },
+                        { label: 'Analytics', value: '📊', sub: 'View full report', color: PRIMARY, link: true },
+                      ].map((kpi, ki) => (
+                        <div key={ki}
+                          onClick={kpi.link ? (e) => { e.stopPropagation(); window.open('/analytics', '_blank'); } : undefined}
+                          style={{ textAlign: 'center' as const, padding: '8px 12px', borderLeft: '1px solid #f0f0f0', display: 'flex', flexDirection: 'column' as const, justifyContent: 'center', cursor: kpi.link ? 'pointer' : 'default' }}>
+                          <div style={{ fontSize: 10, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase' as const, letterSpacing: 0.4, marginBottom: 4 }}>{kpi.label}</div>
+                          <div style={{ fontSize: kpi.link ? 22 : 15, fontWeight: 800, color: kpi.color }}>{kpi.value}</div>
+                          {kpi.sub && <div style={{ fontSize: 10, color: '#9ca3af', marginTop: 2 }}>{kpi.sub}</div>}
                         </div>
-                        <div style={{ height: 8, background: '#eef2ee', borderRadius: 4, marginBottom: 16 }}>
-                          <div style={{ height: '100%', width: `${p}%`, background: color, borderRadius: 4, transition: 'width 0.5s' }} />
-                        </div>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
-                          <div style={{ textAlign: 'center' as const, background: '#f8faf8', borderRadius: 10, padding: '8px 4px' }}>
-                            <div style={{ fontSize: 16, fontWeight: 800, color: '#333' }}>{s.completed}/{s.total}</div>
-                            <div style={{ fontSize: 10, color: '#aaa', marginTop: 2 }}>Tasks</div>
-                          </div>
-                          <div style={{ textAlign: 'center' as const, background: '#f8faf8', borderRadius: 10, padding: '8px 4px' }}>
-                            <div style={{ fontSize: 16, fontWeight: 800, color: '#333' }}>{s.uniform_photos}</div>
-                            <div style={{ fontSize: 10, color: '#aaa', marginTop: 2 }}>Uniforms</div>
-                          </div>
-                          <div style={{ textAlign: 'center' as const, background: s.temp_violations > 0 ? '#fdecea' : '#f8faf8', borderRadius: 10, padding: '8px 4px' }}>
-                            <div style={{ fontSize: 16, fontWeight: 800, color: s.temp_violations > 0 ? '#ef4444' : '#333' }}>{s.temp_violations}</div>
-                            <div style={{ fontSize: 10, color: '#aaa', marginTop: 2 }}>Violations</div>
-                          </div>
-                        </div>
-                        {s.duration_seconds && (
-                          <div style={{ marginTop: 12, fontSize: 12, color: '#aaa', textAlign: 'right' as const }}>
-                            Completed in {formatDuration(s.duration_seconds)}
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <div style={{ textAlign: 'center' as const, padding: '24px 0', color: '#ccc', fontSize: 14 }}>
-                        No compliance session started today
-                      </div>
-                    )}
+                      ))}
+                    </div>
 
-                    <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <button onClick={e => { e.stopPropagation(); setLoginStore(store); setLoginForm({ full_name: '', email: '', password: generatePassword(), role: 'store_manager' }); setLoginError(''); setLoginSuccess(''); }} style={{ fontSize: 11, fontWeight: 700, color: PRIMARY, background: '#f0f7f4', border: 'none', borderRadius: 8, padding: '6px 12px', cursor: 'pointer' }}>+ Create Login</button>
-                      <span style={{ fontSize: 11, color: '#ccc' }}>Click card to open dashboard →</span>
+                    {/* Create Login button */}
+                    <div style={{ display: 'flex', flexDirection: 'column' as const, justifyContent: 'flex-end', paddingLeft: 12, borderLeft: '1px solid #f0f0f0' }}>
+                      <button onClick={e => { e.stopPropagation(); setLoginStore(store); setLoginForm({ full_name: '', email: '', password: generatePassword(), role: 'store_manager' }); setLoginError(''); setLoginSuccess(''); }} style={{ fontSize: 11, fontWeight: 700, color: PRIMARY, background: '#f0f7f4', border: 'none', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', whiteSpace: 'nowrap' as const }}>+ Login</button>
                     </div>
                   </div>
                 );
