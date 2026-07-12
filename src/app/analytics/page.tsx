@@ -258,7 +258,7 @@ export default function AnalyticsPage(){
     {/* Header */}
     <div style={{background:`linear-gradient(135deg,${DARK},${PRIMARY})`,padding:'20px 32px',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
       <div style={{display:'flex',alignItems:'center',gap:16}}>
-        <button onClick={()=>router.push('/dashboard')} style={{background:'rgba(255,255,255,0.15)',color:'#fff',border:'none',borderRadius:8,padding:'6px 14px',cursor:'pointer',fontSize:13}}>\u2190 Back</button>
+        <button onClick={()=>router.push('/dashboard')} style={{background:'rgba(255,255,255,0.15)',color:'#fff',border:'none',borderRadius:8,padding:'6px 14px',cursor:'pointer',fontSize:13}}>← Back</button>
         <div>
           <div style={{color:'#fff',fontWeight:800,fontSize:22}}>📊 Analytics</div>
           <div style={{color:'rgba(255,255,255,0.65)',fontSize:13}}>P&L · Breakeven · Compliance · Expense Breakdown</div>
