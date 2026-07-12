@@ -9,7 +9,7 @@ const DARK = '#0a1f12';
 
 type Organisation = { id: string; name: string; };
 type Store = { id: string; name: string; city: string; manager_name: string | null; organisation_id: string; is_active: boolean; };
-type StoreStats = { store_id: string; session_id: string | null; status: string | null; total: number; completed: number; uniform_photos: number; temp_violations: number; duration_seconds: number | null; sales_mtd: number; expenses_mtd: number; food_cost_pct: number | null; };
+type StoreStats = { store_id: string; session_id: string | null; status: string | null; total: number; completed: number; uniform_photos: number; temp_violations: number; duration_seconds: number | null; sales_mtd: number; expenses_mtd: number; food_cost_pct: number | null; spice_mtd: number; spice_ratio_pct: number | null; };
 type Profile = { full_name: string; franchisor_id: string; role: string; };
 type HistorySession = { id: string; session_date: string; status: string; store_id: string; duration_seconds: number | null; total: number; completed: number; };
 type ChecklistItem = { id: string; completed: boolean; completed_at: string | null; notes: string | null; photo_url: string | null; checklist_templates: { task_name: string; section: string; } | null; };
@@ -31,6 +31,7 @@ export default function FranchisorPage() {
   const [history, setHistory] = useState<HistorySession[]>([]);
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [networkAvgSpiceRatio, setNetworkAvgSpiceRatio] = useState<number | null>(null);
   const [selectedOrg, setSelectedOrg] = useState<string>('all');
   const [search, setSearch] = useState('');
   const [activeTab, setActiveTab] = useState<'today' | 'history'>('today');
@@ -80,14 +81,20 @@ export default function FranchisorPage() {
     const monthStart = today.slice(0, 7) + '-01';
     const statsMap: Record<string, StoreStats> = {};
     await Promise.all(storeList.map(async (store) => {
-      const [sessionRes, salesRes, expRes, purchRes, wastRes, invoicesRes] = await Promise.all([
+      const [sessionRes, salesRes, expRes, purchRes, wastRes, invoicesRes, spiceCatRes, spiceItemsRes] = await Promise.all([
         supabase.from('daily_sessions').select('id, status, duration_seconds').eq('store_id', store.id).eq('session_date', today).eq('session_type', 'daily').maybeSingle(),
         supabase.from('cash_ups').select('cash_up_total').eq('store_id', store.id).neq('status', 'draft').gte('cash_up_date', monthStart).lte('cash_up_date', today),
         supabase.from('expenses').select('amount').eq('store_id', store.id).gte('expense_date', monthStart).lte('expense_date', today),
-        supabase.from('stock_purchases').select('total_cost, invoice_id').gte('purchase_date', monthStart).lte('purchase_date', today).eq('store_id', store.id),
+        supabase.from('stock_purchases').select('total_cost, invoice_id, stock_item_id').gte('purchase_date', monthStart).lte('purchase_date', today).eq('store_id', store.id),
         supabase.from('stock_wastage').select('total_cost').eq('store_id', store.id).gte('wastage_date', monthStart).lte('wastage_date', today),
         // Supplier bills (received/paid invoices) - the main source of operating expenses
         supabase.from('invoices').select('total_amount').eq('store_id', store.id).in('status', ['received', 'paid']).gte('invoice_date', monthStart).lte('invoice_date', today),
+        // Spice royalty-audit: items filed under a "Spice" stock category track actual production
+        // volume independently of what the store declares for sales. A store quietly under-declaring
+        // sales still has to buy the same spice for the real volume it's making, so its spice-to-sales
+        // ratio comes out abnormally high relative to the network average.
+        supabase.from('stock_categories').select('id, name').eq('store_id', store.id),
+        supabase.from('stock_items').select('id, category').eq('store_id', store.id),
       ]);
       const session = sessionRes.data;
       const sales_mtd = (salesRes.data || []).reduce((s: number, r: any) => s + Number(r.cash_up_total || 0), 0);
@@ -105,8 +112,15 @@ export default function FranchisorPage() {
       // Total expenses = quick expenses + supplier invoices + non-invoiced stock purchases
       const expenses_mtd = quickExp + invExp + nonInvoicedPurchases;
       const food_cost_pct = sales_mtd_excl_vat > 0 ? (purchases - wastage) / sales_mtd_excl_vat * 100 : null;
+      // Match "Spice" category by id first, falling back to a name match (categories are sometimes
+      // referenced by legacy name/slug on older stock items rather than by uuid).
+      const spiceCategoryIds = new Set((spiceCatRes.data || []).filter((c: any) => (c.name || '').toLowerCase().includes('spice')).map((c: any) => c.id));
+      const spiceCategoryNames = new Set((spiceCatRes.data || []).filter((c: any) => (c.name || '').toLowerCase().includes('spice')).map((c: any) => (c.name || '').toLowerCase()));
+      const spiceItemIds = new Set((spiceItemsRes.data || []).filter((i: any) => spiceCategoryIds.has(i.category) || spiceCategoryNames.has((i.category || '').toLowerCase())).map((i: any) => i.id));
+      const spice_mtd = (purchRes.data || []).filter((r: any) => r.stock_item_id && spiceItemIds.has(r.stock_item_id)).reduce((s: number, r: any) => s + Number(r.total_cost || 0), 0);
+      const spice_ratio_pct = sales_mtd_excl_vat > 0 ? (spice_mtd / sales_mtd_excl_vat) * 100 : null;
       if (!session) {
-        statsMap[store.id] = { store_id: store.id, session_id: null, status: null, total: 0, completed: 0, uniform_photos: 0, temp_violations: 0, duration_seconds: null, sales_mtd, expenses_mtd, food_cost_pct };
+        statsMap[store.id] = { store_id: store.id, session_id: null, status: null, total: 0, completed: 0, uniform_photos: 0, temp_violations: 0, duration_seconds: null, sales_mtd, expenses_mtd, food_cost_pct, spice_mtd, spice_ratio_pct };
         return;
       }
       const [totalRes, completedRes, uniformRes, violationRes] = await Promise.all([
@@ -115,9 +129,11 @@ export default function FranchisorPage() {
         supabase.from('uniform_sessions').select('id').eq('session_id', session.id),
         supabase.from('temperature_logs').select('id').eq('session_id', session.id).eq('is_compliant', false),
       ]);
-      statsMap[store.id] = { store_id: store.id, session_id: session.id, status: session.status, total: totalRes.data?.length || 0, completed: completedRes.data?.length || 0, uniform_photos: uniformRes.data?.length || 0, temp_violations: violationRes.data?.length || 0, duration_seconds: session.duration_seconds, sales_mtd, expenses_mtd, food_cost_pct };
+      statsMap[store.id] = { store_id: store.id, session_id: session.id, status: session.status, total: totalRes.data?.length || 0, completed: completedRes.data?.length || 0, uniform_photos: uniformRes.data?.length || 0, temp_violations: violationRes.data?.length || 0, duration_seconds: session.duration_seconds, sales_mtd, expenses_mtd, food_cost_pct, spice_mtd, spice_ratio_pct };
     }));
     setStats(statsMap);
+    const spiceRatios = Object.values(statsMap).map(s => s.spice_ratio_pct).filter((r): r is number => r != null && r > 0);
+    setNetworkAvgSpiceRatio(spiceRatios.length > 0 ? spiceRatios.reduce((a, b) => a + b, 0) / spiceRatios.length : null);
     setLastUpdated(new Date());
   }
 
@@ -170,6 +186,11 @@ export default function FranchisorPage() {
   const noSession = stores.length - sessionsToday;
   const avgCompliance = sessionsToday > 0 ? Math.round(allStats.filter(s => s.session_id).reduce((sum, s) => sum + pct(s), 0) / sessionsToday) : 0;
   const totalViolations = allStats.reduce((sum, s) => sum + s.temp_violations, 0);
+  // A store whose spice-to-sales ratio runs more than 25% above the network average is flagged
+  // as a possible under-reporter for royalty purposes (see loadStats for the reasoning).
+  const SPICE_FLAG_THRESHOLD = 1.25;
+  const isSpiceFlagged = (s: StoreStats | undefined) => !!(s?.spice_ratio_pct != null && networkAvgSpiceRatio != null && s.spice_ratio_pct > networkAvgSpiceRatio * SPICE_FLAG_THRESHOLD);
+  const spiceFlaggedCount = allStats.filter(s => isSpiceFlagged(s)).length;
 
   const cardStyle = { background: '#fff', borderRadius: 20, padding: 24, border: '1px solid #eef2ee', boxShadow: '0 2px 8px rgba(0,0,0,0.06)' };
   const labelStyle = { fontSize: 13, color: '#666', marginBottom: 8, fontWeight: 500 as const };
@@ -357,6 +378,8 @@ export default function FranchisorPage() {
                 { label: 'NO SESSION', value: noSession, sub: 'stores not started', color: noSession > 0 ? '#ef4444' : PRIMARY },
                 { label: 'AVG COMPLIANCE', value: `${avgCompliance}%`, sub: `across ${sessionsToday} sessions`, color: pctColor(avgCompliance), progress: avgCompliance },
                 { label: 'TEMP VIOLATIONS', value: totalViolations, sub: 'out of range today', color: totalViolations > 0 ? '#ef4444' : PRIMARY },
+                { label: 'AVG SPICE RATIO', value: networkAvgSpiceRatio != null ? `${networkAvgSpiceRatio.toFixed(2)}%` : '—', sub: 'network avg, spice ÷ sales', color: PRIMARY },
+                { label: 'SPICE FLAGS', value: spiceFlaggedCount, sub: `>25% above network avg`, color: spiceFlaggedCount > 0 ? '#ef4444' : PRIMARY },
               ].map(item => (
                 <div key={item.label} style={cardStyle}>
                   <div style={labelStyle}>{item.label}</div>
@@ -444,11 +467,12 @@ export default function FranchisorPage() {
                         </div>
 
                         {/* Financial KPIs */}
-                        <div style={{ flex: 1, display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 0 }}>
+                        <div style={{ flex: 1, display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 0 }}>
                           {[
                             { label: 'Sales MTD (incl VAT)', value: fmtR(s?.sales_mtd || 0), sub: 'Ex-VAT: ' + fmtR((s?.sales_mtd || 0) / 1.15), color: '#111' },
                             { label: 'Expenses MTD', value: fmtR(s?.expenses_mtd || 0), sub: s?.sales_mtd ? ((s.expenses_mtd / (s.sales_mtd / 1.15)) * 100).toFixed(1) + '% of sales' : '—', color: '#374151' },
                             { label: 'Food Cost', value: s?.food_cost_pct != null ? s.food_cost_pct.toFixed(1) + '%' : '—', sub: s?.food_cost_pct != null ? (s.food_cost_pct <= 35 ? '✓ On target' : '⚠️ Above target') : 'No data', color: s?.food_cost_pct != null ? (s.food_cost_pct <= 35 ? '#16a34a' : s.food_cost_pct <= 40 ? '#d97706' : '#dc2626') : '#9ca3af' },
+                            { label: 'Spice vs Sales', value: s?.spice_ratio_pct != null ? s.spice_ratio_pct.toFixed(2) + '%' : '—', sub: s?.spice_ratio_pct != null && networkAvgSpiceRatio != null ? `${(((s.spice_ratio_pct - networkAvgSpiceRatio) / networkAvgSpiceRatio) * 100 >= 0 ? '+' : '')}${(((s.spice_ratio_pct - networkAvgSpiceRatio) / networkAvgSpiceRatio) * 100).toFixed(0)}% vs network avg` : 'No data', color: isSpiceFlagged(s) ? '#dc2626' : s?.spice_ratio_pct != null ? '#16a34a' : '#9ca3af' },
                             { label: 'Est. Profit', value: fmtR(profitEst), sub: s?.sales_mtd ? ((profitEst / s.sales_mtd) * 100).toFixed(1) + '% margin' : '—', color: profitEst >= 0 ? '#16a34a' : '#dc2626' },
                             { label: 'Analytics', value: '📊', sub: 'View full report', color: PRIMARY, link: true },
                           ].map((kpi, ki) => (
