@@ -375,7 +375,7 @@ export default function OrgPage() {
                     {/* Right: Financial KPIs */}
                     <div style={{ flex: 1, display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 0 }}>
                       {[
-                        { label: 'Sales MTD', value: fmtR(s?.sales_mtd || 0), sub: new Date().toLocaleDateString('en-ZA', { month: 'short', year: 'numeric' }), color: '#111' },
+                        { label: 'Sales MTD (incl VAT)', value: fmtR(s?.sales_mtd || 0), sub: 'Ex-VAT: ' + fmtR((s?.sales_mtd || 0) / 1.15), color: '#111' },
                         { label: 'Expenses MTD', value: fmtR(s?.expenses_mtd || 0), sub: s?.sales_mtd ? ((s.expenses_mtd / (s.sales_mtd / 1.15)) * 100).toFixed(1) + '% of sales' : '—', color: '#374151' },
                         { label: 'Food Cost', value: s?.food_cost_pct != null ? s.food_cost_pct.toFixed(1) + '%' : '—', sub: s?.food_cost_pct != null ? (s.food_cost_pct <= 35 ? '✓ On target' : '⚠️ Above target') : 'No stock data', color: s?.food_cost_pct != null ? (s.food_cost_pct <= 35 ? '#16a34a' : s.food_cost_pct <= 40 ? '#d97706' : '#dc2626') : '#9ca3af' },
                         { label: 'Est. Profit', value: fmtR(profitEst), sub: s?.sales_mtd ? ((profitEst / (s.sales_mtd / 1.15)) * 100).toFixed(1) + '% margin' : '—', color: profitEst >= 0 ? '#16a34a' : '#dc2626' },
