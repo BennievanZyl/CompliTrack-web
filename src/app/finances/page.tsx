@@ -112,7 +112,7 @@ export default function FinancesPage() {
   const [fcOverrideCountThisQuarter, setFcOverrideCountThisQuarter] = useState(0)
 
   const [categories, setCategories] = useState<{id:string;name:string;key:string;colour:string}[]>([])
-  const [suppliers, setSuppliers] = useState<{id:string;name:string;payment_terms_days:number|null;invoice_columns:{name:string;maps_to:string|null}[]|null;invoice_vat_included:boolean|null}[]>([])
+  const [suppliers, setSuppliers] = useState<{id:string;name:string;payment_terms_days:number|null;invoice_columns:{name:string;maps_to:string|null}[]|null;invoice_vat_included:boolean|null;delivers_stock:boolean}[]>([])
   const [cashUps, setCashUps] = useState<CashUp[]>([])
   const [invoices, setInvoices] = useState<Invoice[]>([])
   const [quickExp, setQuickExp] = useState<QuickExpense[]>([])
@@ -193,7 +193,7 @@ export default function FinancesPage() {
         .gte('invoice_date', monthStart).lte('invoice_date', monthEnd)
         .order('invoice_date', { ascending: false }),
       supabase.from('expense_categories').select('id, name, key, colour, sort_order').eq('organisation_id', ORG_ID).eq('is_active', true).order('sort_order'),
-      supabase.from('stock_suppliers').select('id, name, payment_terms_days, invoice_columns, invoice_vat_included').eq('store_id', STORE_ID).eq('is_active', true).order('sort_order'),
+      supabase.from('stock_suppliers').select('id, name, payment_terms_days, invoice_columns, invoice_vat_included, delivers_stock').eq('store_id', STORE_ID).eq('is_active', true).order('sort_order'),
       supabase.from('expenses')
         .select('*').eq('store_id', STORE_ID)
         .gte('expense_date', monthStart).lte('expense_date', monthEnd)
@@ -780,7 +780,16 @@ export default function FinancesPage() {
       total_vat: lineVatTotal,
       invoice_lines: lines as unknown as InvoiceLine[],
     }
-    openGRV(savedInvoice)
+    // Only open GRV if this supplier delivers stock
+    const sup = suppliers.find(s => s.name === invForm.supplier)
+    const deliversStock = !sup || sup.delivers_stock !== false
+    if (deliversStock) {
+      openGRV(savedInvoice)
+    } else {
+      // Non-stock supplier (rent, Micros, insurance, etc.) — just mark as received, no GRV
+      await supabase.from('invoices').update({ status: 'received' }).eq('id', savedInvoice.id)
+      setShowInvForm(false); setEditInv(null); await load()
+    }
   }
 
   async function deleteInvoice(id: string) {
@@ -1234,10 +1243,25 @@ export default function FinancesPage() {
 
                   <div style={{ display: 'flex', gap: 10 }}>
                     <button style={btn('#6b7280')} onClick={() => saveInvoice(false)} disabled={saving}>{saving ? 'Saving…' : '💾 Save as Draft'}</button>
-                    <button style={btn()} onClick={() => saveInvoice(true)} disabled={saving}>{saving ? 'Saving…' : '✓ Submit & Receive Stock'}</button>
+                    {(() => {
+                      const sup = suppliers.find(s => s.name === invForm.supplier)
+                      const deliversStock = !sup || sup.delivers_stock !== false
+                      return (
+                        <button style={btn()} onClick={() => saveInvoice(true)} disabled={saving}>
+                          {saving ? 'Saving…' : deliversStock ? '✓ Submit & Receive Stock' : '✓ Submit Bill'}
+                        </button>
+                      )
+                    })()}
                     <button style={btn('#6b7280')} onClick={() => { setShowInvForm(false); setEditInv(null) }}>Cancel</button>
                   </div>
-                  <p style={{ fontSize: 12, color: '#9ca3af', marginTop: 8 }}>Save as Draft keeps this invoice editable without touching your stock sheet. Submit & Receive Stock saves it and opens Receive Goods to update stock and pricing.</p>
+                  <p style={{ fontSize: 12, color: '#9ca3af', marginTop: 8 }}>
+                    {(() => {
+                      const sup = suppliers.find(s => s.name === invForm.supplier)
+                      return (!sup || sup.delivers_stock !== false)
+                        ? 'Save as Draft keeps this invoice editable without touching your stock sheet. Submit & Receive Stock saves it and opens Receive Goods to update stock and pricing.'
+                        : 'Save as Draft keeps this invoice editable. Submit Bill marks it as received — no stock update needed since this supplier delivers a service, not stock.'
+                    })()}
+                  </p>
                 </div>
               )}
 
