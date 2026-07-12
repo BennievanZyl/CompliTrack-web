@@ -383,6 +383,21 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
 
   async function signOff() {
     if (!signedByName.trim()) return;
+    // Safety check: catch the classic "forgot to enter the POS slip total" mistake before
+    // it locks in — a missing slip total silently inflates the variance to the full cash
+    // total and there was previously no way to fix it without editing the database directly.
+    if (posSlip === 0) {
+      const proceed = confirm(
+        `POS Slip Total is R0.00 — it looks like it wasn't entered.
+
+` +
+        `Signing off now will lock in a variance of ${varianceLabel} based on that R0.00.
+
+` +
+        `Sign off anyway? (Cancel to go back and enter it)`
+      );
+      if (!proceed) return;
+    }
     setSaving(true);
     try {
       const payload = { ...buildPayload('signed_off'), signed_by_name: signedByName.trim(), signed_off_at: new Date().toISOString() };
@@ -390,6 +405,23 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
       else { const { data } = await supabase.from('cash_ups').insert(payload).select().single(); if (data) setCashUp(data); }
       await loadCashUp();
     } catch (e) { console.error('Sign off error:', e); alert('Sign off failed'); }
+    setSaving(false);
+  }
+
+  // Lets a signed-off cash up be corrected instead of being permanently locked. Drops status
+  // back to 'draft' (unlocking every field) so mistakes like a missed POS Slip Total can be
+  // fixed — it must be signed off again afterwards to re-lock it.
+  async function reopenForEditing() {
+    if (!cashUp?.id) return;
+    if (!confirm('Reopen this signed-off cash up for editing?
+
+It will return to Draft status until it is signed off again.')) return;
+    setSaving(true);
+    try {
+      await supabase.from('cash_ups').update({ status: 'draft' }).eq('id', cashUp.id);
+      await loadCashUp();
+      setActiveStep(2);
+    } catch (e) { console.error('Reopen error:', e); alert('Failed to reopen'); }
     setSaving(false);
   }
 
@@ -965,6 +997,9 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
                         <div style={{ fontSize: 13, color: '#888', marginTop: 6 }}>{cashUp?.signed_off_at ? new Date(cashUp.signed_off_at).toLocaleString('en-ZA') : ''}</div>
                       </div>
                       <button onClick={printCashUp} style={{ width: '100%', padding: '14px', background: PRIMARY, color: '#fff', border: 'none', borderRadius: 12, fontWeight: 700, cursor: 'pointer', fontSize: 15 }}>Download / Print PDF Report</button>
+                      <button onClick={reopenForEditing} disabled={saving} style={{ width: '100%', marginTop: 10, padding: '12px', background: '#fff8e1', color: '#b45309', border: '1.5px solid #fde68a', borderRadius: 12, fontWeight: 700, cursor: 'pointer', fontSize: 14 }}>
+                        {saving ? 'Reopening…' : '🔓 Reopen for Editing'}
+                      </button>
                     </div>
                   )}
                 </div>
