@@ -124,6 +124,7 @@ export default function FinancesPage() {
   const [grvLines, setGrvLines] = useState<{stock_item_id:string;description:string;unit:string;qty_received:string;unit_cost:string;units_per_case:string;case_qty:string;case_price:string}[]>([])
   const [savingGRV, setSavingGRV] = useState(false)
   const [editingValues, setEditingValues] = useState<Record<string, string>>({})
+  const [scanning, setScanning] = useState(false)
   const [scanError, setScanError] = useState('')
   const [showScanChoice, setShowScanChoice] = useState(false)
   const [scanSupplier, setScanSupplier] = useState('')
