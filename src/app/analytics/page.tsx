@@ -92,8 +92,10 @@ export default function AnalyticsPage() {
       return (lines || []).reduce((s, l) => s + Number(l.actual_qty || 0) * Number(l.unit_cost || 0), 0)
     }
     const [openingValue, closingValue] = await Promise.all([countValue(openingCount?.id), countValue(closingCount?.id)])
+    const VAT_RATE = 0.15
+    const salesExclVat = sales / (1 + VAT_RATE) // Convert incl-VAT sales to ex-VAT for apples-to-apples comparison
     const foodCostAmount = openingValue + purchases - closingValue - wastage
-    const foodCostPct = sales > 0 ? foodCostAmount / sales * 100 : 0
+    const foodCostPct = salesExclVat > 0 ? foodCostAmount / salesExclVat * 100 : 0
 
     // Expenses by category (excluding wages which are tracked separately)
     const expByCategory: Record<string, { name: string; total: number }> = {}
@@ -108,26 +110,26 @@ export default function AnalyticsPage() {
     const fixedItems: FixedCostItem[] = fixedRes.data?.items || []
     const totalFixed = fixedItems.reduce((s, i) => s + Number(i.amount || 0), 0)
 
-    // Gross profit = Sales - Food Cost
-    const grossProfit = sales - foodCostAmount
-    const grossMarginPct = sales > 0 ? grossProfit / sales * 100 : 0
+    // All margin/% calculations use ex-VAT sales (apples-to-apples with ex-VAT costs)
+    const grossProfit = salesExclVat - foodCostAmount
+    const grossMarginPct = salesExclVat > 0 ? grossProfit / salesExclVat * 100 : 0
 
     // Total operating costs = food cost + wages + fixed + other expenses
     const otherExpenses = Object.values(expByCategory).reduce((s, c) => s + c.total, 0)
     const totalCosts = foodCostAmount + wagesGross + totalFixed + otherExpenses
-    const netProfit = sales - totalCosts
-    const netMarginPct = sales > 0 ? netProfit / sales * 100 : 0
+    const netProfit = salesExclVat - totalCosts
+    const netMarginPct = salesExclVat > 0 ? netProfit / salesExclVat * 100 : 0
 
-    // Breakeven: Fixed costs (wages + rent + etc) ÷ Gross Margin %
+    // Breakeven uses ex-VAT sales base — fixed costs ÷ gross margin %
     const fixedForBreakeven = wagesGross + totalFixed
     const breakeven = grossMarginPct > 0 ? fixedForBreakeven / (grossMarginPct / 100) : 0
-    const salesAboveBreakeven = sales - breakeven
+    const salesAboveBreakeven = salesExclVat - breakeven
     const daysInPeriod = Math.round((new Date(end).getTime() - new Date(start).getTime()) / 86400000) + 1
     const dailySales = sales / daysInPeriod
     const daysToBreakeven = dailySales > 0 ? Math.ceil(breakeven / dailySales) : null
 
     return {
-      sales, purchases, wastage, wages, wagesGross, uifEmployer,
+      sales, salesExclVat, purchases, wastage, wages, wagesGross, uifEmployer,
       openingValue, closingValue, foodCostAmount, foodCostPct,
       grossProfit, grossMarginPct,
       expByCategory, otherExpenses,
@@ -287,7 +289,7 @@ export default function AnalyticsPage() {
             {view === 'compare' && compareData && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 32 }}>
                 <CompareKPI label="Sales" curr={data.sales} prev={compareData.sales} />
-                <CompareKPI label="Food Cost" curr={data.foodCostAmount} prev={compareData.foodCostAmount} />
+                <CompareKPI label="Food Cost (ex-VAT)" curr={data.foodCostAmount} prev={compareData.foodCostAmount} />
                 <CompareKPI label="Wages" curr={data.wagesGross} prev={compareData.wagesGross} />
                 <CompareKPI label="Fixed Costs" curr={data.totalFixed} prev={compareData.totalFixed} />
                 <CompareKPI label="Other Expenses" curr={data.otherExpenses} prev={compareData.otherExpenses} />
@@ -310,23 +312,23 @@ export default function AnalyticsPage() {
                 <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 16 }}>Profit & Loss Breakdown</div>
                 <div style={{ borderBottom: '1px solid #f3f4f6', paddingBottom: 12, marginBottom: 12 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, marginBottom: 4 }}>
-                    <span style={{ fontWeight: 600 }}>Sales Revenue</span><span style={{ fontWeight: 800, color: '#16a34a' }}>{fmt(data.sales)}</span>
+                    <span style={{ fontWeight: 600 }}>Sales Revenue (ex-VAT)</span><span style={{ fontWeight: 800, color: '#16a34a' }}>{fmt(data.salesExclVat)}</span>
                   </div>
                 </div>
                 <div style={{ marginBottom: 12 }}>
                   <div style={{ fontSize: 12, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', marginBottom: 8 }}>Cost of Goods Sold</div>
-                  <Bar label="Food Cost" value={data.foodCostAmount} total={data.sales} color="#ef4444" />
+                  <Bar label="Food Cost (ex-VAT)" value={data.foodCostAmount} total={data.salesExclVat} color="#ef4444" />
                   <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 8, borderTop: '1px solid #f3f4f6', fontSize: 14, fontWeight: 700 }}>
                     <span>Gross Profit</span><span style={{ color: '#16a34a' }}>{fmt(data.grossProfit)} ({data.grossMarginPct.toFixed(1)}%)</span>
                   </div>
                 </div>
                 <div style={{ marginBottom: 12 }}>
                   <div style={{ fontSize: 12, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', marginBottom: 8 }}>Operating Expenses</div>
-                  <Bar label="Wages & Salaries" value={data.wagesGross} total={data.sales} color="#8b5cf6" />
+                  <Bar label="Wages & Salaries" value={data.wagesGross} total={data.salesExclVat} color="#8b5cf6" />
                   {Object.entries(data.expByCategory).map(([key, cat]: any) => (
-                    <Bar key={key} label={cat.name} value={cat.total} total={data.sales} color="#3b82f6" />
+                    <Bar key={key} label={cat.name} value={cat.total} total={data.salesExclVat} color="#3b82f6" />
                   ))}
-                  <Bar label="Fixed Costs (Rent, etc.)" value={data.totalFixed} total={data.sales} color="#f59e0b" />
+                  <Bar label="Fixed Costs (Rent, etc.)" value={data.totalFixed} total={data.salesExclVat} color="#f59e0b" />
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 0', borderTop: '2px solid #111', fontSize: 15, fontWeight: 800 }}>
                   <span>Net {data.netProfit >= 0 ? 'Profit' : 'Loss'}</span>
@@ -343,7 +345,7 @@ export default function AnalyticsPage() {
                   <div style={{ fontSize: 28, fontWeight: 800, color: '#111', marginBottom: 4 }}>{fmt(data.breakeven)}</div>
                   <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 12 }}>Required to cover all fixed costs</div>
                   <div style={{ height: 10, background: '#f3f4f6', borderRadius: 5, marginBottom: 8 }}>
-                    <div style={{ height: '100%', width: `${Math.min(100, data.breakeven > 0 ? data.sales / data.breakeven * 100 : 0)}%`, background: data.sales >= data.breakeven ? '#16a34a' : '#ef4444', borderRadius: 5 }} />
+                    <div style={{ height: '100%', width: `${Math.min(100, data.breakeven > 0 ? data.salesExclVat / data.breakeven * 100 : 0)}%`, background: data.sales >= data.breakeven ? '#16a34a' : '#ef4444', borderRadius: 5 }} />
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                     <div style={{ background: '#f8faf8', borderRadius: 8, padding: '8px 12px' }}>
