@@ -38,17 +38,17 @@ export async function POST(req: NextRequest) {
 { "supplier": string, "invoice_number": string, "invoice_date": "YYYY-MM-DD", "due_date": "YYYY-MM-DD or null", "notes": string, "lines": [{ "description": string, "qty": number, "uom": string, "unit_price": number, "amount": number, "vat_amount": number, "category_key": string, "case_size": number | null, "case_uom": string | null }] }
 
 For each line:
-- description = clean item name ONLY — strip out any size/weight/volume info (e.g. "Mexican Chips Spice" not "Mexican Chips Spice 4 kg", "MOC Dynamite Sauce" not "MOC Dynamite Sauce (250ml)")
-- qty = number of cases/units ordered (the quantity column)
-- uom = the outer unit being ordered (CASE, BOX, BAG, EACH, etc.)
-- unit_price = PRICE PER UNIT EXCLUDING VAT. CRITICAL: use excl-VAT column only, never Total Incl or incl-VAT column.
-- amount = Total Incl VAT for that line
-- vat_amount = VAT amount for that line
-- category_key: cost_of_sales for food/meat/frozen/dairy, packaging for packaging, cleaning for cleaning, other for rest
-- case_size = the SIZE per unit extracted from the item description (e.g. "Mexican Chips Spice 4 kg" → case_size: 4, "MOC Whip 20 L" → case_size: 20, "Sauce 250ml" → case_size: 250). Return null if no size found.
-- case_uom = the UNIT of the case_size extracted from the description (e.g. "kg", "L", "ml", "g"). Return null if none found. IMPORTANT: if case_uom is "ml", convert case_size to litres (divide by 1000) and set case_uom to "L" — so "250ml" becomes case_size: 0.25, case_uom: "L". If no size info found, return case_size: null, case_uom: null.
+- description = the FULL product description exactly as printed on the invoice. Keep all sizes, specs and product codes in the description (e.g. "DETERGENT DISHWASHING LIQUID-CLEAN TECH-25LT" stays as-is, "OIL PALM-COOKING WITH-20LT" stays as-is). Do NOT strip sizes from descriptions. Only strip embedded qty prefixes like "6x" at the very start if present.
+- qty = the quantity column value (number of units ordered)
+- uom = unit of measure exactly as printed (BOTT, CTN, DRUM, BOX, CASE, BKT, etc.)
+- unit_price = price per unit EXCLUDING VAT. CRITICAL: use the column labelled "Unit Price" or "Price (Ex)" or "Price Excl" — this is NEVER the same as "Exclusive Value" or "Total Excl" (those are line totals = qty × unit_price). When qty=1 they may look the same but they are different columns.
+- amount = total line amount INCLUDING VAT (the rightmost/last price column, labelled "Total Incl" or "Inclusive Value" or "Total (Incl VAT)")
+- vat_amount = the VAT amount for the line. IMPORTANT: many food/cooking items have 0% VAT so their vat_amount = 0.00 and amount = exclusive value. This is correct — do not invent VAT for these items.
+- category_key: cost_of_sales for food/ingredients/cooking/frozen items, cleaning for cleaning/hygiene/chemical products, packaging for packaging materials, other for rest
+- case_size: if the description contains a package size like "20LT", "5KG", "25LT", extract just the number. null if no size.
+- case_uom: unit of case_size (kg, L, g, ml). Convert ml to L (250ml → 0.25, case_uom: "L"). null if no case_size.
 ${columnGuidance}
-Extract EVERY visible line item. If date not found use ${today}. Return raw JSON only.`
+Extract EVERY visible line item — do not skip any. If date not found use ${today}. Return raw JSON only.`
 
     const isPdf = (mediaType || '').includes('pdf')
     const contentBlock = isPdf
