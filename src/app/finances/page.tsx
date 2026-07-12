@@ -501,8 +501,18 @@ export default function FinancesPage() {
     setInvLines(lines => lines.map((l, idx) => {
       if (idx !== i) return l
       const updated = { ...l, [field]: value }
-      // Auto-calc VAT when amount changes
-      if (field === 'amount') updated.vat_amount = Math.round(Number(value) / (1 + VAT_RATE) * VAT_RATE * 100) / 100
+      // When amount (incl VAT) changes: back-calc VAT
+      if (field === 'amount') {
+        updated.vat_amount = Math.round(Number(value) / (1 + VAT_RATE) * VAT_RATE * 100) / 100
+      }
+      // When unit_price or qty changes: forward-calc VAT amount + inclusive total
+      if (field === 'unit_price' || field === 'qty') {
+        const price = Number(field === 'unit_price' ? value : l.unit_price) || 0
+        const qty   = Number(field === 'qty'        ? value : l.qty)        || 1
+        const excl  = price * qty
+        updated.vat_amount = Math.round(excl * VAT_RATE * 100) / 100
+        updated.amount     = Math.round(excl * (1 + VAT_RATE) * 100) / 100
+      }
       return updated
     }))
   }
