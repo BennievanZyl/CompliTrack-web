@@ -505,13 +505,26 @@ export default function FinancesPage() {
       if (field === 'amount') {
         updated.vat_amount = Math.round(Number(value) / (1 + VAT_RATE) * VAT_RATE * 100) / 100
       }
-      // When unit_price or qty changes: forward-calc VAT amount + inclusive total
+      // When unit_price or qty changes: forward-calc totals
       if (field === 'unit_price' || field === 'qty') {
-        const price = Number(field === 'unit_price' ? value : l.unit_price) || 0
-        const qty   = Number(field === 'qty'        ? value : l.qty)        || 1
-        const excl  = price * qty
-        updated.vat_amount = Math.round(excl * VAT_RATE * 100) / 100
-        updated.amount     = Math.round(excl * (1 + VAT_RATE) * 100) / 100
+        const newPrice = Number(field === 'unit_price' ? value : l.unit_price) || 0
+        const newQty   = Number(field === 'qty'        ? value : l.qty)        || 1
+        const oldPrice = Number(l.unit_price) || 0
+        const oldQty   = Number(l.qty)        || 1
+        const oldExcl  = oldPrice * oldQty
+        const newExcl  = newPrice * newQty
+        const currentVat = Number(l.vat_amount) || 0
+        // Only recalculate VAT if it was auto-calculated from the old values (within 2c rounding)
+        // If the user manually set VAT (e.g. 0 for a zero-rated item), preserve it
+        const expectedOldVat = Math.round(oldExcl * VAT_RATE * 100) / 100
+        const vatWasAuto = oldExcl === 0 || Math.abs(currentVat - expectedOldVat) < 0.02
+        if (vatWasAuto) {
+          updated.vat_amount = Math.round(newExcl * VAT_RATE * 100) / 100
+          updated.amount     = Math.round(newExcl * (1 + VAT_RATE) * 100) / 100
+        } else {
+          // VAT manually set — just update the total using existing VAT
+          updated.amount = Math.round((newExcl + currentVat) * 100) / 100
+        }
       }
       return updated
     }))
