@@ -432,7 +432,10 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
       }
       setPayoutForm({ amount: '', category: 'Salary Advance', description: '', employee_id: '', employee_name: '' });
       setShowPayoutForm(false);
-      await loadCashUp();
+      // Note: intentionally NOT calling loadCashUp() here — it re-fetches the whole record
+      // from the DB and repopulates the form (previous_float, eft_total, etc.), which wipes
+      // out anything typed but not yet saved. loadPayouts() above already refreshes the
+      // payout list, and totals/variance are derived reactively from local state.
     } catch (e) { console.error('Payout error:', e); }
     setPayoutSaving(false);
   }
