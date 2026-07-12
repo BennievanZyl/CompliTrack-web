@@ -1403,7 +1403,9 @@ export default function FinancesPage() {
           {tab === 4 && (() => {
             const [periodStart, periodEnd] = fcPeriodRange()
             const costOfSales = fcData ? fcData.openingValue + fcData.purchases - fcData.closingValue - fcData.wastage : 0
-            const foodCostPct = fcData && fcData.sales > 0 ? (costOfSales / fcData.sales) * 100 : null
+            // Purchases and stock are ex-VAT — divide sales by 1.15 for apples-to-apples comparison
+            const salesExclVat = fcData ? fcData.sales / 1.15 : 0
+            const foodCostPct = fcData && salesExclVat > 0 ? (costOfSales / salesExclVat) * 100 : null
             const row = (label: string, value: number, sign: '+' | '-' | '=' | '') => (
               <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid #f3f4f6', fontSize: 14 }}>
                 <span style={{ color: '#6b7280' }}>{sign && <span style={{ display: 'inline-block', width: 16, fontWeight: 700, color: '#9ca3af' }}>{sign}</span>}{label}</span>
@@ -1497,7 +1499,7 @@ export default function FinancesPage() {
                         <div style={{ fontSize: 44, fontWeight: 800, color: foodCostPct === null ? '#9ca3af' : foodCostPct <= 33 ? '#16a34a' : foodCostPct <= 38 ? '#d97706' : '#dc2626' }}>
                           {foodCostPct === null ? '—' : `${foodCostPct.toFixed(1)}%`}
                         </div>
-                        <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 4 }}>{fmt(costOfSales)} ÷ {fmt(fcData.sales)} sales</div>
+                        <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 4 }}>{fmt(costOfSales)} ÷ {fmt(salesExclVat)} sales (ex-VAT)</div>
                         {fcData.sales === 0 && <div style={{ fontSize: 11, color: '#dc2626', marginTop: 8 }}>No sales recorded for this period</div>}
                         {(fcData.openingManual || fcData.closingManual) && <div style={{ fontSize: 11, color: '#c2410c', marginTop: 8, fontWeight: 600 }}>⚠️ Based on a manual entry, not a physical count</div>}
                         <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 16, borderTop: '1px solid #f3f4f6', paddingTop: 12 }}>Typical restaurant target: 28–35%</div>
