@@ -8,6 +8,7 @@ const STORE_ID = '05328298-fc27-4c9f-b091-bb7f6598b601'
 
 type StockCategory = { id: string; name: string; color: string; sort_order: number }
 type StockItem = { id: string; category: string | null; name: string; description: string; unit: string; cost_price: number; price: number; par_level: number; current_qty: number; is_active: boolean; sort_order: number; supplier: string | null; on_daily_sheet: boolean; is_catch_weight: boolean; kg_price: number; avg_weight_kg: number }
+type StockAdjustment = { id: string; store_id: string; stock_item_id: string; item_name: string; qty_before: number; qty_after: number; adjustment: number; unit: string; reason: string; notes: string; created_at: string }
 type InvoiceColumn = { name: string; maps_to: string | null }
 type StockSupplier = { id: string; name: string; contact_name: string | null; phone: string | null; email: string | null; order_day: string | null; notes: string | null; payment_terms_days: number | null; is_active: boolean; sort_order: number; invoice_columns: InvoiceColumn[] | null; invoice_vat_included: boolean | null; delivers_stock: boolean }
 const MAPS_TO_OPTIONS = [
@@ -68,6 +69,75 @@ function Modal({ show, onClose, title, children, maxWidth = '480px' }: { show: b
         {children}
       </div>
 
+      {adjustItem && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 3000, padding: 20 }} onClick={() => setAdjustItem(null)}>
+          <div style={{ background: '#fff', borderRadius: 20, width: 480, maxWidth: '100%', maxHeight: '80vh', overflow: 'auto' }} onClick={e => e.stopPropagation()}>
+            <div style={{ padding: '20px 24px 16px', borderBottom: '1px solid #f0f0f0' }}>
+              <div style={{ fontSize: 18, fontWeight: 800 }}>⚖️ Adjust Stock</div>
+              <div style={{ fontSize: 14, color: '#6b7280', marginTop: 2 }}>{adjustItem.description || adjustItem.name}</div>
+              <div style={{ marginTop: 8, display: 'inline-block', background: '#f3f4f6', borderRadius: 8, padding: '6px 12px', fontSize: 14 }}>Current qty: <strong>{Number(adjustItem.current_qty || 0).toFixed(3)} {adjustItem.unit}</strong></div>
+            </div>
+            <div style={{ padding: '20px 24px' }}>
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ fontSize: 12, fontWeight: 700, color: '#374151', display: 'block', marginBottom: 6 }}>Adjustment type</label>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  {(['set','add','subtract'] as const).map(mode => (
+                    <button key={mode} onClick={() => setAdjustMode(mode)} style={{ flex: 1, padding: '8px 4px', borderRadius: 8, border: `2px solid ${adjustMode === mode ? '#7c3aed' : '#e5e7eb'}`, background: adjustMode === mode ? '#ede9fe' : '#fff', color: adjustMode === mode ? '#7c3aed' : '#6b7280', fontWeight: 700, fontSize: 11, cursor: 'pointer' }}>
+                      {mode === 'set' ? 'Set exact qty' : mode === 'add' ? 'Add to current' : 'Subtract from current'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ fontSize: 12, fontWeight: 700, color: '#374151', display: 'block', marginBottom: 6 }}>{adjustMode === 'set' ? `New quantity (${adjustItem.unit})` : adjustMode === 'add' ? `Quantity to add (${adjustItem.unit})` : `Quantity to remove (${adjustItem.unit})`}</label>
+                <input type="number" step="0.001" min="0" autoFocus value={adjustQty} onChange={e => setAdjustQty(e.target.value)} placeholder="0.000" style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1.5px solid #e5e7eb', fontSize: 16, fontWeight: 700 }} />
+                {adjustQty && <div style={{ marginTop: 6, fontSize: 13, color: '#7c3aed', fontWeight: 600 }}>
+                  {adjustMode === 'set' && `Will set to ${parseFloat(adjustQty).toFixed(3)} ${adjustItem.unit} (${parseFloat(adjustQty) - Number(adjustItem.current_qty) >= 0 ? '+' : ''}${(parseFloat(adjustQty) - Number(adjustItem.current_qty)).toFixed(3)})`}
+                  {adjustMode === 'add' && `New qty: ${(Number(adjustItem.current_qty) + parseFloat(adjustQty)).toFixed(3)} ${adjustItem.unit}`}
+                  {adjustMode === 'subtract' && `New qty: ${Math.max(0, Number(adjustItem.current_qty) - parseFloat(adjustQty)).toFixed(3)} ${adjustItem.unit}`}
+                </div>}
+              </div>
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ fontSize: 12, fontWeight: 700, color: '#374151', display: 'block', marginBottom: 6 }}>Reason *</label>
+                <select value={adjustReason} onChange={e => setAdjustReason(e.target.value)} style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1.5px solid #e5e7eb', fontSize: 14 }}>
+                  <option value="">— Select reason —</option>
+                  <option value="Entry Error">Entry Error (GRV or count was wrong)</option>
+                  <option value="Count Correction">Physical count correction</option>
+                  <option value="Damaged">Damaged / unusable</option>
+                  <option value="Expired">Expired / thrown out</option>
+                  <option value="Theft">Theft / shrinkage</option>
+                  <option value="Internal Use">Internal use / staff meal</option>
+                  <option value="Transfer">Transfer to another location</option>
+                  <option value="Other">Other</option>
+                </select>
+              </div>
+              <div style={{ marginBottom: 20 }}>
+                <label style={{ fontSize: 12, fontWeight: 700, color: '#374151', display: 'block', marginBottom: 6 }}>Notes (optional)</label>
+                <input value={adjustNotes} onChange={e => setAdjustNotes(e.target.value)} placeholder="e.g. Pita bread GRV was entered twice" style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1.5px solid #e5e7eb', fontSize: 13 }} />
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={() => setAdjustItem(null)} style={{ flex: 1, padding: '11px', background: '#f3f4f6', color: '#374151', border: 'none', borderRadius: 10, fontWeight: 700, cursor: 'pointer' }}>Cancel</button>
+                <button onClick={saveAdjustment} disabled={adjusting || !adjustQty || !adjustReason} style={{ flex: 2, padding: '11px', background: (!adjustQty || !adjustReason) ? '#d1d5db' : '#7c3aed', color: '#fff', border: 'none', borderRadius: 10, fontWeight: 800, cursor: 'pointer', fontSize: 14 }}>{adjusting ? 'Saving…' : '✓ Apply Adjustment'}</button>
+              </div>
+              {adjustHistory.length > 0 && (
+                <div style={{ marginTop: 20, borderTop: '1px solid #f0f0f0', paddingTop: 14 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', marginBottom: 8 }}>Recent adjustments</div>
+                  {adjustHistory.map(h => (
+                    <div key={h.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid #f9fafb', fontSize: 12 }}>
+                      <div>
+                        <span style={{ color: h.adjustment >= 0 ? '#16a34a' : '#dc2626', fontWeight: 700 }}>{h.adjustment >= 0 ? '+' : ''}{Number(h.adjustment).toFixed(3)} {h.unit}</span>
+                        <span style={{ color: '#6b7280', marginLeft: 8 }}>{h.reason}</span>
+                        {h.notes && <span style={{ color: '#9ca3af', marginLeft: 8 }}>— {h.notes}</span>}
+                      </div>
+                      <span style={{ color: '#9ca3af' }}>{new Date(h.created_at).toLocaleDateString('en-ZA')}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -101,6 +171,13 @@ export default function StockPage() {
   const [aiResults, setAIResults] = useState<{ name: string; qty: number; unit: string }[]>([])
   const [showAddItem, setShowAddItem] = useState(false)
   const [showInlineCat, setShowInlineCat] = useState(false)
+  const [adjustItem, setAdjustItem] = useState<StockItem | null>(null)
+  const [adjustQty, setAdjustQty] = useState('')
+  const [adjustMode, setAdjustMode] = useState<'set' | 'add' | 'subtract'>('set')
+  const [adjustReason, setAdjustReason] = useState('')
+  const [adjustNotes, setAdjustNotes] = useState('')
+  const [adjusting, setAdjusting] = useState(false)
+  const [adjustHistory, setAdjustHistory] = useState<StockAdjustment[]>([])
   const [newCatName, setNewCatName] = useState('')
   const [savingCat, setSavingCat] = useState(false)
   const [showAddPurchase, setShowAddPurchase] = useState(false)
@@ -362,6 +439,24 @@ export default function StockPage() {
 
   async function updateOrderStatus(id: string, status: string) {
     await supabase.from('stock_orders').update({ status }).eq('id', id); await loadAll()
+  }
+
+  async function saveAdjustment() {
+    if (!adjustItem || !adjustQty || !adjustReason) { alert('Please fill in quantity and reason'); return }
+    setAdjusting(true)
+    const qtyBefore = Number(adjustItem.current_qty || 0)
+    const entered = parseFloat(adjustQty) || 0
+    const qtyAfter = adjustMode === 'set' ? entered : adjustMode === 'add' ? qtyBefore + entered : Math.max(0, qtyBefore - entered)
+    const adjustment = qtyAfter - qtyBefore
+    await supabase.from('stock_items').update({ current_qty: qtyAfter }).eq('id', adjustItem.id)
+    await supabase.from('stock_adjustments').insert({ store_id: STORE_ID, stock_item_id: adjustItem.id, item_name: adjustItem.description || adjustItem.name, qty_before: qtyBefore, qty_after: qtyAfter, adjustment, unit: adjustItem.unit, reason: adjustReason, notes: adjustNotes })
+    setAdjustItem(null); setAdjustQty(''); setAdjustReason(''); setAdjustNotes(''); setAdjusting(false)
+    await loadAll()
+  }
+
+  async function loadAdjustHistory(itemId: string) {
+    const { data } = await supabase.from('stock_adjustments').select('*').eq('stock_item_id', itemId).order('created_at', { ascending: false }).limit(10)
+    setAdjustHistory((data || []) as StockAdjustment[])
   }
 
   async function saveItem() {
@@ -850,6 +945,7 @@ export default function StockPage() {
                                   })
                                   setShowAddItem(true)
                                 }} style={{ fontSize: '12px', color: '#1d4ed8', background: '#eff6ff', border: 'none', borderRadius: '8px', padding: '5px 10px', cursor: 'pointer', fontWeight: 600 }}>Edit</button>
+                                <button onClick={() => { setAdjustItem(item); setAdjustQty(''); setAdjustMode('set'); setAdjustReason(''); setAdjustNotes(''); loadAdjustHistory(item.id) }} style={{ fontSize: '12px', color: '#7c3aed', background: '#ede9fe', border: 'none', borderRadius: '8px', padding: '5px 10px', cursor: 'pointer', fontWeight: 600 }}>Adjust</button>
                                 <button onClick={() => deleteItem(item.id)} style={{ fontSize: '12px', color: '#dc2626', background: '#fee2e2', border: 'none', borderRadius: '8px', padding: '5px 8px', cursor: 'pointer', fontWeight: 700 }}>✕</button>
                               </div>
                             </td>
@@ -1169,6 +1265,75 @@ export default function StockPage() {
           <button onClick={saveSupplier} disabled={saving || !supplierForm.name} style={{ flex: 1, background: !supplierForm.name ? '#d1d5db' : '#1a5c38', color: 'white', border: 'none', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: 800, cursor: 'pointer' }}>{saving ? 'Saving…' : editSupplier ? 'Save Changes' : 'Add Supplier'}</button>
         </div>
       </Modal>
+      {adjustItem && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 3000, padding: 20 }} onClick={() => setAdjustItem(null)}>
+          <div style={{ background: '#fff', borderRadius: 20, width: 480, maxWidth: '100%', maxHeight: '80vh', overflow: 'auto' }} onClick={e => e.stopPropagation()}>
+            <div style={{ padding: '20px 24px 16px', borderBottom: '1px solid #f0f0f0' }}>
+              <div style={{ fontSize: 18, fontWeight: 800 }}>⚖️ Adjust Stock</div>
+              <div style={{ fontSize: 14, color: '#6b7280', marginTop: 2 }}>{adjustItem.description || adjustItem.name}</div>
+              <div style={{ marginTop: 8, display: 'inline-block', background: '#f3f4f6', borderRadius: 8, padding: '6px 12px', fontSize: 14 }}>Current qty: <strong>{Number(adjustItem.current_qty || 0).toFixed(3)} {adjustItem.unit}</strong></div>
+            </div>
+            <div style={{ padding: '20px 24px' }}>
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ fontSize: 12, fontWeight: 700, color: '#374151', display: 'block', marginBottom: 6 }}>Adjustment type</label>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  {(['set','add','subtract'] as const).map(mode => (
+                    <button key={mode} onClick={() => setAdjustMode(mode)} style={{ flex: 1, padding: '8px 4px', borderRadius: 8, border: `2px solid ${adjustMode === mode ? '#7c3aed' : '#e5e7eb'}`, background: adjustMode === mode ? '#ede9fe' : '#fff', color: adjustMode === mode ? '#7c3aed' : '#6b7280', fontWeight: 700, fontSize: 11, cursor: 'pointer' }}>
+                      {mode === 'set' ? 'Set exact qty' : mode === 'add' ? 'Add to current' : 'Subtract from current'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ fontSize: 12, fontWeight: 700, color: '#374151', display: 'block', marginBottom: 6 }}>{adjustMode === 'set' ? `New quantity (${adjustItem.unit})` : adjustMode === 'add' ? `Quantity to add (${adjustItem.unit})` : `Quantity to remove (${adjustItem.unit})`}</label>
+                <input type="number" step="0.001" min="0" autoFocus value={adjustQty} onChange={e => setAdjustQty(e.target.value)} placeholder="0.000" style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1.5px solid #e5e7eb', fontSize: 16, fontWeight: 700 }} />
+                {adjustQty && <div style={{ marginTop: 6, fontSize: 13, color: '#7c3aed', fontWeight: 600 }}>
+                  {adjustMode === 'set' && `Will set to ${parseFloat(adjustQty).toFixed(3)} ${adjustItem.unit} (${parseFloat(adjustQty) - Number(adjustItem.current_qty) >= 0 ? '+' : ''}${(parseFloat(adjustQty) - Number(adjustItem.current_qty)).toFixed(3)})`}
+                  {adjustMode === 'add' && `New qty: ${(Number(adjustItem.current_qty) + parseFloat(adjustQty)).toFixed(3)} ${adjustItem.unit}`}
+                  {adjustMode === 'subtract' && `New qty: ${Math.max(0, Number(adjustItem.current_qty) - parseFloat(adjustQty)).toFixed(3)} ${adjustItem.unit}`}
+                </div>}
+              </div>
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ fontSize: 12, fontWeight: 700, color: '#374151', display: 'block', marginBottom: 6 }}>Reason *</label>
+                <select value={adjustReason} onChange={e => setAdjustReason(e.target.value)} style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1.5px solid #e5e7eb', fontSize: 14 }}>
+                  <option value="">— Select reason —</option>
+                  <option value="Entry Error">Entry Error (GRV or count was wrong)</option>
+                  <option value="Count Correction">Physical count correction</option>
+                  <option value="Damaged">Damaged / unusable</option>
+                  <option value="Expired">Expired / thrown out</option>
+                  <option value="Theft">Theft / shrinkage</option>
+                  <option value="Internal Use">Internal use / staff meal</option>
+                  <option value="Transfer">Transfer to another location</option>
+                  <option value="Other">Other</option>
+                </select>
+              </div>
+              <div style={{ marginBottom: 20 }}>
+                <label style={{ fontSize: 12, fontWeight: 700, color: '#374151', display: 'block', marginBottom: 6 }}>Notes (optional)</label>
+                <input value={adjustNotes} onChange={e => setAdjustNotes(e.target.value)} placeholder="e.g. Pita bread GRV was entered twice" style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1.5px solid #e5e7eb', fontSize: 13 }} />
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={() => setAdjustItem(null)} style={{ flex: 1, padding: '11px', background: '#f3f4f6', color: '#374151', border: 'none', borderRadius: 10, fontWeight: 700, cursor: 'pointer' }}>Cancel</button>
+                <button onClick={saveAdjustment} disabled={adjusting || !adjustQty || !adjustReason} style={{ flex: 2, padding: '11px', background: (!adjustQty || !adjustReason) ? '#d1d5db' : '#7c3aed', color: '#fff', border: 'none', borderRadius: 10, fontWeight: 800, cursor: 'pointer', fontSize: 14 }}>{adjusting ? 'Saving…' : '✓ Apply Adjustment'}</button>
+              </div>
+              {adjustHistory.length > 0 && (
+                <div style={{ marginTop: 20, borderTop: '1px solid #f0f0f0', paddingTop: 14 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', marginBottom: 8 }}>Recent adjustments</div>
+                  {adjustHistory.map(h => (
+                    <div key={h.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid #f9fafb', fontSize: 12 }}>
+                      <div>
+                        <span style={{ color: h.adjustment >= 0 ? '#16a34a' : '#dc2626', fontWeight: 700 }}>{h.adjustment >= 0 ? '+' : ''}{Number(h.adjustment).toFixed(3)} {h.unit}</span>
+                        <span style={{ color: '#6b7280', marginLeft: 8 }}>{h.reason}</span>
+                        {h.notes && <span style={{ color: '#9ca3af', marginLeft: 8 }}>— {h.notes}</span>}
+                      </div>
+                      <span style={{ color: '#9ca3af' }}>{new Date(h.created_at).toLocaleDateString('en-ZA')}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
