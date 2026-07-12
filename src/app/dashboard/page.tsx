@@ -147,7 +147,7 @@ function DashboardContent() {
       ) : null
     },
     { icon: <span style={{ fontSize: '26px' }}>💰</span>, iconBg: '#eff6ff', title: 'Cash Up', subtitle: 'Daily cash reconciliation', href: '/cashup' },
-    { icon: <span style={{ fontSize: '26px' }}>📊</span>, iconBg: '#f5f3ff', title: 'Analytics & Reports', subtitle: 'View reports and compliance analytics', href: '/reports' },
+    { icon: <span style={{ fontSize: '26px' }}>📊</span>, iconBg: '#f5f3ff', title: 'Analytics & Reports', subtitle: 'P&L, breakeven, food cost, expense breakdown', href: '/analytics' },
     { icon: <span style={{ fontSize: '26px' }}>📈</span>, iconBg: '#ecfdf5', title: 'Income & Expenses', subtitle: 'Financial tracking and food cost', href: '/finances' },
     { icon: <span style={{ fontSize: '26px' }}>📋</span>, iconBg: '#fef3c7', title: 'Clipboard', subtitle: 'Unpaid bills and unsubmitted drafts', href: '/clipboard' },
     { icon: <span style={{ fontSize: '26px' }}>🌡️</span>, iconBg: '#fff1f2', title: 'Temperature Logs', subtitle: 'Equipment temperature monitoring', href: '/temperatures' },
