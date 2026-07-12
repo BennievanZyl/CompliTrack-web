@@ -121,7 +121,7 @@ export default function FinancesPage() {
   const [showGRV, setShowGRV] = useState(false)
   const [grvInvoice, setGrvInvoice] = useState<Invoice | null>(null)
   const [grvItems, setGrvItems] = useState<{id:string;description:string;unit:string;supplier:string|null}[]>([])
-  const [grvLines, setGrvLines] = useState<{stock_item_id:string;description:string;unit:string;qty_received:string;unit_cost:string;units_per_case:string;case_qty:string;case_price:string}[]>([])
+  const [grvLines, setGrvLines] = useState<{stock_item_id:string;description:string;unit:string;qty_received:string;unit_cost:string;units_per_case:string;case_qty:string;case_price:string;is_catch_weight:boolean}[]>([])
   const [savingGRV, setSavingGRV] = useState(false)
   const [editingValues, setEditingValues] = useState<Record<string, string>>({})
   const [scanning, setScanning] = useState(false)
@@ -525,7 +525,7 @@ export default function FinancesPage() {
     // Load supplier's stock items
     const { data: items } = await supabase
       .from('stock_items')
-      .select('id, description, unit, supplier')
+      .select('id, description, unit, supplier, is_catch_weight, cost_price, price')
       .eq('store_id', STORE_ID)
       .eq('is_active', true)
       .eq('supplier', inv.supplier)
@@ -567,6 +567,7 @@ export default function FinancesPage() {
           units_per_case: String(caseSize),
           case_qty: String(matchQty),
           case_price: matchUnitCost > 0 ? matchUnitCost.toFixed(2) : '',
+          is_catch_weight: !!(i as any).is_catch_weight,
         }
       }
 
@@ -579,7 +580,8 @@ export default function FinancesPage() {
         unit_cost: match && matchUnitCost > 0 ? matchUnitCost.toFixed(4) : String(Number(i.cost_price || i.price || 0) || ''),
         units_per_case: '',
         case_qty: '',
-        case_price: ''
+        case_price: '',
+        is_catch_weight: !!(i as any).is_catch_weight,
       }
     }))
     setShowGRV(true)
@@ -1747,8 +1749,18 @@ export default function FinancesPage() {
                              </button>
                            ) : <div />}
                          </div>
-                         {/* Catch weight helper — shows when stock is "each" but qty looks like kg (decimal) */}
-                         {['each','unit','units','pcs'].includes((line.unit||'').toLowerCase()) && parseFloat(line.qty_received) > 0 && (
+                         {/* Catch weight toggle button — shown on any "each" item */}
+                         {['each','unit','units','pcs'].includes((line.unit||'').toLowerCase()) && (
+                           <button
+                             onClick={() => setGrvLines(ls => ls.map((l,idx) => idx===i ? {...l, is_catch_weight: !l.is_catch_weight} : l))}
+                             style={{ marginTop: 6, fontSize: 11, fontWeight: 700, color: line.is_catch_weight ? '#92400e' : '#6b7280', background: line.is_catch_weight ? '#fef9c3' : '#f9fafb', border: `1px solid ${line.is_catch_weight ? '#fde68a' : '#e5e7eb'}`, borderRadius: 6, padding: '3px 10px', cursor: 'pointer' }}
+                             title="Toggle catch weight mode — use when item is bought by kg but counted by unit (e.g. whole chickens)"
+                           >
+                             ⚖️ {line.is_catch_weight ? 'Catch weight ON' : 'Catch weight?'}
+                           </button>
+                         )}
+                         {/* Catch weight helper panel — only when toggled on */}
+                         {line.is_catch_weight && (
                            <div style={{ marginTop: 8, background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, padding: '10px 12px' }}>
                              <div style={{ fontSize: 12, fontWeight: 700, color: '#92400e', marginBottom: 6 }}>
                                ⚖️ Catch Weight — stock tracked in <strong>{line.unit}</strong>
