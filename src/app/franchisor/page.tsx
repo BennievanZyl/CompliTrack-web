@@ -84,7 +84,7 @@ export default function FranchisorPage() {
         supabase.from('daily_sessions').select('id, status, duration_seconds').eq('store_id', store.id).eq('session_date', today).eq('session_type', 'daily').maybeSingle(),
         supabase.from('cash_ups').select('cash_up_total').eq('store_id', store.id).neq('status', 'draft').gte('cash_up_date', monthStart).lte('cash_up_date', today),
         supabase.from('expenses').select('amount').eq('store_id', store.id).gte('expense_date', monthStart).lte('expense_date', today),
-        supabase.from('stock_purchases').select('total_cost').eq('store_id', store.id).gte('purchase_date', monthStart).lte('purchase_date', today),
+        supabase.from('stock_purchases').select('total_cost, invoice_id').gte('purchase_date', monthStart).lte('purchase_date', today).eq('store_id', store.id),
         supabase.from('stock_wastage').select('total_cost').eq('store_id', store.id).gte('wastage_date', monthStart).lte('wastage_date', today),
         // Supplier bills (received/paid invoices) - the main source of operating expenses
         supabase.from('invoices').select('total_amount').eq('store_id', store.id).in('status', ['received', 'paid']).gte('invoice_date', monthStart).lte('invoice_date', today),
@@ -94,10 +94,16 @@ export default function FranchisorPage() {
       const sales_mtd_excl_vat = sales_mtd / 1.15;
       const quickExp = (expRes.data || []).reduce((s: number, r: any) => s + Number(r.amount || 0), 0);
       const invExp = (invoicesRes.data || []).reduce((s: number, r: any) => s + Number(r.total_amount || 0), 0);
+      // Food cost % needs every stock receipt, invoiced or not.
       const purchases = (purchRes.data || []).reduce((s: number, r: any) => s + Number(r.total_cost || 0), 0);
+      // But expenses_mtd must NOT double-count: GRV'ing a supplier invoice inserts a matching
+      // stock_purchases row for it, and invExp above already accounts for that invoice's total.
+      // Only purchases with no linked invoice (manual entries from the Purchases tab) are "new"
+      // money on top of invExp.
+      const nonInvoicedPurchases = (purchRes.data || []).filter((r: any) => !r.invoice_id).reduce((s: number, r: any) => s + Number(r.total_cost || 0), 0);
       const wastage = (wastRes.data || []).reduce((s: number, r: any) => s + Number(r.total_cost || 0), 0);
-      // Total expenses = quick expenses + supplier invoices + stock purchases
-      const expenses_mtd = quickExp + invExp + purchases;
+      // Total expenses = quick expenses + supplier invoices + non-invoiced stock purchases
+      const expenses_mtd = quickExp + invExp + nonInvoicedPurchases;
       const food_cost_pct = sales_mtd_excl_vat > 0 ? (purchases - wastage) / sales_mtd_excl_vat * 100 : null;
       if (!session) {
         statsMap[store.id] = { store_id: store.id, session_id: null, status: null, total: 0, completed: 0, uniform_photos: 0, temp_violations: 0, duration_seconds: null, sales_mtd, expenses_mtd, food_cost_pct };
