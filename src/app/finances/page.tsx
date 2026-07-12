@@ -1127,36 +1127,55 @@ export default function FinancesPage() {
                                     </select>
                                     {i === 0 && <button type="button" onClick={() => setShowQuickCat(true)} style={{ fontSize: '11px', color: '#1a5c38', background: 'none', border: 'none', cursor: 'pointer', padding: '2px 0', fontWeight: '600' }}>+ New Category</button>}
                                   </div>
-                                  {activeCols.map(col => (
-                                    <input
-                                      key={col.header}
-                                      type={col.type}
-                                      step={col.type === 'number' ? '0.01' : undefined}
-                                      placeholder={col.placeholder}
-                                      type="text"
-                                      inputMode="decimal"
-                                      value={col.type === 'number'
-                                        ? (Number(line[col.field]) > 0 || Number(line[col.field]) < 0
-                                            ? Number(line[col.field]).toFixed(2)
-                                            : '')
-                                        : (line[col.field] as string || '')}
-                                      onChange={e => {
-                                        // Allow free typing — only store if it's a valid partial number
-                                        const raw = e.target.value
-                                        if (col.type === 'number') {
-                                          // Accept digits, dot, comma (SA decimal separator)
-                                          updateLine(i, col.field, raw.replace(',', '.'))
-                                        } else {
+                                  {activeCols.map(col => {
+                                    // UoM column gets a dropdown for consistency
+                                    if (col.field === 'uom') return (
+                                      <select
+                                        key={col.header}
+                                        value={line.uom || ''}
+                                        onChange={e => updateLine(i, 'uom', e.target.value)}
+                                        style={{ ...inp, padding: '8px 10px' }}
+                                      >
+                                        <option value="">— select —</option>
+                                        {['each','kg','g','L','ml','box','case','bag','bottle','can','tray','bunch','carton','pkt','pair','roll','sheet','set'].map(u => <option key={u} value={u}>{u}</option>)}
+                                      </select>
+                                    )
+                                    // Number fields: show raw value while typing, format on blur only
+                                    if (col.type === 'number') return (
+                                      <input
+                                        key={col.header}
+                                        type="text"
+                                        inputMode="decimal"
+                                        placeholder={col.placeholder}
+                                        // Show raw number string — no toFixed during editing
+                                        defaultValue={Number(line[col.field]) > 0 || Number(line[col.field]) < 0 ? String(line[col.field]) : ''}
+                                        key={`${col.header}-${i}-${line[col.field]}`}
+                                        onChange={e => {
+                                          const raw = e.target.value.replace(',', '.')
                                           updateLine(i, col.field, raw)
-                                        }
-                                      }}
-                                      onBlur={col.type === 'number' ? (e => {
-                                        const val = parseFloat(e.target.value.replace(',', '.'))
-                                        if (!isNaN(val)) updateLine(i, col.field, val)
-                                      }) : undefined}
-                                      style={{ ...inp, padding: '8px 10px' }}
-                                    />
-                                  ))}
+                                        }}
+                                        onBlur={e => {
+                                          const val = parseFloat(e.target.value.replace(',', '.'))
+                                          if (!isNaN(val)) {
+                                            updateLine(i, col.field, val)
+                                            e.target.value = val.toFixed(2)
+                                          }
+                                        }}
+                                        style={{ ...inp, padding: '8px 10px' }}
+                                      />
+                                    )
+                                    // Text fields: controlled as normal
+                                    return (
+                                      <input
+                                        key={col.header}
+                                        type="text"
+                                        placeholder={col.placeholder}
+                                        value={line[col.field] as string || ''}
+                                        onChange={e => updateLine(i, col.field, e.target.value)}
+                                        style={{ ...inp, padding: '8px 10px' }}
+                                      />
+                                    )
+                                  })}
                                   <button onClick={() => removeLine(i)} disabled={invLines.length === 1}
                                     style={{ background: '#fef2f2', color: '#dc2626', border: 'none', borderRadius: 6, padding: '8px 12px', cursor: 'pointer', fontSize: 16, fontWeight: 700 }}>×</button>
                                 </div>
