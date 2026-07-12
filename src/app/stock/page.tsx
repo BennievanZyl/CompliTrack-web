@@ -845,9 +845,7 @@ export default function StockPage() {
                             </td>
                             <td style={{ padding: '12px 16px', fontSize: '13px', color: '#374151' }}>{formatCurrency(Number(item.cost_price) || Number(item.price) || 0)}</td>
                             <td style={{ padding: '12px 16px', fontSize: '13px', color: '#374151' }}>
-                              {item.is_catch_weight
-                                ? <span title={`R${item.kg_price || 0}/kg x ${item.avg_weight_kg || 0}kg`} style={{ cursor: 'help' }}>{formatCurrency(Number(item.price || 0))} ⚖️</span>
-                                : formatCurrency(Number(item.price || 0))}
+                              {item.par_level ? `${Number(item.par_level)} ${item.unit}` : '—'}
                             </td>
                             <td style={{ padding: '12px 16px' }}>
                               <div style={{ display: 'flex', gap: '6px' }}>
