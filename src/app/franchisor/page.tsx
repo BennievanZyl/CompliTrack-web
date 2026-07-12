@@ -89,10 +89,11 @@ export default function FranchisorPage() {
       ]);
       const session = sessionRes.data;
       const sales_mtd = (salesRes.data || []).reduce((s: number, r: any) => s + Number(r.cash_up_total || 0), 0);
+      const sales_mtd_excl_vat = sales_mtd / 1.15; // Convert to ex-VAT for accurate food cost %
       const expenses_mtd = (expRes.data || []).reduce((s: number, r: any) => s + Number(r.amount || 0), 0);
       const purchases = (purchRes.data || []).reduce((s: number, r: any) => s + Number(r.total_cost || 0), 0);
       const wastage = (wastRes.data || []).reduce((s: number, r: any) => s + Number(r.total_cost || 0), 0);
-      const food_cost_pct = sales_mtd > 0 ? (purchases - wastage) / sales_mtd * 100 : null;
+      const food_cost_pct = sales_mtd_excl_vat > 0 ? (purchases - wastage) / sales_mtd_excl_vat * 100 : null;
       if (!session) {
         statsMap[store.id] = { store_id: store.id, session_id: null, status: null, total: 0, completed: 0, uniform_photos: 0, temp_violations: 0, duration_seconds: null, sales_mtd, expenses_mtd, food_cost_pct };
         return;
