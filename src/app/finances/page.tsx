@@ -123,6 +123,7 @@ export default function FinancesPage() {
   const [grvItems, setGrvItems] = useState<{id:string;description:string;unit:string;supplier:string|null}[]>([])
   const [grvLines, setGrvLines] = useState<{stock_item_id:string;description:string;unit:string;qty_received:string;unit_cost:string;units_per_case:string;case_qty:string;case_price:string;is_catch_weight:boolean}[]>([])
   const [savingGRV, setSavingGRV] = useState(false)
+  const [redoingGRVId, setRedoingGRVId] = useState<string | null>(null)
   const [editingValues, setEditingValues] = useState<Record<string, string>>({})
   const [scanning, setScanning] = useState(false)
   const [scanError, setScanError] = useState('')
@@ -648,6 +649,27 @@ export default function FinancesPage() {
     setGrvInvoice(null)
     setSavingGRV(false)
     load()
+  }
+
+  // Re-do GRV: reverses the stock quantities/cost previously recorded from this invoice's
+  // GRV (without touching the invoice itself), then reopens Receive Goods so it can be
+  // re-entered correctly. Fixes double-GRV and wrong-quantity mistakes without having to
+  // delete and re-submit the whole invoice.
+  async function redoGRV(inv: Invoice) {
+    if (!confirm(`Re-do GRV for ${inv.supplier}${inv.invoice_number ? ' #' + inv.invoice_number : ''} (${inv.invoice_date})?\n\nThis reverses the stock quantities and cost already received against this invoice, then reopens Receive Goods so you can re-enter it. The invoice itself is not resubmitted.`)) return
+    setRedoingGRVId(inv.id)
+    const { data: existing, error } = await supabase.from('stock_purchases').select('id, stock_item_id, quantity').eq('invoice_id', inv.id)
+    if (error) { alert('Error loading previous GRV: ' + error.message); setRedoingGRVId(null); return }
+    if (existing && existing.length > 0) {
+      // Reverse the stock balance increments from the original GRV
+      await Promise.all(existing.filter(p => p.stock_item_id).map(p =>
+        supabase.rpc('increment_stock_qty', { item_id: p.stock_item_id, amount: -Number(p.quantity) })
+      ))
+      // Remove the old purchase records so they aren't double-counted alongside the redo
+      await supabase.from('stock_purchases').delete().eq('invoice_id', inv.id)
+    }
+    setRedoingGRVId(null)
+    await openGRV(inv)
   }
 
   async function scanInvoice(file: File, supplierArg?: string) {
@@ -1325,6 +1347,9 @@ export default function FinancesPage() {
                         <div style={{ display: 'flex', gap: 6 }}>
                           {(inv.status === 'draft' || inv.status === 'approved') && <button onClick={() => openGRV(inv)} style={smBtn('#fef3c7', '#d97706')}>📦 Receive Goods</button>}
                           {inv.status === 'received' && <button onClick={() => updateInvoiceStatus(inv.id, 'paid')} style={smBtn('#eff6ff', '#2563eb')}>Mark Paid</button>}
+                          {(inv.status === 'received' || inv.status === 'paid') && (suppliers.find(s => s.name === inv.supplier)?.delivers_stock !== false) && (
+                            <button onClick={() => redoGRV(inv)} disabled={redoingGRVId === inv.id} style={smBtn('#faf5ff', '#9333ea')}>{redoingGRVId === inv.id ? 'Reversing…' : '↻ Re-do GRV'}</button>
+                          )}
                           <button onClick={() => openEditInvoice(inv)} style={smBtn('#f3f4f6', '#374151')}>Edit</button>
                           <button onClick={() => setExpandedInv(expandedInv === inv.id ? null : inv.id)} style={smBtn('#f3f4f6', '#374151')}>
                             {expandedInv === inv.id ? '▲ Hide' : '▼ Lines'}
