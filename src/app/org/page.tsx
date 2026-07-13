@@ -157,7 +157,8 @@ export default function OrgPage() {
         supabase.from('cash_ups').select('cash_up_total').eq('store_id', store.id).neq('status', 'draft').gte('cash_up_date', monthStart).lte('cash_up_date', today),
         supabase.from('expenses').select('amount').eq('store_id', store.id).gte('expense_date', monthStart).lte('expense_date', today),
         supabase.from('invoices').select('total_amount').eq('store_id', store.id).in('status', ['received', 'paid']).gte('invoice_date', monthStart).lte('invoice_date', today),
-        supabase.from('stock_purchases').select('total_cost').eq('store_id', store.id).gte('purchase_date', monthStart).lte('purchase_date', today),
+        // stock_purchases used ONLY for food cost % — NOT included in expenses (invoices already capture that spend)
+        supabase.from('stock_purchases').select('quantity, unit_cost').eq('store_id', store.id).gte('purchase_date', monthStart).lte('purchase_date', today),
         supabase.from('stock_wastage').select('total_cost').eq('store_id', store.id).gte('wastage_date', monthStart).lte('wastage_date', today),
       ]);
       const session = sessionRes.data;
@@ -165,9 +166,11 @@ export default function OrgPage() {
       const sales_excl_vat = sales_mtd / 1.15;
       const quickExp = (expRes.data || []).reduce((s: number, r: any) => s + Number(r.amount || 0), 0);
       const invExp = (invoicesRes.data || []).reduce((s: number, r: any) => s + Number(r.total_amount || 0), 0);
-      const purchases = (purchRes.data || []).reduce((s: number, r: any) => s + Number(r.total_cost || 0), 0);
+      // purchases = qty × unit_cost (no total_cost column on stock_purchases)
+      const purchases = (purchRes.data || []).reduce((s: number, r: any) => s + (Number(r.quantity || 0) * Number(r.unit_cost || 0)), 0);
       const wastage = (wastRes.data || []).reduce((s: number, r: any) => s + Number(r.total_cost || 0), 0);
-      const expenses_mtd = quickExp + invExp + purchases;
+      // Expenses = supplier invoices + quick expenses (NOT stock_purchases — already captured in invoices)
+      const expenses_mtd = quickExp + invExp;
       const food_cost_pct = sales_excl_vat > 0 ? (purchases - wastage) / sales_excl_vat * 100 : null;
 
       if (!session) {
