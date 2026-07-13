@@ -794,9 +794,10 @@ export default function StockPage() {
                 <button onClick={() => { setEditItem(null); setItemForm({ name: '', description: '', category_id: categories[0]?.id || '', unit: 'each', cost_price: '', par_level: '', supplier: 'Other', on_daily_sheet: false }); setShowAddItem(true) }} style={{ padding: '10px 18px', background: '#1a5c38', color: 'white', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: 800, cursor: 'pointer' }}>+ Add Item</button>
                 </div>
               </div>
-              {/* Supplier filter */}
+              {/* Supplier filter — excludes non-stock suppliers (e.g. rent/landlord) since
+                  they never have stock items to filter by */}
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                {['All', ...suppliers.map(s => s.name)].map(s => (
+                {['All', ...suppliers.filter(s => s.delivers_stock !== false).map(s => s.name)].map(s => (
                   <button key={s} onClick={() => setSupplierFilter(s)}
                     style={{ padding: '6px 14px', borderRadius: '20px', fontSize: '12px', fontWeight: 600, cursor: 'pointer', border: 'none',
                       background: supplierFilter === s ? '#1a5c38' : '#f3f4f6', color: supplierFilter === s ? '#fff' : '#374151' }}>
