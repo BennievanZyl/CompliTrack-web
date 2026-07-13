@@ -132,14 +132,13 @@ export default function StockPage() {
   const [savingCat, setSavingCat] = useState(false)
   const [showAddPurchase, setShowAddPurchase] = useState(false)
   const [showAddWastage, setShowAddWastage] = useState(false)
-  const [showAddIssue, setShowAddIssue] = useState(false)
   const [showAddOrder, setShowAddOrder] = useState(false)
   const [showAddCategory, setShowAddCategory] = useState(false)
   const [editItem, setEditItem] = useState<StockItem | null>(null)
   const [itemForm, setItemForm] = useState({ name: '', description: '', category_id: 'goods', unit: 'each', cost_price: '', par_level: '', supplier: 'Other', on_daily_sheet: false, is_catch_weight: false, kg_price: '', avg_weight_kg: '', is_prepped_item: false, parent_item_id: '', portion_size: '' })
   const [purchaseForm, setPurchaseForm] = useState({ purchase_date: new Date().toISOString().split('T')[0], supplier_name: '', stock_item_id: '', item_name: '', quantity: '', unit: 'each', unit_cost: '', invoice_number: '' })
   const [wastageForm, setWastageForm] = useState({ wastage_date: new Date().toISOString().split('T')[0], stock_item_id: '', item_name: '', quantity: '', unit: 'each', unit_cost: '', reason: 'Expired' })
-  const [issueForm, setIssueForm] = useState({ issue_date: new Date().toISOString().split('T')[0], stock_item_id: '', item_name: '', quantity: '', unit: 'each', issued_to: 'Kitchen', notes: '', prepped_item_id: '', prepped_qty: '' })
+  const [issueForm, setIssueForm] = useState<{ stock_item_id: string; item_name: string; quantity: string; unit: string; issued_to: string; notes: string; preppedBreakdown: Record<string, string> }>({ stock_item_id: '', item_name: '', quantity: '', unit: 'each', issued_to: 'Kitchen', notes: '', preppedBreakdown: {} })
   const [issueCategory, setIssueCategory] = useState<string | null>(null)
   const [issueSearch, setIssueSearch] = useState('')
   const [orderForm, setOrderForm] = useState({ supplier_name: '', order_date: new Date().toISOString().split('T')[0], expected_delivery: '', notes: '' })
@@ -297,19 +296,26 @@ export default function StockPage() {
   async function saveIssue() {
     if (!issueForm.stock_item_id || !(parseFloat(issueForm.quantity || '0') > 0)) { alert('Select an item and quantity'); return }
     setSaving(true)
-    const preppedQty = issueForm.prepped_item_id ? parseFloat(issueForm.prepped_qty || '0') : 0
+    const allocations = Object.entries(issueForm.preppedBreakdown)
+      .map(([childId, val]) => ({ childId, portions: parseFloat(val || '0') }))
+      .filter(a => a.portions > 0)
+    const breakdown = allocations.map(a => {
+      const child = items.find(i => i.id === a.childId)
+      return { item_id: a.childId, name: child?.description || child?.name || '', portions: a.portions }
+    })
     await supabase.from('stock_issues').insert({
-      store_id: STORE_ID, issue_date: issueForm.issue_date, stock_item_id: issueForm.stock_item_id || null,
+      store_id: STORE_ID, issue_date: new Date().toISOString(), stock_item_id: issueForm.stock_item_id || null,
       item_name: issueForm.item_name || items.find(i => i.id === issueForm.stock_item_id)?.description || null,
       quantity: parseFloat(issueForm.quantity || '0'), unit: issueForm.unit, issued_to: issueForm.issued_to, notes: issueForm.notes || null,
-      prepped_item_id: issueForm.prepped_item_id || null, prepped_qty: preppedQty > 0 ? preppedQty : null
+      prepped_breakdown: breakdown.length ? breakdown : null
     })
     await supabase.rpc('increment_stock_qty', { item_id: issueForm.stock_item_id, amount: -parseFloat(issueForm.quantity) })
-    if (issueForm.prepped_item_id && preppedQty > 0) {
-      await supabase.rpc('increment_stock_qty', { item_id: issueForm.prepped_item_id, amount: preppedQty })
+    for (const a of allocations) {
+      await supabase.rpc('increment_stock_qty', { item_id: a.childId, amount: a.portions })
     }
-    setIssueForm({ issue_date: new Date().toISOString().split('T')[0], stock_item_id: '', item_name: '', quantity: '', unit: 'each', issued_to: 'Kitchen', notes: '', prepped_item_id: '', prepped_qty: '' })
-    setShowAddIssue(false); await loadAll(); setSaving(false)
+    setIssueForm({ stock_item_id: '', item_name: '', quantity: '', unit: 'each', issued_to: 'Kitchen', notes: '', preppedBreakdown: {} })
+    setIssueCategory(null); setIssueSearch('')
+    await loadAll(); setSaving(false)
   }
 
   function generateOrderText(supplierName: string, orderDate: string, deliveryDate: string, notes: string) {
@@ -689,22 +695,131 @@ export default function StockPage() {
           {/* WASTAGE */}
           {tab === 'issues' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div><div style={{ fontSize: '18px', fontWeight: 800, color: '#111' }}>Issue Stock</div><div style={{ fontSize: '13px', color: '#9ca3af' }}>Record stock taken out for use — kitchen, prep, front counter etc.</div></div>
-                <button onClick={() => { setIssueCategory(null); setIssueSearch(''); setIssueForm(f => ({ ...f, stock_item_id: '', item_name: '', quantity: '', prepped_item_id: '', prepped_qty: '', notes: '' })); setShowAddIssue(true) }} style={{ padding: '10px 20px', background: '#1a5c38', color: 'white', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: 800, cursor: 'pointer' }}>+ Issue Stock</button>
-              </div>
-              <div style={{ background: 'white', borderRadius: '20px', border: '1.5px solid #eef2ee', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
-                {issues.length === 0 ? <div style={{ padding: '48px', textAlign: 'center', color: '#9ca3af' }}>No stock issued yet</div> : (<>
-                  {(issues || []).map(iss => (
-                    <div key={iss.id} style={{ display: 'flex', alignItems: 'center', gap: '16px', padding: '14px 20px', borderTop: '1px solid #f3f4f6' }}>
-                      <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: '#dcfce7', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px', flexShrink: 0 }}>🍳</div>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontWeight: 700, fontSize: '14px', color: '#111' }}>{iss.item_name}</div>
-                        <div style={{ fontSize: '12px', color: '#9ca3af' }}>{iss.quantity} {iss.unit} → {iss.issued_to} • {formatDate(iss.issue_date)}{iss.notes ? ' • ' + iss.notes : ''}</div>
+              <div><div style={{ fontSize: '18px', fontWeight: 800, color: '#111' }}>Issue Stock</div><div style={{ fontSize: '13px', color: '#9ca3af' }}>Record stock taken out for use — kitchen, prep, front counter etc.</div></div>
+              <div style={{ background: 'white', borderRadius: '20px', border: '1.5px solid #eef2ee', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
+                {!issueForm.stock_item_id ? (
+                  <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                    <input
+                      value={issueSearch}
+                      onChange={e => { setIssueSearch(e.target.value); if (e.target.value.trim()) setIssueCategory(null) }}
+                      placeholder="Search items..."
+                      style={INPUT}
+                    />
+                    {issueSearch.trim() ? (
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '12px' }}>
+                        {items.filter(i => (i.description || i.name || '').toLowerCase().includes(issueSearch.toLowerCase())).map(item => {
+                          const cat = categories.find(c => c.id === item.category)
+                          return (
+                            <button key={item.id} onClick={() => setIssueForm(f => ({ ...f, stock_item_id: item.id, item_name: item.description || item.name || '', unit: item.unit || f.unit, preppedBreakdown: {} }))}
+                              style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', padding: '16px 10px', border: '1.5px solid #e5e7eb', borderRadius: '14px', background: 'white', cursor: 'pointer', textAlign: 'center' as const }}>
+                              <div style={{ fontSize: '30px' }}>{getCategoryIcon(cat?.name || '')}</div>
+                              <div style={{ fontSize: '12px', fontWeight: 700, color: '#111827' }}>{item.description || item.name}</div>
+                              <div style={{ fontSize: '11px', color: '#6b7280' }}>{Number(item.current_qty || 0)} {item.unit}</div>
+                            </button>
+                          )
+                        })}
                       </div>
+                    ) : !issueCategory ? (
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '12px' }}>
+                        {categories.map(cat => {
+                          const count = items.filter(i => i.category === cat.id).length
+                          if (!count) return null
+                          return (
+                            <button key={cat.id} onClick={() => setIssueCategory(cat.id)}
+                              style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', padding: '22px 10px', border: '1.5px solid #e5e7eb', borderRadius: '16px', background: '#f9fafb', cursor: 'pointer', textAlign: 'center' as const }}>
+                              <div style={{ fontSize: '36px' }}>{getCategoryIcon(cat.name)}</div>
+                              <div style={{ fontSize: '14px', fontWeight: 800, color: '#1a5c38' }}>{cat.name}</div>
+                              <div style={{ fontSize: '11px', color: '#6b7280' }}>{count} item{count === 1 ? '' : 's'}</div>
+                            </button>
+                          )
+                        })}
+                      </div>
+                    ) : (
+                      <div>
+                        <button onClick={() => setIssueCategory(null)} style={{ background: 'none', border: 'none', color: '#1a5c38', fontWeight: 700, fontSize: '13px', cursor: 'pointer', padding: 0, marginBottom: '14px' }}>&larr; Categories</button>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '12px' }}>
+                          {items.filter(i => i.category === issueCategory).map(item => (
+                            <button key={item.id} onClick={() => setIssueForm(f => ({ ...f, stock_item_id: item.id, item_name: item.description || item.name || '', unit: item.unit || f.unit, preppedBreakdown: {} }))}
+                              style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', padding: '16px 10px', border: '1.5px solid #e5e7eb', borderRadius: '14px', background: 'white', cursor: 'pointer', textAlign: 'center' as const }}>
+                              <div style={{ fontSize: '30px' }}>{getCategoryIcon(categories.find(c => c.id === issueCategory)?.name || '')}</div>
+                              <div style={{ fontSize: '12px', fontWeight: 700, color: '#111827' }}>{item.description || item.name}</div>
+                              <div style={{ fontSize: '11px', color: '#6b7280' }}>{Number(item.current_qty || 0)} {item.unit}</div>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <>
+                    <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '14px', maxWidth: '520px' }}>
+                      <button onClick={() => setIssueForm(f => ({ ...f, stock_item_id: '', preppedBreakdown: {} }))} style={{ background: 'none', border: 'none', color: '#1a5c38', fontWeight: 700, fontSize: '13px', cursor: 'pointer', padding: 0, alignSelf: 'flex-start' }}>&larr; Change Item</button>
+                      {(() => {
+                        const sel = items.find(i => i.id === issueForm.stock_item_id)
+                        const cat = categories.find(c => c.id === sel?.category)
+                        return (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', background: '#f0fdf4', border: '1.5px solid #bbf7d0', borderRadius: '12px', padding: '12px 16px' }}>
+                            <div style={{ fontSize: '28px' }}>{getCategoryIcon(cat?.name || '')}</div>
+                            <div>
+                              <div style={{ fontWeight: 800, fontSize: '14px', color: '#111827' }}>{issueForm.item_name}</div>
+                              <div style={{ fontSize: '12px', color: '#6b7280' }}>On hand: <strong>{Number(sel?.current_qty || 0)} {sel?.unit}</strong></div>
+                            </div>
+                          </div>
+                        )
+                      })()}
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                        <div><label style={LABEL}>Quantity Issued</label><input type="number" step="0.1" value={issueForm.quantity} onChange={e => setIssueForm(f => ({ ...f, quantity: e.target.value }))} placeholder="0" style={INPUT} autoFocus /></div>
+                        <div><label style={LABEL}>Unit</label><select value={issueForm.unit} onChange={e => setIssueForm(f => ({ ...f, unit: e.target.value }))} style={INPUT}>{UNITS.map(u => <option key={u}>{u}</option>)}</select></div>
+                      </div>
+                      {(() => {
+                        const children = items.filter(i => i.parent_item_id === issueForm.stock_item_id)
+                        if (!children.length) return null
+                        const parentUnit = items.find(i => i.id === issueForm.stock_item_id)?.unit || ''
+                        const portionedWeight = children.reduce((sum, c) => sum + (parseFloat(issueForm.preppedBreakdown[c.id] || '0') * Number(c.portion_size || 0)), 0)
+                        return (
+                          <div style={{ background: '#f5f3ff', border: '1.5px solid #ddd6fe', borderRadius: '12px', padding: '14px' }}>
+                            <div style={{ fontWeight: 700, fontSize: '13px', color: '#6d28d9', marginBottom: '4px' }}>Prepped Into (optional)</div>
+                            <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '10px' }}>How many of each portion did this make? Leave blank for any you didn't prep.</div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                              {children.map(c => (
+                                <div key={c.id} style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '10px', alignItems: 'center' }}>
+                                  <div style={{ fontSize: '13px', fontWeight: 600, color: '#374151' }}>{c.description || c.name} <span style={{ color: '#9ca3af', fontWeight: 400 }}>({c.portion_size}{parentUnit} each)</span></div>
+                                  <input type="number" step="1" min="0" value={issueForm.preppedBreakdown[c.id] || ''} onChange={e => setIssueForm(f => ({ ...f, preppedBreakdown: { ...f.preppedBreakdown, [c.id]: e.target.value } }))} placeholder="0 portions" style={INPUT} />
+                                </div>
+                              ))}
+                            </div>
+                            {portionedWeight > 0 && (
+                              <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '10px' }}>
+                                Portioned: <strong>{portionedWeight.toFixed(2)}{parentUnit}</strong> of {parseFloat(issueForm.quantity || '0').toFixed(2)}{parentUnit} issued
+                                {portionedWeight > parseFloat(issueForm.quantity || '0') && <span style={{ color: '#dc2626', fontWeight: 700 }}> — exceeds quantity issued</span>}
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })()}
+                      <div><label style={LABEL}>Issued To</label><select value={issueForm.issued_to} onChange={e => setIssueForm(f => ({ ...f, issued_to: e.target.value }))} style={INPUT}>{ISSUE_DESTINATIONS.map(d => <option key={d}>{d}</option>)}</select></div>
+                      <div><label style={LABEL}>Notes</label><input value={issueForm.notes} onChange={e => setIssueForm(f => ({ ...f, notes: e.target.value }))} placeholder="Optional" style={INPUT} /></div>
+                      <button onClick={saveIssue} disabled={saving} style={{ background: '#1a5c38', color: 'white', border: 'none', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: 800, cursor: 'pointer', marginTop: '4px' }}>Issue Stock</button>
                     </div>
-                  ))}
-                </>)}
+                  </>
+                )}
+              </div>
+
+              <div>
+                <div style={{ fontWeight: 800, fontSize: '15px', color: '#111', marginBottom: '10px' }}>History</div>
+                <div style={{ background: 'white', borderRadius: '20px', border: '1.5px solid #eef2ee', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
+                  {issues.length === 0 ? <div style={{ padding: '48px', textAlign: 'center', color: '#9ca3af' }}>No stock issued yet</div> : (<>
+                    {(issues || []).map(iss => (
+                      <div key={iss.id} style={{ display: 'flex', alignItems: 'center', gap: '16px', padding: '14px 20px', borderTop: '1px solid #f3f4f6' }}>
+                        <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: '#dcfce7', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px', flexShrink: 0 }}>🍳</div>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontWeight: 700, fontSize: '14px', color: '#111' }}>{iss.item_name}</div>
+                          <div style={{ fontSize: '12px', color: '#9ca3af' }}>{iss.quantity} {iss.unit} → {iss.issued_to} • {formatDate(iss.issue_date)}{iss.notes ? ' • ' + iss.notes : ''}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </>)}
+                </div>
               </div>
             </div>
           )}
@@ -1216,118 +1331,6 @@ export default function StockPage() {
         </div>
       </Modal>
 
-      {/* Issue Stock Modal */}
-      <Modal show={showAddIssue} onClose={() => setShowAddIssue(false)} title="Issue Stock" maxWidth="640px">
-        {!issueForm.stock_item_id ? (
-          <div style={{ padding: '20px 28px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-            <input
-              value={issueSearch}
-              onChange={e => { setIssueSearch(e.target.value); if (e.target.value.trim()) setIssueCategory(null) }}
-              placeholder="Search items..."
-              style={INPUT}
-            />
-            {issueSearch.trim() ? (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px', maxHeight: '420px', overflowY: 'auto' }}>
-                {items.filter(i => (i.description || i.name || '').toLowerCase().includes(issueSearch.toLowerCase())).map(item => {
-                  const cat = categories.find(c => c.id === item.category)
-                  return (
-                    <button key={item.id} onClick={() => setIssueForm(f => ({ ...f, stock_item_id: item.id, item_name: item.description || item.name || '', unit: item.unit || f.unit, prepped_item_id: '', prepped_qty: '' }))}
-                      style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', padding: '14px 8px', border: '1.5px solid #e5e7eb', borderRadius: '14px', background: 'white', cursor: 'pointer', textAlign: 'center' as const }}>
-                      <div style={{ fontSize: '28px' }}>{getCategoryIcon(cat?.name || '')}</div>
-                      <div style={{ fontSize: '12px', fontWeight: 700, color: '#111827' }}>{item.description || item.name}</div>
-                      <div style={{ fontSize: '11px', color: '#6b7280' }}>{Number(item.current_qty || 0)} {item.unit}</div>
-                    </button>
-                  )
-                })}
-              </div>
-            ) : !issueCategory ? (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px' }}>
-                {categories.map(cat => {
-                  const count = items.filter(i => i.category === cat.id).length
-                  if (!count) return null
-                  return (
-                    <button key={cat.id} onClick={() => setIssueCategory(cat.id)}
-                      style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', padding: '18px 8px', border: '1.5px solid #e5e7eb', borderRadius: '14px', background: '#f9fafb', cursor: 'pointer', textAlign: 'center' as const }}>
-                      <div style={{ fontSize: '32px' }}>{getCategoryIcon(cat.name)}</div>
-                      <div style={{ fontSize: '13px', fontWeight: 800, color: '#1a5c38' }}>{cat.name}</div>
-                      <div style={{ fontSize: '11px', color: '#6b7280' }}>{count} item{count === 1 ? '' : 's'}</div>
-                    </button>
-                  )
-                })}
-              </div>
-            ) : (
-              <div>
-                <button onClick={() => setIssueCategory(null)} style={{ background: 'none', border: 'none', color: '#1a5c38', fontWeight: 700, fontSize: '13px', cursor: 'pointer', padding: 0, marginBottom: '12px' }}>&larr; Categories</button>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px', maxHeight: '420px', overflowY: 'auto' }}>
-                  {items.filter(i => i.category === issueCategory).map(item => (
-                    <button key={item.id} onClick={() => setIssueForm(f => ({ ...f, stock_item_id: item.id, item_name: item.description || item.name || '', unit: item.unit || f.unit, prepped_item_id: '', prepped_qty: '' }))}
-                      style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', padding: '14px 8px', border: '1.5px solid #e5e7eb', borderRadius: '14px', background: 'white', cursor: 'pointer', textAlign: 'center' as const }}>
-                      <div style={{ fontSize: '28px' }}>{getCategoryIcon(categories.find(c => c.id === issueCategory)?.name || '')}</div>
-                      <div style={{ fontSize: '12px', fontWeight: 700, color: '#111827' }}>{item.description || item.name}</div>
-                      <div style={{ fontSize: '11px', color: '#6b7280' }}>{Number(item.current_qty || 0)} {item.unit}</div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        ) : (
-          <>
-            <div style={{ padding: '20px 28px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              <button onClick={() => setIssueForm(f => ({ ...f, stock_item_id: '', prepped_item_id: '', prepped_qty: '' }))} style={{ background: 'none', border: 'none', color: '#1a5c38', fontWeight: 700, fontSize: '13px', cursor: 'pointer', padding: 0, alignSelf: 'flex-start' }}>&larr; Change Item</button>
-              {(() => {
-                const sel = items.find(i => i.id === issueForm.stock_item_id)
-                const cat = categories.find(c => c.id === sel?.category)
-                return (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', background: '#f0fdf4', border: '1.5px solid #bbf7d0', borderRadius: '12px', padding: '12px 16px' }}>
-                    <div style={{ fontSize: '28px' }}>{getCategoryIcon(cat?.name || '')}</div>
-                    <div>
-                      <div style={{ fontWeight: 800, fontSize: '14px', color: '#111827' }}>{issueForm.item_name}</div>
-                      <div style={{ fontSize: '12px', color: '#6b7280' }}>On hand: <strong>{Number(sel?.current_qty || 0)} {sel?.unit}</strong></div>
-                    </div>
-                  </div>
-                )
-              })()}
-              <div><label style={LABEL}>Date</label><input type="date" value={issueForm.issue_date} onChange={e => setIssueForm(f => ({ ...f, issue_date: e.target.value }))} style={INPUT} /></div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                <div><label style={LABEL}>Quantity</label><input type="number" step="0.1" value={issueForm.quantity} onChange={e => setIssueForm(f => ({ ...f, quantity: e.target.value }))} placeholder="0" style={INPUT} autoFocus /></div>
-                <div><label style={LABEL}>Unit</label><select value={issueForm.unit} onChange={e => setIssueForm(f => ({ ...f, unit: e.target.value }))} style={INPUT}>{UNITS.map(u => <option key={u}>{u}</option>)}</select></div>
-              </div>
-              {(() => {
-                const children = items.filter(i => i.parent_item_id === issueForm.stock_item_id)
-                if (!children.length) return null
-                const parentUnit = items.find(i => i.id === issueForm.stock_item_id)?.unit || ''
-                return (
-                  <div style={{ background: '#f5f3ff', border: '1.5px solid #ddd6fe', borderRadius: '12px', padding: '14px' }}>
-                    <div style={{ fontWeight: 700, fontSize: '13px', color: '#6d28d9', marginBottom: '4px' }}>Prepped Into (optional)</div>
-                    <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '10px' }}>Portioning this into an Instore item? Record it to credit that item's stock.</div>
-                    <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '10px' }}>
-                      <div><label style={LABEL}>Prepped Into</label>
-                        <select value={issueForm.prepped_item_id} onChange={e => {
-                          const child = items.find(i => i.id === e.target.value)
-                          const qty = parseFloat(issueForm.quantity || '0')
-                          const suggested = child?.portion_size ? qty / Number(child.portion_size) : 0
-                          setIssueForm(f => ({ ...f, prepped_item_id: e.target.value, prepped_qty: suggested > 0 ? String(Math.floor(suggested)) : '' }))
-                        }} style={INPUT}>
-                          <option value="">&mdash; None &mdash;</option>
-                          {children.map(c => <option key={c.id} value={c.id}>{c.description || c.name} ({c.portion_size}{parentUnit} each)</option>)}
-                        </select>
-                      </div>
-                      <div><label style={LABEL}>Portions Made</label><input type="number" step="1" min="0" value={issueForm.prepped_qty} onChange={e => setIssueForm(f => ({ ...f, prepped_qty: e.target.value }))} placeholder="0" style={INPUT} disabled={!issueForm.prepped_item_id} /></div>
-                    </div>
-                  </div>
-                )
-              })()}
-              <div><label style={LABEL}>Issued To</label><select value={issueForm.issued_to} onChange={e => setIssueForm(f => ({ ...f, issued_to: e.target.value }))} style={INPUT}>{ISSUE_DESTINATIONS.map(d => <option key={d}>{d}</option>)}</select></div>
-              <div><label style={LABEL}>Notes</label><input value={issueForm.notes} onChange={e => setIssueForm(f => ({ ...f, notes: e.target.value }))} placeholder="Optional" style={INPUT} /></div>
-            </div>
-            <div style={{ padding: '16px 28px 24px', display: 'flex', gap: '12px' }}>
-              <button onClick={() => setShowAddIssue(false)} style={{ flex: 1, border: '1.5px solid #e5e7eb', color: '#374151', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: 700, cursor: 'pointer', background: 'white' }}>Cancel</button>
-              <button onClick={saveIssue} disabled={saving} style={{ flex: 1, background: '#1a5c38', color: 'white', border: 'none', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: 800, cursor: 'pointer' }}>Issue Stock</button>
-            </div>
-          </>
-        )}
-      </Modal>
 
       {/* New Order Modal - Purchase Order */}
       <Modal show={showAddOrder} onClose={() => setShowAddOrder(false)} title="New Purchase Order" maxWidth="700px">
