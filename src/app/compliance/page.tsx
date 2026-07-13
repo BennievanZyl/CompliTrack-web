@@ -192,13 +192,14 @@ export default function CompliancePage() {
       .from('conversations')
       .select('id')
       .or(`and(participant_1.eq.${currentUser.id},participant_2.eq.${recipientId}),and(participant_1.eq.${recipientId},participant_2.eq.${currentUser.id})`)
-      .single();
+      .maybeSingle();
     if (existing) return existing.id;
-    const { data: newConv } = await supabase
+    const { data: newConv, error } = await supabase
       .from('conversations')
       .insert({ participant_1: currentUser.id, participant_2: recipientId })
       .select()
       .single();
+    if (error) { console.error('[compliance] conversation create error', error.message); return null; }
     return newConv?.id || null;
   }
 
@@ -214,6 +215,8 @@ export default function CompliancePage() {
     await supabase.from('conversations').update({ last_message: `📷 Compliance photo: ${taskName}`, last_message_at: new Date().toISOString() }).eq('id', convId);
     alert('Photo shared to chat with store manager ✓');
   }
+
+  async function sendComment() {
     if (!newComment.trim() || !selectedItem || !session || !currentUser) return;
     setSendingComment(true);
     await supabase.from('compliance_comments').insert({
