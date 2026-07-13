@@ -79,6 +79,20 @@ export default function ChatPage() {
     if (!currentUser) return;
     const channel = supabase
       .channel('chat-live')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_messages', filter: `recipient_id=eq.${currentUser.id}` }, (payload) => {
+        // Play notification sound for incoming messages
+        try {
+          const audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFhX2JkI2Fg3qCi5KSjYZ9fIaNmJqVi4N/hI+bop6Uinx3gpCcpJ+WjIN9gpCdpZ+WjIN+g5GepqCXjYR/hJGfp6CYjoWAhZKgqKGZj4aBhpOhqaKamIeChpSimqGZj4aBhpOiqaKZj4aBhpSiqaKZj4aBhpSiqqKZj4aBhpSjqqKZj4aBhpWjq6KZj4aBhpWkq6KZj4aBhpWkrKKZj4aBhpakrKKZj4eChpakraKZj4eChpakraKZj4eChpWlraKZj4eChpWlraKZj4eChpWlraGZj4eChpWlraGZj4eChpWlraGZj4eChpWlraCZj4eChpWlraCZj4eCh5WlraCZj4eCh5WlraCZj4eCh5Wmr6CZj4eCh5Wmr6CZj4eCh5Wmr6CZj4eCh5Wmr6CZj4eCh5Wmr6CZj4eCh5Wmr6CZj4eCh5Wmr6CZj4eCh5Wmr6CZj4eCh5Wmr6CZj4eCh5Wmr6CZj4eCh5Wmr6CZj4eCh5Wmr6CZj4eCh5Wmr6CZj4eCh5Wmr6A=');
+          audio.volume = 0.4;
+          audio.play().catch(() => {});
+        } catch {}
+        loadConversations(currentUser.id);
+        if (selectedConv) loadMessages(selectedConv.id, currentUser.id);
+        // Browser notification if tab not focused
+        if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
+          new Notification('CompliTrack — New message', { body: 'You have a new chat message', icon: '/favicon.ico' });
+        }
+      })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_messages' }, () => {
         loadConversations(currentUser.id);
         if (selectedConv) loadMessages(selectedConv.id, currentUser.id);
@@ -87,6 +101,10 @@ export default function ChatPage() {
         loadConversations(currentUser.id);
       })
       .subscribe();
+    // Request browser notification permission
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
     return () => { supabase.removeChannel(channel); };
   }, [currentUser, selectedConv]);
 
