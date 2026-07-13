@@ -1010,7 +1010,7 @@ export default function StockPage() {
       </Modal>
 
       {/* Add/Edit Item Modal */}
-      <Modal show={showAddItem} onClose={() => { setShowAddItem(false); setEditItem(null); setShowInlineCat(false); setNewCatName(''); setParentItemSearch('') }} title={editItem ? 'Edit Item' : 'Add Stock Item'}>
+      <Modal show={showAddItem} onClose={() => { setShowAddItem(false); setEditItem(null); setShowInlineCat(false); setNewCatName(''); setParentItemSearch('') }} title={editItem ? 'Edit Item' : 'Add Stock Item'} maxWidth="680px">
         <div style={{ padding: '20px 28px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
           <div><label style={LABEL}>Item Name *</label><input value={itemForm.name} onChange={e => setItemForm(f => ({ ...f, name: e.target.value, description: e.target.value }))} placeholder="e.g. Chicken Breasts" style={INPUT} /></div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
@@ -1091,7 +1091,7 @@ export default function StockPage() {
             const parentCost = selectedParent ? (Number(selectedParent.cost_price) || Number(selectedParent.price) || 0) : 0
             const calcCost = parentCost * (parseFloat(itemForm.portion_size || '0') || 0)
             return (
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px', padding: '14px 16px', background: '#faf5ff', borderRadius: '10px', border: '1px solid #e9d5ff' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: '12px', padding: '14px 16px', background: '#faf5ff', borderRadius: '10px', border: '1px solid #e9d5ff' }}>
                 <div>
                   <label style={LABEL}>Made From</label>
                   <input
