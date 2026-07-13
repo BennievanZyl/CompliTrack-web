@@ -467,7 +467,7 @@ export default function FinancesPage() {
   function removeLine(i: number) { setInvLines(l => l.filter((_, idx) => idx !== i)) }
 
   // Maps a supplier template maps_to value to the internal InvoiceLine field and input type.
-  type ColDef = { header: string; field: keyof InvoiceLine; type: 'text' | 'number'; placeholder: string }
+  type ColDef = { header: string; field: keyof InvoiceLine; type: 'text' | 'number' | 'readonly'; placeholder: string }
   const MAPS_TO_FIELD: Record<string, Omit<ColDef, 'header'>> = {
     'description':     { field: 'description', type: 'text',   placeholder: 'Item description' },
     'qty':             { field: 'qty',          type: 'number', placeholder: '1' },
@@ -495,7 +495,16 @@ export default function FinancesPage() {
       if (cols.some(existing => existing.field === def.field)) continue
       cols.push({ header: c.name || c.maps_to, ...def })
     }
-    return cols.length >= 2 ? cols : DEFAULT_COLS
+    if (cols.length < 2) return DEFAULT_COLS
+    // The total (incl VAT) is always auto-calculated from qty x unit price behind the scenes
+    // (see updateLine), even when the supplier's own invoice has no printed running-total
+    // column to map. Without a visible column for it, that number is invisible and impossible
+    // to verify while entering the invoice — so show it read-only if the template didn't
+    // already give us an editable one.
+    if (!cols.some(c => c.field === 'amount')) {
+      cols.push({ header: 'Total (incl VAT)', field: 'amount', type: 'readonly', placeholder: '' })
+    }
+    return cols
   }
 
   function updateLine(i: number, field: keyof InvoiceLine, value: string | number) {
@@ -1187,6 +1196,14 @@ export default function FinancesPage() {
                                     {i === 0 && <button type="button" onClick={() => setShowQuickCat(true)} style={{ fontSize: '11px', color: '#1a5c38', background: 'none', border: 'none', cursor: 'pointer', padding: '2px 0', fontWeight: '600' }}>+ New Category</button>}
                                   </div>
                                   {activeCols.map(col => {
+                                    // Auto-calculated total with no column in the supplier's own
+                                    // template to map it to — show it, but read-only, since it's
+                                    // always derived from qty x unit price (+ VAT), never typed in.
+                                    if (col.type === 'readonly') return (
+                                      <div key={col.header} title="Calculated from qty x unit price, incl. VAT" style={{ ...inp, padding: '8px 10px', background: '#f9fafb', color: '#374151', display: 'flex', alignItems: 'center', fontWeight: 600 }}>
+                                        {fmt(Number(line.amount) || 0)}
+                                      </div>
+                                    )
                                     // UoM column gets a dropdown for consistency
                                     if (col.field === 'uom') return (
                                       <select
