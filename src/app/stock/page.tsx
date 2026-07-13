@@ -94,6 +94,7 @@ export default function StockPage() {
   const [countLines, setCountLines] = useState<StockCountLine[]>([])
   const [countTypeFilter, setCountTypeFilter] = useState('daily')
   const [supplierFilter, setSupplierFilter] = useState('All')
+  const [parentItemSearch, setParentItemSearch] = useState('')
   const [itemSearch, setItemSearch] = useState('')
   const [showAIImport, setShowAIImport] = useState(false)
   const [aiText, setAIText] = useState('')
@@ -408,7 +409,7 @@ export default function StockPage() {
       cost_price: calcPrice,
       par_level: parseFloat(itemForm.par_level || '0'),
       is_active: true,
-      supplier: itemForm.supplier || 'Other',
+      supplier: itemForm.is_prepped_item ? 'Instore' : (itemForm.supplier || 'Other'),
       on_daily_sheet: itemForm.on_daily_sheet,
       is_catch_weight: itemForm.is_catch_weight,
       kg_price: parseFloat(itemForm.kg_price || '0'),
@@ -837,7 +838,6 @@ export default function StockPage() {
                                 <div style={{ fontWeight: 700, fontSize: '14px', color: '#111' }}>{item.description || item.name}</div>
                                 <div style={{ display: 'flex', gap: '6px', marginTop: '4px', flexWrap: 'wrap' as const }}>
                                   {parent && <span style={{ fontSize: '11px', fontWeight: 600, background: '#f3e8ff', color: '#7c3aed', padding: '2px 8px', borderRadius: '20px' }}>🔗 from {parent.description || parent.name}</span>}
-                                  {item.supplier && <span style={{ fontSize: '11px', fontWeight: 600, background: '#eff6ff', color: '#2563eb', padding: '2px 8px', borderRadius: '20px' }}>{item.supplier}</span>}
                                   {item.on_daily_sheet && <span style={{ fontSize: '11px', fontWeight: 600, background: '#f0fdf4', color: '#16a34a', padding: '2px 8px', borderRadius: '20px' }}>📋 Daily</span>}
                                 </div>
                               </td>
@@ -1010,7 +1010,7 @@ export default function StockPage() {
       </Modal>
 
       {/* Add/Edit Item Modal */}
-      <Modal show={showAddItem} onClose={() => { setShowAddItem(false); setEditItem(null); setShowInlineCat(false); setNewCatName('') }} title={editItem ? 'Edit Item' : 'Add Stock Item'}>
+      <Modal show={showAddItem} onClose={() => { setShowAddItem(false); setEditItem(null); setShowInlineCat(false); setNewCatName(''); setParentItemSearch('') }} title={editItem ? 'Edit Item' : 'Add Stock Item'}>
         <div style={{ padding: '20px 28px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
           <div><label style={LABEL}>Item Name *</label><input value={itemForm.name} onChange={e => setItemForm(f => ({ ...f, name: e.target.value, description: e.target.value }))} placeholder="e.g. Chicken Breasts" style={INPUT} /></div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
@@ -1029,9 +1029,16 @@ export default function StockPage() {
                 </div>
               )}
             </div>
-            <div><label style={LABEL}>Supplier</label><select value={itemForm.supplier} onChange={e => setItemForm(f => ({ ...f, supplier: e.target.value }))} style={INPUT}>
-              {suppliers.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
-            </select></div>
+            <div>
+              <label style={LABEL}>Supplier</label>
+              {itemForm.is_prepped_item ? (
+                <div style={{ ...INPUT, background: '#faf5ff', color: '#7c3aed', fontWeight: 700, display: 'flex', alignItems: 'center' }}>🍽️ Instore</div>
+              ) : (
+                <select value={itemForm.supplier} onChange={e => setItemForm(f => ({ ...f, supplier: e.target.value }))} style={INPUT}>
+                  {suppliers.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
+                </select>
+              )}
+            </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 16px', background: '#f0fdf4', borderRadius: '10px', border: '1.5px solid #bbf7d0' }}>
             <input type="checkbox" id="dailySheet" checked={itemForm.on_daily_sheet} onChange={e => setItemForm(f => ({ ...f, on_daily_sheet: e.target.checked }))} style={{ width: '18px', height: '18px', cursor: 'pointer' }} />
@@ -1087,9 +1094,19 @@ export default function StockPage() {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px', padding: '14px 16px', background: '#faf5ff', borderRadius: '10px', border: '1px solid #e9d5ff' }}>
                 <div>
                   <label style={LABEL}>Made From</label>
-                  <select value={itemForm.parent_item_id} onChange={e => setItemForm(f => ({ ...f, parent_item_id: e.target.value }))} style={INPUT}>
+                  <input
+                    type="text"
+                    placeholder="🔍 Search stock items…"
+                    value={parentItemSearch}
+                    onChange={e => setParentItemSearch(e.target.value)}
+                    style={{ ...INPUT, marginBottom: 6 }}
+                  />
+                  <select value={itemForm.parent_item_id} onChange={e => setItemForm(f => ({ ...f, parent_item_id: e.target.value }))} style={INPUT} size={parentItemSearch.trim() ? 6 : undefined}>
                     <option value="">— Select source item —</option>
-                    {parentOptions.map(i => <option key={i.id} value={i.id}>{i.description || i.name} ({i.unit})</option>)}
+                    {parentOptions
+                      .filter(i => i.id === itemForm.parent_item_id || !parentItemSearch.trim() || (i.description || i.name || '').toLowerCase().includes(parentItemSearch.trim().toLowerCase()))
+                      .sort((a, b) => (a.description || a.name || '').localeCompare(b.description || b.name || ''))
+                      .map(i => <option key={i.id} value={i.id}>{i.description || i.name} ({i.unit})</option>)}
                   </select>
                 </div>
                 <div>
@@ -1112,7 +1129,7 @@ export default function StockPage() {
           </div>
         </div>
         <div style={{ padding: '16px 28px 24px', display: 'flex', gap: '12px' }}>
-          <button onClick={() => { setShowAddItem(false); setEditItem(null) }} style={{ flex: 1, border: '1.5px solid #e5e7eb', color: '#374151', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: 700, cursor: 'pointer', background: 'white' }}>Cancel</button>
+          <button onClick={() => { setShowAddItem(false); setEditItem(null); setParentItemSearch('') }} style={{ flex: 1, border: '1.5px solid #e5e7eb', color: '#374151', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: 700, cursor: 'pointer', background: 'white' }}>Cancel</button>
           <button onClick={saveItem} disabled={saving || !itemForm.name} style={{ flex: 1, background: !itemForm.name ? '#d1d5db' : '#1a5c38', color: 'white', border: 'none', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: 800, cursor: 'pointer' }}>{editItem ? 'Save Changes' : 'Add Item'}</button>
         </div>
       </Modal>
