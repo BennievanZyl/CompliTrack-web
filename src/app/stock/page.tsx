@@ -7,7 +7,7 @@ import { useRouter } from 'next/navigation'
 const STORE_ID = '05328298-fc27-4c9f-b091-bb7f6598b601'
 
 type StockCategory = { id: string; name: string; color: string; sort_order: number }
-type StockItem = { id: string; category: string | null; name: string; description: string; unit: string; cost_price: number; price: number; par_level: number; current_qty: number; is_active: boolean; sort_order: number; supplier: string | null; on_daily_sheet: boolean; is_catch_weight: boolean; kg_price: number; avg_weight_kg: number }
+type StockItem = { id: string; category: string | null; name: string; description: string; unit: string; cost_price: number; price: number; par_level: number; current_qty: number; is_active: boolean; sort_order: number; supplier: string | null; on_daily_sheet: boolean; is_catch_weight: boolean; kg_price: number; avg_weight_kg: number; parent_item_id: string | null; portion_size: number | null }
 type StockAdjustment = { id: string; store_id: string; stock_item_id: string; item_name: string; qty_before: number; qty_after: number; adjustment: number; unit: string; reason: string; notes: string; created_at: string }
 type InvoiceColumn = { name: string; maps_to: string | null }
 type StockSupplier = { id: string; name: string; contact_name: string | null; phone: string | null; email: string | null; order_day: string | null; notes: string | null; payment_terms_days: number | null; is_active: boolean; sort_order: number; invoice_columns: InvoiceColumn[] | null; invoice_vat_included: boolean | null; delivers_stock: boolean }
@@ -116,7 +116,7 @@ export default function StockPage() {
   const [showAddOrder, setShowAddOrder] = useState(false)
   const [showAddCategory, setShowAddCategory] = useState(false)
   const [editItem, setEditItem] = useState<StockItem | null>(null)
-  const [itemForm, setItemForm] = useState({ name: '', description: '', category_id: 'goods', unit: 'each', cost_price: '', par_level: '', supplier: 'Other', on_daily_sheet: false, is_catch_weight: false, kg_price: '', avg_weight_kg: '' })
+  const [itemForm, setItemForm] = useState({ name: '', description: '', category_id: 'goods', unit: 'each', cost_price: '', par_level: '', supplier: 'Other', on_daily_sheet: false, is_catch_weight: false, kg_price: '', avg_weight_kg: '', is_prepped_item: false, parent_item_id: '', portion_size: '' })
   const [purchaseForm, setPurchaseForm] = useState({ purchase_date: new Date().toISOString().split('T')[0], supplier_name: '', stock_item_id: '', item_name: '', quantity: '', unit: 'each', unit_cost: '', invoice_number: '' })
   const [wastageForm, setWastageForm] = useState({ wastage_date: new Date().toISOString().split('T')[0], stock_item_id: '', item_name: '', quantity: '', unit: 'each', unit_cost: '', reason: 'Expired' })
   const [issueForm, setIssueForm] = useState({ issue_date: new Date().toISOString().split('T')[0], stock_item_id: '', item_name: '', quantity: '', unit: 'each', issued_to: 'Kitchen', notes: '' })
@@ -287,7 +287,7 @@ export default function StockPage() {
 
   function generateOrderText(supplierName: string, orderDate: string, deliveryDate: string, notes: string) {
     const orderItems = items
-      .filter(i => (i.supplier || 'Other') === supplierName)
+      .filter(i => (i.supplier || 'Other') === supplierName && !i.parent_item_id)
       .filter(i => parseFloat((orderForm as {[key:string]:string})[`qty_${i.id}`] || '0') > 0)
       .map(i => {
         const qty = (orderForm as {[key:string]:string})[`qty_${i.id}`] || '0'
@@ -335,7 +335,7 @@ export default function StockPage() {
         <table>
           <tr><th>Item</th><th>Unit</th><th>Qty Ordered</th></tr>
           ${items
-            .filter(i => (i.supplier || 'Other') === orderForm.supplier_name)
+            .filter(i => (i.supplier || 'Other') === orderForm.supplier_name && !i.parent_item_id)
             .filter(i => parseFloat((orderForm as {[key:string]:string})[`qty_${i.id}`] || '0') > 0)
             .map(i => `<tr><td>${i.description || i.name}</td><td>${i.unit}</td><td><strong>${(orderForm as {[key:string]:string})[`qty_${i.id}`]}</strong></td></tr>`)
             .join('')}
@@ -392,8 +392,11 @@ export default function StockPage() {
   async function saveItem() {
     if (!itemForm.name.trim() && !itemForm.description.trim()) { alert('Item name is required'); return }
     setSaving(true)
+    const parentItem = itemForm.is_prepped_item ? items.find(i => i.id === itemForm.parent_item_id) : undefined
     const calcPrice = itemForm.is_catch_weight
       ? parseFloat(itemForm.kg_price || '0') * parseFloat(itemForm.avg_weight_kg || '0')
+      : itemForm.is_prepped_item && parentItem
+      ? (Number(parentItem.cost_price) || Number(parentItem.price) || 0) * parseFloat(itemForm.portion_size || '0')
       : parseFloat(itemForm.cost_price || '0')
     const payload = {
       store_id: STORE_ID,
@@ -409,13 +412,15 @@ export default function StockPage() {
       on_daily_sheet: itemForm.on_daily_sheet,
       is_catch_weight: itemForm.is_catch_weight,
       kg_price: parseFloat(itemForm.kg_price || '0'),
-      avg_weight_kg: parseFloat(itemForm.avg_weight_kg || '0')
+      avg_weight_kg: parseFloat(itemForm.avg_weight_kg || '0'),
+      parent_item_id: itemForm.is_prepped_item ? (itemForm.parent_item_id || null) : null,
+      portion_size: itemForm.is_prepped_item ? parseFloat(itemForm.portion_size || '0') : null
     }
     let error = null
     if (editItem) { const res = await supabase.from('stock_items').update(payload).eq('id', editItem.id); error = res.error }
     else { const res = await supabase.from('stock_items').insert(payload); error = res.error }
     if (error) { alert('Error saving item: ' + error.message); setSaving(false); return }
-    setItemForm({ name: '', description: '', category_id: categories[0]?.id || '', unit: 'each', cost_price: '', par_level: '', supplier: 'Other', on_daily_sheet: false, is_catch_weight: false, kg_price: '', avg_weight_kg: '' })
+    setItemForm({ name: '', description: '', category_id: categories[0]?.id || '', unit: 'each', cost_price: '', par_level: '', supplier: 'Other', on_daily_sheet: false, is_catch_weight: false, kg_price: '', avg_weight_kg: '', is_prepped_item: false, parent_item_id: '', portion_size: '' })
     setShowAddItem(false); setEditItem(null); setShowInlineCat(false); await loadAll(); setSaving(false)
   }
 
@@ -791,7 +796,7 @@ export default function StockPage() {
                       style={{ padding: '10px 36px 10px 14px', border: '1.5px solid #e5e7eb', borderRadius: '10px', fontSize: '13px', width: '200px', outline: 'none' }} />
                     {itemSearch && <button onClick={() => setItemSearch('')} style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#9ca3af', fontSize: '16px' }}>✕</button>}
                   </div>
-                <button onClick={() => { setEditItem(null); setItemForm({ name: '', description: '', category_id: categories[0]?.id || '', unit: 'each', cost_price: '', par_level: '', supplier: 'Other', on_daily_sheet: false }); setShowAddItem(true) }} style={{ padding: '10px 18px', background: '#1a5c38', color: 'white', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: 800, cursor: 'pointer' }}>+ Add Item</button>
+                <button onClick={() => { setEditItem(null); setItemForm({ name: '', description: '', category_id: categories[0]?.id || '', unit: 'each', cost_price: '', par_level: '', supplier: 'Other', on_daily_sheet: false, is_catch_weight: false, kg_price: '', avg_weight_kg: '', is_prepped_item: false, parent_item_id: '', portion_size: '' }); setShowAddItem(true) }} style={{ padding: '10px 18px', background: '#1a5c38', color: 'white', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: 800, cursor: 'pointer' }}>+ Add Item</button>
                 </div>
               </div>
               {/* Supplier filter — excludes non-stock suppliers (e.g. rent/landlord) since
@@ -805,14 +810,96 @@ export default function StockPage() {
                   </button>
                 ))}
               </div>
+              {(() => {
+                // Instore / Prepped Items: pulled out of their normal category into their own
+                // section, regardless of what category they're filed under, so the main stock
+                // sheet only shows bulk/orderable stock. Still fully counted toward stock value.
+                const filteredBySupplier = supplierFilter === 'All' ? items : items.filter(i => (i.supplier || 'Other') === supplierFilter)
+                const searchFiltered = itemSearch ? (filteredBySupplier || []).filter(i => (i.description || i.name || '').toLowerCase().includes(itemSearch.toLowerCase())) : (filteredBySupplier || [])
+                const preppedItems = searchFiltered.filter(i => i.parent_item_id)
+                if (!preppedItems.length) return null
+                const preppedStockValue = preppedItems.reduce((sum, item) => sum + Number(item.current_qty || 0) * (Number(item.cost_price) || Number(item.price) || 0), 0)
+                return (
+                  <div style={{ background: 'white', borderRadius: '20px', border: '1.5px solid #e9d5ff', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
+                    <div style={{ padding: '12px 20px', background: '#faf5ff', display: 'flex', alignItems: 'center', gap: '10px', borderBottom: '1px solid #e9d5ff' }}>
+                      <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#7c3aed' }} />
+                      <div style={{ fontWeight: 700, fontSize: '14px', color: '#111' }}>🍽️ Instore / Prepped Items</div>
+                      <span style={{ fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '100px', background: '#7c3aed20', color: '#7c3aed' }}>{preppedItems.length}</span>
+                    </div>
+                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <thead><tr style={{ background: '#fafafa' }}>{['Item', 'Unit', 'On Hand', 'Cost Price', 'Par Level', ''].map(h => <th key={h} style={{ padding: '10px 16px', textAlign: 'left', fontSize: '11px', fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{h}</th>)}</tr></thead>
+                      <tbody>
+                        {preppedItems.map(item => {
+                          const parent = items.find(i => i.id === item.parent_item_id)
+                          return (
+                            <tr key={item.id} style={{ borderTop: '1px solid #f3f4f6' }}>
+                              <td style={{ padding: '12px 16px' }}>
+                                <div style={{ fontWeight: 700, fontSize: '14px', color: '#111' }}>{item.description || item.name}</div>
+                                <div style={{ display: 'flex', gap: '6px', marginTop: '4px', flexWrap: 'wrap' as const }}>
+                                  {parent && <span style={{ fontSize: '11px', fontWeight: 600, background: '#f3e8ff', color: '#7c3aed', padding: '2px 8px', borderRadius: '20px' }}>🔗 from {parent.description || parent.name}</span>}
+                                  {item.supplier && <span style={{ fontSize: '11px', fontWeight: 600, background: '#eff6ff', color: '#2563eb', padding: '2px 8px', borderRadius: '20px' }}>{item.supplier}</span>}
+                                  {item.on_daily_sheet && <span style={{ fontSize: '11px', fontWeight: 600, background: '#f0fdf4', color: '#16a34a', padding: '2px 8px', borderRadius: '20px' }}>📋 Daily</span>}
+                                </div>
+                              </td>
+                              <td style={{ padding: '12px 16px', fontSize: '13px', color: '#6b7280' }}>{item.unit}</td>
+                              <td style={{ padding: '12px 16px', fontSize: '13px' }}>
+                                <span style={{ fontWeight: 700, color: item.par_level && Number(item.current_qty || 0) < Number(item.par_level) ? '#dc2626' : '#111' }}>
+                                  {Number(item.current_qty || 0)} {item.unit}
+                                </span>
+                              </td>
+                              <td style={{ padding: '12px 16px', fontSize: '13px', color: '#374151' }}>{formatCurrency(Number(item.cost_price) || Number(item.price) || 0)}</td>
+                              <td style={{ padding: '12px 16px', fontSize: '13px', color: '#374151' }}>{item.par_level ? `${Number(item.par_level)} ${item.unit}` : '—'}</td>
+                              <td style={{ padding: '12px 16px' }}>
+                                <div style={{ display: 'flex', gap: '6px' }}>
+                                  <button onClick={() => {
+                                    setEditItem(item)
+                                    const catMatch = categories.find(c => c.id === item.category)
+                                      || categories.find(c => c.name.toLowerCase() === (item.category || '').toLowerCase())
+                                      || categories.find(c => c.name.toLowerCase().includes((item.category || '').toLowerCase().replace(/_/g,' ')))
+                                    setItemForm({
+                                      name: item.description || item.name || '',
+                                      description: item.description || '',
+                                      category_id: catMatch?.id || categories[0]?.id || '',
+                                      unit: item.unit || 'each',
+                                      cost_price: String(Number(item.price) || 0),
+                                      par_level: String(Number(item.par_level) || 0),
+                                      supplier: item.supplier || 'Other',
+                                      on_daily_sheet: item.on_daily_sheet || false,
+                                      is_catch_weight: item.is_catch_weight || false,
+                                      kg_price: String(Number(item.kg_price) || ''),
+                                      avg_weight_kg: String(Number(item.avg_weight_kg) || ''),
+                                      is_prepped_item: !!item.parent_item_id,
+                                      parent_item_id: item.parent_item_id || '',
+                                      portion_size: item.portion_size != null ? String(item.portion_size) : ''
+                                    })
+                                    setShowAddItem(true)
+                                  }} style={{ fontSize: '12px', color: '#1d4ed8', background: '#eff6ff', border: 'none', borderRadius: '8px', padding: '5px 10px', cursor: 'pointer', fontWeight: 600 }}>Edit</button>
+                                  <button onClick={() => { setAdjustItem(item); setAdjustQty(''); setAdjustMode('set'); setAdjustReason(''); setAdjustNotes(''); loadAdjustHistory(item.id) }} style={{ fontSize: '12px', color: '#7c3aed', background: '#ede9fe', border: 'none', borderRadius: '8px', padding: '5px 10px', cursor: 'pointer', fontWeight: 600 }}>Adjust</button>
+                                  <button onClick={() => deleteItem(item.id)} style={{ fontSize: '12px', color: '#dc2626', background: '#fee2e2', border: 'none', borderRadius: '8px', padding: '5px 8px', cursor: 'pointer', fontWeight: 700 }}>✕</button>
+                                </div>
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                    <div style={{ padding: '12px 20px', background: '#faf5ff', borderTop: '1px solid #e9d5ff', display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ fontSize: '12px', fontWeight: 700, color: '#a78bfa', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Section Stock Value</span>
+                      <span style={{ fontSize: '15px', fontWeight: 800, color: '#111' }}>{formatCurrency(preppedStockValue)}</span>
+                    </div>
+                  </div>
+                )
+              })()}
               {categories.map(cat => {
                 const filteredBySupplier = supplierFilter === 'All' ? items : items.filter(i => (i.supplier || 'Other') === supplierFilter)
                 const searchFiltered = itemSearch ? (filteredBySupplier || []).filter(i => (i.description || i.name || '').toLowerCase().includes(itemSearch.toLowerCase())) : (filteredBySupplier || [])
                 // Match items by UUID (new items) or by legacy name/slug (old items)
                 const catItems = searchFiltered.filter(i =>
+                  !i.parent_item_id && (
                   i.category === cat.id ||
                   (i.category && cat.name && i.category.toLowerCase() === cat.name.toLowerCase()) ||
                   (i.category && cat.name && cat.name.toLowerCase().replace(/[^a-z]/g,'').includes((i.category||'').toLowerCase().replace(/[^a-z]/g,'')))
+                  )
                 )
                 if (!catItems.length) return null
                 const catColor = cat.color || '#6b7280'
@@ -872,7 +959,10 @@ export default function StockPage() {
                                     on_daily_sheet: item.on_daily_sheet || false,
                                     is_catch_weight: item.is_catch_weight || false,
                                     kg_price: String(Number(item.kg_price) || ''),
-                                    avg_weight_kg: String(Number(item.avg_weight_kg) || '')
+                                    avg_weight_kg: String(Number(item.avg_weight_kg) || ''),
+                                    is_prepped_item: !!item.parent_item_id,
+                                    parent_item_id: item.parent_item_id || '',
+                                    portion_size: item.portion_size != null ? String(item.portion_size) : ''
                                   })
                                   setShowAddItem(true)
                                 }} style={{ fontSize: '12px', color: '#1d4ed8', background: '#eff6ff', border: 'none', borderRadius: '8px', padding: '5px 10px', cursor: 'pointer', fontWeight: 600 }}>Edit</button>
@@ -951,8 +1041,9 @@ export default function StockPage() {
             <div><label style={LABEL}>Unit</label><select value={itemForm.unit} onChange={e => setItemForm(f => ({ ...f, unit: e.target.value }))} style={INPUT}>{UNITS.map(u => <option key={u}>{u}</option>)}</select></div>
             <div>
               <label style={LABEL}>Unit Cost (R)</label>
-              <input type="number" step="0.01" value={itemForm.cost_price} onChange={e => setItemForm(f => ({ ...f, cost_price: e.target.value }))} placeholder="0.00" style={INPUT} disabled={itemForm.is_catch_weight} />
+              <input type="number" step="0.01" value={itemForm.cost_price} onChange={e => setItemForm(f => ({ ...f, cost_price: e.target.value }))} placeholder="0.00" style={INPUT} disabled={itemForm.is_catch_weight || itemForm.is_prepped_item} />
               {itemForm.is_catch_weight && <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px' }}>Auto-calculated from kg price × avg weight</div>}
+              {itemForm.is_prepped_item && <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px' }}>Auto-calculated from source item price × portion size</div>}
             </div>
             <div><label style={LABEL}>Par Level</label><input type="number" step="0.1" value={itemForm.par_level} onChange={e => setItemForm(f => ({ ...f, par_level: e.target.value }))} placeholder="0" style={INPUT} /></div>
           </div>
@@ -982,6 +1073,41 @@ export default function StockPage() {
               </div>
             </div>
           )}
+          {/* Instore / Prepped Item */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 16px', background: '#faf5ff', borderRadius: '10px', border: '1.5px solid #e9d5ff' }}>
+            <input type="checkbox" id="preppedItem" checked={itemForm.is_prepped_item} onChange={e => setItemForm(f => ({ ...f, is_prepped_item: e.target.checked }))} style={{ width: '18px', height: '18px', cursor: 'pointer' }} />
+            <label htmlFor="preppedItem" style={{ cursor: 'pointer', fontWeight: 600, fontSize: '14px', color: '#7c3aed' }}>🍽️ Instore / Prepped Item — portioned in-house from another stock item</label>
+          </div>
+          {itemForm.is_prepped_item && (() => {
+            const parentOptions = items.filter(i => !i.parent_item_id && i.id !== editItem?.id)
+            const selectedParent = parentOptions.find(i => i.id === itemForm.parent_item_id)
+            const parentCost = selectedParent ? (Number(selectedParent.cost_price) || Number(selectedParent.price) || 0) : 0
+            const calcCost = parentCost * (parseFloat(itemForm.portion_size || '0') || 0)
+            return (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px', padding: '14px 16px', background: '#faf5ff', borderRadius: '10px', border: '1px solid #e9d5ff' }}>
+                <div>
+                  <label style={LABEL}>Made From</label>
+                  <select value={itemForm.parent_item_id} onChange={e => setItemForm(f => ({ ...f, parent_item_id: e.target.value }))} style={INPUT}>
+                    <option value="">— Select source item —</option>
+                    {parentOptions.map(i => <option key={i.id} value={i.id}>{i.description || i.name} ({i.unit})</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={LABEL}>Portion Size {selectedParent ? `(${selectedParent.unit})` : ''}</label>
+                  <input type="number" step="0.001" placeholder="0.03" value={itemForm.portion_size} onChange={e => setItemForm(f => ({ ...f, portion_size: e.target.value }))} style={INPUT} />
+                </div>
+                <div>
+                  <label style={LABEL}>Calculated Unit Cost</label>
+                  <div style={{ padding: '10px 12px', background: '#fff', border: '1.5px solid #e9d5ff', borderRadius: '10px', fontWeight: 800, fontSize: '16px', color: '#7c3aed' }}>
+                    R {calcCost.toFixed(2)}
+                  </div>
+                </div>
+                <div style={{ gridColumn: 'span 3', fontSize: '12px', color: '#7c3aed', background: '#f3e8ff', padding: '8px 12px', borderRadius: '8px' }}>
+                  💡 Cost auto-updates from the source item's price × portion size. This item is excluded from Orders and Purchases (you order/purchase the source item instead) and is grouped under its own "Instore" section on the stock sheet — it still counts fully toward stock value and shows up in stock counts, wastage and issuing.
+                </div>
+              </div>
+            )
+          })()}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
           </div>
         </div>
@@ -1010,7 +1136,7 @@ export default function StockPage() {
           <div><label style={LABEL}>Stock Item (optional)</label>
             <select value={purchaseForm.stock_item_id} onChange={e => { const item = items.find(i => i.id === e.target.value); setPurchaseForm(f => ({ ...f, stock_item_id: e.target.value, item_name: (item?.description || item?.name) || f.item_name, unit: item?.unit || f.unit, unit_cost: item ? String(Number(item.cost_price) || Number(item.price) || 0) : f.unit_cost })) }} style={INPUT}>
               <option value="">Select from stock list</option>
-              {suppliers.map(sup => { const supItems = items.filter(i => (i.supplier||'Other')===sup.name); return supItems.length ? <optgroup key={sup.id} label={sup.name}>{supItems.map(i => <option key={i.id} value={i.id}>{i.description||i.name}</option>)}</optgroup> : null })}
+              {suppliers.map(sup => { const supItems = items.filter(i => (i.supplier||'Other')===sup.name && !i.parent_item_id); return supItems.length ? <optgroup key={sup.id} label={sup.name}>{supItems.map(i => <option key={i.id} value={i.id}>{i.description||i.name}</option>)}</optgroup> : null })}
             </select></div>
           <div><label style={LABEL}>Item Name *</label><input value={purchaseForm.item_name} onChange={e => setPurchaseForm(f => ({ ...f, item_name: e.target.value }))} placeholder="or type manually" style={INPUT} /></div>
           <div><label style={LABEL}>Supplier</label><select value={purchaseForm.supplier_name} onChange={e => setPurchaseForm(f => ({ ...f, supplier_name: e.target.value }))} style={INPUT}><option value="">— Select Supplier —</option>{suppliers.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}<option value="_other">Other</option></select></div>
@@ -1093,10 +1219,10 @@ export default function StockPage() {
               <div style={{ fontWeight: 700, fontSize: '14px', marginBottom: '12px', color: '#1a5c38' }}>
                 Order Items — {orderForm.supplier_name}
                 <span style={{ fontWeight: 400, fontSize: '12px', color: '#6b7280', marginLeft: '8px' }}>
-                  {items.filter(i => (i.supplier || 'Other') === orderForm.supplier_name).length} items
+                  {items.filter(i => (i.supplier || 'Other') === orderForm.supplier_name && !i.parent_item_id).length} items
                 </span>
               </div>
-              {items.filter(i => (i.supplier || 'Other') === orderForm.supplier_name).length === 0 ? (
+              {items.filter(i => (i.supplier || 'Other') === orderForm.supplier_name && !i.parent_item_id).length === 0 ? (
                 <p style={{ color: '#6b7280', fontSize: '13px', margin: 0 }}>No items assigned to this supplier. Go to Stock Items tab to assign items to suppliers.</p>
               ) : (
                 <div>
@@ -1104,7 +1230,7 @@ export default function StockPage() {
                     <div>Item</div><div>Unit</div><div>Order Qty</div>
                   </div>
                   <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
-                    {items.filter(i => (i.supplier || 'Other') === orderForm.supplier_name).map(item => (
+                    {items.filter(i => (i.supplier || 'Other') === orderForm.supplier_name && !i.parent_item_id).map(item => (
                       <div key={item.id} style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: '8px', marginBottom: '8px', alignItems: 'center' }}>
                         <div style={{ fontSize: '13px', fontWeight: 600 }}>{item.description || item.name}</div>
                         <div style={{ fontSize: '12px', color: '#6b7280' }}>{item.unit}</div>
@@ -1116,7 +1242,7 @@ export default function StockPage() {
                     ))}
                   </div>
                   <div style={{ marginTop: '8px', fontSize: '12px', color: '#6b7280', textAlign: 'right' as const }}>
-                    {items.filter(i => (i.supplier||'Other')===orderForm.supplier_name && parseFloat((orderForm as Record<string,string>)[`qty_${i.id}`]||'0')>0).length} of {items.filter(i => (i.supplier||'Other')===orderForm.supplier_name).length} items ordered
+                    {items.filter(i => (i.supplier||'Other')===orderForm.supplier_name && !i.parent_item_id && parseFloat((orderForm as Record<string,string>)[`qty_${i.id}`]||'0')>0).length} of {items.filter(i => (i.supplier||'Other')===orderForm.supplier_name && !i.parent_item_id).length} items ordered
                   </div>
                 </div>
               )}
