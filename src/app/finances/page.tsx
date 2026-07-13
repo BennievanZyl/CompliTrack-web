@@ -123,7 +123,6 @@ export default function FinancesPage() {
   const [grvItems, setGrvItems] = useState<{id:string;description:string;unit:string;supplier:string|null}[]>([])
   const [grvLines, setGrvLines] = useState<{stock_item_id:string;description:string;unit:string;qty_received:string;unit_cost:string;units_per_case:string;case_qty:string;case_price:string;is_catch_weight:boolean}[]>([])
   const [savingGRV, setSavingGRV] = useState(false)
-  const [redoingGRVId, setRedoingGRVId] = useState<string | null>(null)
   const [editingValues, setEditingValues] = useState<Record<string, string>>({})
   const [scanning, setScanning] = useState(false)
   const [scanError, setScanError] = useState('')
@@ -467,7 +466,7 @@ export default function FinancesPage() {
   function removeLine(i: number) { setInvLines(l => l.filter((_, idx) => idx !== i)) }
 
   // Maps a supplier template maps_to value to the internal InvoiceLine field and input type.
-  type ColDef = { header: string; field: keyof InvoiceLine; type: 'text' | 'number' | 'readonly'; placeholder: string }
+  type ColDef = { header: string; field: keyof InvoiceLine; type: 'text' | 'number'; placeholder: string }
   const MAPS_TO_FIELD: Record<string, Omit<ColDef, 'header'>> = {
     'description':     { field: 'description', type: 'text',   placeholder: 'Item description' },
     'qty':             { field: 'qty',          type: 'number', placeholder: '1' },
@@ -495,16 +494,7 @@ export default function FinancesPage() {
       if (cols.some(existing => existing.field === def.field)) continue
       cols.push({ header: c.name || c.maps_to, ...def })
     }
-    if (cols.length < 2) return DEFAULT_COLS
-    // The total (incl VAT) is always auto-calculated from qty x unit price behind the scenes
-    // (see updateLine), even when the supplier's own invoice has no printed running-total
-    // column to map. Without a visible column for it, that number is invisible and impossible
-    // to verify while entering the invoice — so show it read-only if the template didn't
-    // already give us an editable one.
-    if (!cols.some(c => c.field === 'amount')) {
-      cols.push({ header: 'Total (incl VAT)', field: 'amount', type: 'readonly', placeholder: '' })
-    }
-    return cols
+    return cols.length >= 2 ? cols : DEFAULT_COLS
   }
 
   function updateLine(i: number, field: keyof InvoiceLine, value: string | number) {
@@ -658,27 +648,6 @@ export default function FinancesPage() {
     setGrvInvoice(null)
     setSavingGRV(false)
     load()
-  }
-
-  // Re-do GRV: reverses the stock quantities/cost previously recorded from this invoice's
-  // GRV (without touching the invoice itself), then reopens Receive Goods so it can be
-  // re-entered correctly. Fixes double-GRV and wrong-quantity mistakes without having to
-  // delete and re-submit the whole invoice.
-  async function redoGRV(inv: Invoice) {
-    if (!confirm(`Re-do GRV for ${inv.supplier}${inv.invoice_number ? ' #' + inv.invoice_number : ''} (${inv.invoice_date})?\n\nThis reverses the stock quantities and cost already received against this invoice, then reopens Receive Goods so you can re-enter it. The invoice itself is not resubmitted.`)) return
-    setRedoingGRVId(inv.id)
-    const { data: existing, error } = await supabase.from('stock_purchases').select('id, stock_item_id, quantity').eq('invoice_id', inv.id)
-    if (error) { alert('Error loading previous GRV: ' + error.message); setRedoingGRVId(null); return }
-    if (existing && existing.length > 0) {
-      // Reverse the stock balance increments from the original GRV
-      await Promise.all(existing.filter(p => p.stock_item_id).map(p =>
-        supabase.rpc('increment_stock_qty', { item_id: p.stock_item_id, amount: -Number(p.quantity) })
-      ))
-      // Remove the old purchase records so they aren't double-counted alongside the redo
-      await supabase.from('stock_purchases').delete().eq('invoice_id', inv.id)
-    }
-    setRedoingGRVId(null)
-    await openGRV(inv)
   }
 
   async function scanInvoice(file: File, supplierArg?: string) {
@@ -1196,14 +1165,6 @@ export default function FinancesPage() {
                                     {i === 0 && <button type="button" onClick={() => setShowQuickCat(true)} style={{ fontSize: '11px', color: '#1a5c38', background: 'none', border: 'none', cursor: 'pointer', padding: '2px 0', fontWeight: '600' }}>+ New Category</button>}
                                   </div>
                                   {activeCols.map(col => {
-                                    // Auto-calculated total with no column in the supplier's own
-                                    // template to map it to — show it, but read-only, since it's
-                                    // always derived from qty x unit price (+ VAT), never typed in.
-                                    if (col.type === 'readonly') return (
-                                      <div key={col.header} title="Calculated from qty x unit price, incl. VAT" style={{ ...inp, padding: '8px 10px', background: '#f9fafb', color: '#374151', display: 'flex', alignItems: 'center', fontWeight: 600 }}>
-                                        {fmt(Number(line.amount) || 0)}
-                                      </div>
-                                    )
                                     // UoM column gets a dropdown for consistency
                                     if (col.field === 'uom') return (
                                       <select
@@ -1364,9 +1325,6 @@ export default function FinancesPage() {
                         <div style={{ display: 'flex', gap: 6 }}>
                           {(inv.status === 'draft' || inv.status === 'approved') && <button onClick={() => openGRV(inv)} style={smBtn('#fef3c7', '#d97706')}>📦 Receive Goods</button>}
                           {inv.status === 'received' && <button onClick={() => updateInvoiceStatus(inv.id, 'paid')} style={smBtn('#eff6ff', '#2563eb')}>Mark Paid</button>}
-                          {(inv.status === 'received' || inv.status === 'paid') && (suppliers.find(s => s.name === inv.supplier)?.delivers_stock !== false) && (
-                            <button onClick={() => redoGRV(inv)} disabled={redoingGRVId === inv.id} style={smBtn('#faf5ff', '#9333ea')}>{redoingGRVId === inv.id ? 'Reversing…' : '↻ Re-do GRV'}</button>
-                          )}
                           <button onClick={() => openEditInvoice(inv)} style={smBtn('#f3f4f6', '#374151')}>Edit</button>
                           <button onClick={() => setExpandedInv(expandedInv === inv.id ? null : inv.id)} style={smBtn('#f3f4f6', '#374151')}>
                             {expandedInv === inv.id ? '▲ Hide' : '▼ Lines'}
@@ -1479,7 +1437,14 @@ export default function FinancesPage() {
                     </div>
                     <div>
                       <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Supplier (optional)</label>
-                      <input type="text" placeholder="Supplier name" value={qForm.supplier} onChange={e => setQForm(f => ({ ...f, supplier: e.target.value }))} style={inp} />
+                      <select value={qForm.supplier} onChange={e => setQForm(f => ({ ...f, supplier: e.target.value }))} style={inp}>
+                        <option value="">— Select supplier —</option>
+                        {suppliers.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
+                        <option value="other">Other (not listed)</option>
+                      </select>
+                      {qForm.supplier === 'other' && (
+                        <input type="text" placeholder="Type supplier name" onChange={e => setQForm(f => ({ ...f, supplier: e.target.value === 'other' ? '' : e.target.value }))} style={{ ...inp, marginTop: 6 }} />
+                      )}
                     </div>
                     <div>
                       <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Notes</label>
