@@ -283,10 +283,20 @@ export default function ChatPage() {
                 )}
                 {messages.map(msg => {
                   const isMe = msg.sender_id === currentUser?.id;
+                  const isPhoto = msg.message.startsWith('[PHOTO]:');
+                  const photoUrl = isPhoto ? msg.message.replace('[PHOTO]:', '').split('\n')[0].trim() : null;
+                  const photoCaption = isPhoto ? msg.message.split('\n').slice(1).join('\n').trim() : null;
                   return (
                     <div key={msg.id} style={{ display: 'flex', flexDirection: 'column', alignItems: isMe ? 'flex-end' : 'flex-start' }}>
-                      <div style={{ background: isMe ? PRIMARY : '#fff', color: isMe ? '#fff' : '#333', padding: '10px 16px', borderRadius: isMe ? '18px 18px 4px 18px' : '18px 18px 18px 4px', maxWidth: '65%', fontSize: 14, lineHeight: 1.5, boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
-                        {msg.message}
+                      <div style={{ background: isMe ? PRIMARY : '#fff', color: isMe ? '#fff' : '#333', padding: isPhoto ? '8px 8px 10px' : '10px 16px', borderRadius: isMe ? '18px 18px 4px 18px' : '18px 18px 18px 4px', maxWidth: '65%', fontSize: 14, lineHeight: 1.5, boxShadow: '0 1px 4px rgba(0,0,0,0.08)', overflow: 'hidden' }}>
+                        {isPhoto && photoUrl ? (
+                          <>
+                            <img src={photoUrl} alt="compliance photo" onClick={() => window.open(photoUrl, '_blank')} style={{ width: '100%', borderRadius: 10, objectFit: 'cover', maxHeight: 220, cursor: 'zoom-in', display: 'block' }} />
+                            {photoCaption && <div style={{ marginTop: 6, fontSize: 13, padding: '0 4px' }}>{photoCaption}</div>}
+                          </>
+                        ) : (
+                          msg.message
+                        )}
                       </div>
                       <div style={{ fontSize: 11, color: '#ccc', marginTop: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
                         {new Date(msg.created_at).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })}
