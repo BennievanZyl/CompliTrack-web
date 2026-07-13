@@ -202,7 +202,18 @@ export default function CompliancePage() {
     return newConv?.id || null;
   }
 
-  async function sendComment() {
+  async function sharePhotoToChat(photoUrl: string, taskName: string, caption?: string) {
+    if (!session || !currentUser) return;
+    const recipientId = session.opened_by;
+    if (!recipientId || recipientId === currentUser.id) return;
+    const convId = await getOrCreateConversation(recipientId);
+    if (!convId) return;
+    const sessionDate = new Date(session.session_date).toLocaleDateString('en-ZA');
+    const message = `[PHOTO]:${photoUrl}\n📋 ${taskName} — ${sessionDate}${caption ? `\n${caption}` : ''}`;
+    await supabase.from('chat_messages').insert({ conversation_id: convId, sender_id: currentUser.id, recipient_id: recipientId, message });
+    await supabase.from('conversations').update({ last_message: `📷 Compliance photo: ${taskName}`, last_message_at: new Date().toISOString() }).eq('id', convId);
+    alert('Photo shared to chat with store manager ✓');
+  }
     if (!newComment.trim() || !selectedItem || !session || !currentUser) return;
     setSendingComment(true);
     await supabase.from('compliance_comments').insert({
@@ -308,6 +319,12 @@ export default function CompliancePage() {
                     </div>
                   </div>
                   <div style={{ fontSize: 11, color: '#aaa', marginTop: 6, textAlign: 'center' }}>Tap to enlarge for inspection</div>
+                  <button
+                    onClick={() => sharePhotoToChat(selectedItem.photo_url!, selectedItem.checklist_templates?.task_name || 'Checklist item')}
+                    style={{ marginTop: 8, width: '100%', padding: '8px 12px', background: '#f0f7f4', color: PRIMARY, border: `1px solid #bbf7d0`, borderRadius: 8, cursor: 'pointer', fontSize: 13, fontWeight: 700 }}
+                  >
+                    📤 Share photo to franchisee chat
+                  </button>
                 </div>
               )}
               <div>
