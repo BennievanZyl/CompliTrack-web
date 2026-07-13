@@ -120,7 +120,7 @@ export default function StockPage() {
   const [itemForm, setItemForm] = useState({ name: '', description: '', category_id: 'goods', unit: 'each', cost_price: '', par_level: '', supplier: 'Other', on_daily_sheet: false, is_catch_weight: false, kg_price: '', avg_weight_kg: '', is_prepped_item: false, parent_item_id: '', portion_size: '' })
   const [purchaseForm, setPurchaseForm] = useState({ purchase_date: new Date().toISOString().split('T')[0], supplier_name: '', stock_item_id: '', item_name: '', quantity: '', unit: 'each', unit_cost: '', invoice_number: '' })
   const [wastageForm, setWastageForm] = useState({ wastage_date: new Date().toISOString().split('T')[0], stock_item_id: '', item_name: '', quantity: '', unit: 'each', unit_cost: '', reason: 'Expired' })
-  const [issueForm, setIssueForm] = useState({ issue_date: new Date().toISOString().split('T')[0], stock_item_id: '', item_name: '', quantity: '', unit: 'each', issued_to: 'Kitchen', notes: '' })
+  const [issueForm, setIssueForm] = useState({ issue_date: new Date().toISOString().split('T')[0], stock_item_id: '', item_name: '', quantity: '', unit: 'each', issued_to: 'Kitchen', notes: '', prepped_item_id: '', prepped_qty: '' })
   const [orderForm, setOrderForm] = useState({ supplier_name: '', order_date: new Date().toISOString().split('T')[0], expected_delivery: '', notes: '' })
   const [categoryForm, setCategoryForm] = useState({ name: '', color: '#1a5c38' })
 
@@ -276,13 +276,18 @@ export default function StockPage() {
   async function saveIssue() {
     if (!issueForm.stock_item_id || !(parseFloat(issueForm.quantity || '0') > 0)) { alert('Select an item and quantity'); return }
     setSaving(true)
+    const preppedQty = issueForm.prepped_item_id ? parseFloat(issueForm.prepped_qty || '0') : 0
     await supabase.from('stock_issues').insert({
       store_id: STORE_ID, issue_date: issueForm.issue_date, stock_item_id: issueForm.stock_item_id || null,
       item_name: issueForm.item_name || items.find(i => i.id === issueForm.stock_item_id)?.description || null,
-      quantity: parseFloat(issueForm.quantity || '0'), unit: issueForm.unit, issued_to: issueForm.issued_to, notes: issueForm.notes || null
+      quantity: parseFloat(issueForm.quantity || '0'), unit: issueForm.unit, issued_to: issueForm.issued_to, notes: issueForm.notes || null,
+      prepped_item_id: issueForm.prepped_item_id || null, prepped_qty: preppedQty > 0 ? preppedQty : null
     })
     await supabase.rpc('increment_stock_qty', { item_id: issueForm.stock_item_id, amount: -parseFloat(issueForm.quantity) })
-    setIssueForm({ issue_date: new Date().toISOString().split('T')[0], stock_item_id: '', item_name: '', quantity: '', unit: 'each', issued_to: 'Kitchen', notes: '' })
+    if (issueForm.prepped_item_id && preppedQty > 0) {
+      await supabase.rpc('increment_stock_qty', { item_id: issueForm.prepped_item_id, amount: preppedQty })
+    }
+    setIssueForm({ issue_date: new Date().toISOString().split('T')[0], stock_item_id: '', item_name: '', quantity: '', unit: 'each', issued_to: 'Kitchen', notes: '', prepped_item_id: '', prepped_qty: '' })
     setShowAddIssue(false); await loadAll(); setSaving(false)
   }
 
@@ -1196,7 +1201,7 @@ export default function StockPage() {
           <div><label style={LABEL}>Date</label><input type="date" value={issueForm.issue_date} onChange={e => setIssueForm(f => ({ ...f, issue_date: e.target.value }))} style={INPUT} /></div>
           <div>
             <label style={LABEL}>Stock Item</label>
-            <select value={issueForm.stock_item_id} onChange={e => { const item = items.find(i => i.id === e.target.value); setIssueForm(f => ({ ...f, stock_item_id: e.target.value, item_name: (item?.description||item?.name)||'', unit: item?.unit||f.unit })) }} style={INPUT}>
+            <select value={issueForm.stock_item_id} onChange={e => { const item = items.find(i => i.id === e.target.value); setIssueForm(f => ({ ...f, stock_item_id: e.target.value, item_name: (item?.description||item?.name)||'', unit: item?.unit||f.unit, prepped_item_id: '', prepped_qty: '' })) }} style={INPUT}>
               <option value="">Select stock item</option>
               {suppliers.map(sup => { const supItems = items.filter(i => (i.supplier||'Other')===sup.name); return supItems.length ? <optgroup key={sup.id} label={sup.name}>{supItems.map(i => <option key={i.id} value={i.id}>{i.description||i.name}</option>)}</optgroup> : null })}
             </select>
@@ -1209,6 +1214,31 @@ export default function StockPage() {
             <div><label style={LABEL}>Quantity</label><input type="number" step="0.1" value={issueForm.quantity} onChange={e => setIssueForm(f => ({ ...f, quantity: e.target.value }))} placeholder="0" style={INPUT} /></div>
             <div><label style={LABEL}>Unit</label><select value={issueForm.unit} onChange={e => setIssueForm(f => ({ ...f, unit: e.target.value }))} style={INPUT}>{UNITS.map(u => <option key={u}>{u}</option>)}</select></div>
           </div>
+          {issueForm.stock_item_id && (() => {
+            const children = items.filter(i => i.parent_item_id === issueForm.stock_item_id)
+            if (!children.length) return null
+            const parentUnit = items.find(i => i.id === issueForm.stock_item_id)?.unit || ''
+            return (
+              <div style={{ background: '#f5f3ff', border: '1.5px solid #ddd6fe', borderRadius: '12px', padding: '14px' }}>
+                <div style={{ fontWeight: 700, fontSize: '13px', color: '#6d28d9', marginBottom: '4px' }}>🍽️ Prepped Into (optional)</div>
+                <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '10px' }}>Portioning this into an Instore item? Record it to credit that item's stock.</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '10px' }}>
+                  <div><label style={LABEL}>Prepped Into</label>
+                    <select value={issueForm.prepped_item_id} onChange={e => {
+                      const child = items.find(i => i.id === e.target.value)
+                      const qty = parseFloat(issueForm.quantity || '0')
+                      const suggested = child?.portion_size ? qty / Number(child.portion_size) : 0
+                      setIssueForm(f => ({ ...f, prepped_item_id: e.target.value, prepped_qty: suggested > 0 ? String(Math.floor(suggested)) : '' }))
+                    }} style={INPUT}>
+                      <option value="">— None —</option>
+                      {children.map(c => <option key={c.id} value={c.id}>{c.description||c.name} ({c.portion_size}{parentUnit} each)</option>)}
+                    </select>
+                  </div>
+                  <div><label style={LABEL}>Portions Made</label><input type="number" step="1" min="0" value={issueForm.prepped_qty} onChange={e => setIssueForm(f => ({ ...f, prepped_qty: e.target.value }))} placeholder="0" style={INPUT} disabled={!issueForm.prepped_item_id} /></div>
+                </div>
+              </div>
+            )
+          })()}
           <div><label style={LABEL}>Issued To</label><select value={issueForm.issued_to} onChange={e => setIssueForm(f => ({ ...f, issued_to: e.target.value }))} style={INPUT}>{ISSUE_DESTINATIONS.map(d => <option key={d}>{d}</option>)}</select></div>
           <div><label style={LABEL}>Notes</label><input value={issueForm.notes} onChange={e => setIssueForm(f => ({ ...f, notes: e.target.value }))} placeholder="Optional" style={INPUT} /></div>
         </div>
