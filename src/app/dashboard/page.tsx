@@ -62,6 +62,43 @@ function DashboardContent() {
       .eq('recipient_id', user.id).is('read_at', null)
     setUnreadMessages(count || 0)
     setLoading(false)
+
+    // Realtime subscription for live unread badge — works even when not in chat window
+    const channel = supabase.channel('dashboard-chat-live')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_messages', filter: `recipient_id=eq.${user.id}` }, async (payload: any) => {
+        // New message for me — increment badge + play a gentle sound
+        setUnreadMessages(n => n + 1)
+        try {
+          const ctx = new (window.AudioContext || (window as any).webkitAudioContext)()
+          const osc = ctx.createOscillator()
+          const gain = ctx.createGain()
+          osc.connect(gain); gain.connect(ctx.destination)
+          osc.frequency.setValueAtTime(880, ctx.currentTime)
+          osc.frequency.exponentialRampToValueAtTime(660, ctx.currentTime + 0.1)
+          gain.gain.setValueAtTime(0.12, ctx.currentTime)
+          gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3)
+          osc.start(); osc.stop(ctx.currentTime + 0.3)
+        } catch {}
+        // Browser notification if tab not focused
+        if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
+          const msg = payload.new?.message
+          new Notification('CompliTrack — New message', {
+            body: msg?.startsWith('[PHOTO]:') ? '📷 Shared a compliance photo' : msg ?? 'You have a new message',
+            icon: '/favicon.ico',
+          })
+        }
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'chat_messages', filter: `recipient_id=eq.${user.id}` }, async () => {
+        // Message was read somewhere — re-fetch accurate count
+        const { count: newCount } = await supabase.from('chat_messages').select('*', { count: 'exact', head: true }).eq('recipient_id', user.id).is('read_at', null)
+        setUnreadMessages(newCount || 0)
+      })
+      .subscribe()
+    // Request browser notification permission
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission()
+    }
+    return () => { supabase.removeChannel(channel) }
   }
 
   async function loadStoreData(storeId: string) {
