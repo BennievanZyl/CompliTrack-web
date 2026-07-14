@@ -138,33 +138,71 @@ export default function ChatPage() {
       .from('conversations')
       .select('*')
       .or(`participant_1.eq.${userId},participant_2.eq.${userId}`)
-      .order('last_message_at', { ascending: false });
+      .order('last_message_at', { ascending: false, nullsFirst: false });
 
     if (!convs) return;
 
     const enriched = await Promise.all(convs.map(async (c) => {
       const otherId = c.participant_1 === userId ? c.participant_2 : c.participant_1;
-      const { data: otherProfile } = await supabase.from('profiles').select('id, full_name, role, store_id, organisation_id').eq('id', otherId).single();
+      const { data: otherProfile } = await supabase
+        .from('profiles').select('id, full_name, role, store_id, organisation_id').eq('id', otherId).single();
+      // Load store name for this contact
+      let storeName: string | null = null;
+      if (otherProfile?.store_id) {
+        const { data: store } = await supabase.from('stores').select('name').eq('id', otherProfile.store_id).single();
+        storeName = store?.name || null;
+      }
       const { count: unread } = await supabase
         .from('chat_messages')
         .select('*', { count: 'exact', head: true })
         .eq('conversation_id', c.id)
         .eq('recipient_id', userId)
         .is('read_at', null);
-      return { ...c, other_user: otherProfile, unread: unread || 0 };
+      return { ...c, other_user: otherProfile, store_name: storeName, unread: unread || 0 };
     }));
 
     setConversations(enriched);
   }
 
   async function loadContacts(profile: Profile) {
+    if (!profile.organisation_id) return;
+    // Load all profiles in the same organisation (except self)
     const { data: allProfiles } = await supabase
       .from('profiles')
       .select('id, full_name, role, store_id, organisation_id')
       .neq('id', profile.id)
+      .eq('organisation_id', profile.organisation_id)
       .eq('is_active', true)
       .order('full_name');
     setContacts(allProfiles || []);
+
+    // For franchisor/owner: auto-create conversations with all store managers
+    // so they appear in the sidebar without needing to "New Chat" first
+    const isFranchisor = profile.role === 'franchisor_owner' || profile.role === 'franchisor' || profile.role === 'owner';
+    if (isFranchisor && allProfiles?.length) {
+      const storeManagers = allProfiles.filter(p =>
+        p.role === 'store_manager' || p.role === 'manager' || p.role === 'franchisee_owner'
+      );
+      for (const manager of storeManagers) {
+        // Check if conversation already exists
+        const { data: existing } = await supabase
+          .from('conversations')
+          .select('id')
+          .or(`and(participant_1.eq.${profile.id},participant_2.eq.${manager.id}),and(participant_1.eq.${manager.id},participant_2.eq.${profile.id})`)
+          .maybeSingle();
+        if (!existing) {
+          // Auto-create conversation so it shows in sidebar
+          await supabase.from('conversations').insert({
+            participant_1: profile.id,
+            participant_2: manager.id,
+            last_message: null,
+            last_message_at: new Date().toISOString(),
+          });
+        }
+      }
+      // Reload conversations to show newly created ones
+      loadConversations(profile.id);
+    }
   }
 
   async function loadMessages(convId: string, userId: string) {
@@ -282,7 +320,7 @@ export default function ChatPage() {
                     <span style={{ fontSize: 12, color: '#aaa', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{conv.last_message || 'No messages yet'}</span>
                     {conv.unread > 0 && <span style={{ background: PRIMARY, color: '#fff', borderRadius: 20, padding: '1px 7px', fontSize: 11, fontWeight: 700, flexShrink: 0, marginLeft: 6 }}>{conv.unread}</span>}
                   </div>
-                  <div style={{ fontSize: 11, color: roleColor(conv.other_user?.role || ''), marginTop: 2, fontWeight: 500 }}>{roleLabel(conv.other_user?.role || '')}</div>
+                  <div style={{ fontSize: 11, color: roleColor(conv.other_user?.role || ''), marginTop: 2, fontWeight: 500 }}>{roleLabel(conv.other_user?.role || '')}{(conv as any).store_name ? ` · 🏪 ${(conv as any).store_name}` : ''}</div>
                 </div>
               </div>
             ))}
