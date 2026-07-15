@@ -129,11 +129,28 @@ export default function DevicesPage() {
 
           {generatedCode && (
             <div style={{ textAlign: 'center', padding: '24px 0' }}>
-              <div style={{ fontSize: 14, color: '#6b7280', marginBottom: 12 }}>Enter this code on the device to link it as <strong>{roleInfo(selectedRole).label}</strong></div>
-              <div style={{ fontSize: 56, fontWeight: 900, letterSpacing: 12, color: PRIMARY, fontFamily: 'monospace', background: '#f0fdf4', borderRadius: 16, padding: '20px 32px', display: 'inline-block', border: '2px solid #bbf7d0' }}>
-                {generatedCode}
+              <div style={{ fontSize: 14, color: '#6b7280', marginBottom: 20 }}>
+                Link as <strong>{roleInfo(selectedRole).label}</strong> — scan the QR code or enter the number
               </div>
-              <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 12 }}>⏱ Code expires in 24 hours · Can only be used once</div>
+              <div style={{ display: 'flex', gap: 32, justifyContent: 'center', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                {/* QR Code using Google Charts API */}
+                <div style={{ textAlign: 'center' }}>
+                  <img
+                    src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=complitrack-device:${generatedCode}&bgcolor=ffffff&color=1a5c38&margin=10`}
+                    alt="QR Code"
+                    style={{ borderRadius: 16, border: '2px solid #bbf7d0', width: 200, height: 200 }}
+                  />
+                  <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 8 }}>Scan with camera</div>
+                </div>
+                {/* Number code */}
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ fontSize: 52, fontWeight: 900, letterSpacing: 10, color: PRIMARY, fontFamily: 'monospace', background: '#f0fdf4', borderRadius: 16, padding: '20px 28px', border: '2px solid #bbf7d0' }}>
+                    {generatedCode}
+                  </div>
+                  <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 8 }}>Or type this code</div>
+                </div>
+              </div>
+              <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 16 }}>⏱ Expires in 24 hours · One use only</div>
               <div style={{ marginTop: 16, display: 'flex', gap: 10, justifyContent: 'center' }}>
                 <button onClick={() => { setGeneratedCode(null); setShowCreate(false) }}
                   style={{ background: PRIMARY, color: '#fff', border: 'none', borderRadius: 10, padding: '10px 20px', cursor: 'pointer', fontWeight: 700 }}>
