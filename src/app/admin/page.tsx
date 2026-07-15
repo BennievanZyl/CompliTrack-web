@@ -183,12 +183,6 @@ export default function PlatformAdminPage() {
                       <option value="suspended">🚫 Suspend</option>
                       <option value="cancelled">❌ Cancel</option>
                     </select>
-                    {client.organisation_id && (
-                      <button onClick={() => router.push(`/org?org=${client.organisation_id}`)}
-                        style={{ background: DARK, color: '#fff', border: 'none', borderRadius: 8, padding: '6px 14px', cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>
-                        Open →
-                      </button>
-                    )}
                     <button onClick={() => openEdit(client)} style={{ background: '#f0fdf4', color: PRIMARY, border: `1.5px solid #bbf7d0`, borderRadius: 8, padding: '6px 14px', cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>Edit</button>
                   </div>
                 )
