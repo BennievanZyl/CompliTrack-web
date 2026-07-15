@@ -502,13 +502,16 @@ export default function StockPage() {
   }
 
   const CAT_LABELS: Record<string,string> = { goods: 'Goods', beverages: 'Beverages', packaging: 'Packaging', basting: 'Basting & Sauces', other: 'Other' }
-  const CAT_COLORS: Record<string,string> = { goods: '#16a34a', beverages: '#2563eb', packaging: '#d97706', basting: '#dc2626', other: '#6b7280' }
-  const FIXED_CATS = ['goods','beverages','packaging','basting','other']
-  const groupedItems = FIXED_CATS.reduce((acc, catKey) => {
-    const catItems = (items || []).filter(i => i.category === catKey)
-    if (catItems.length) acc[catKey] = { key: catKey, label: CAT_LABELS[catKey], color: CAT_COLORS[catKey], items: catItems }
+  // Group items by their actual category UUID — matching real categories
+  const groupedItems = (categories || []).reduce((acc, cat) => {
+    const catItems = (items || []).filter(i => i.category === cat.id)
+    if (catItems.length) acc[cat.id] = { key: cat.id, label: cat.name, color: cat.color || '#6b7280', items: catItems }
     return acc
   }, {} as Record<string, { key: string; label: string; color: string; items: StockItem[] }>)
+  // Also bucket any items with unmatched categories into 'Other'
+  const matchedIds = new Set(Object.values(groupedItems).flatMap(g => g.items.map(i => i.id)))
+  const uncategorised = (items || []).filter(i => !matchedIds.has(i.id))
+  if (uncategorised.length) groupedItems['other'] = { key: 'other', label: 'Other', color: '#6b7280', items: uncategorised }
   const todayStr = new Date().toISOString().split('T')[0]
   const todayPurchases = (purchases || []).filter(p => p.purchase_date === todayStr)
   const todayWastage = (wastage || []).filter(w => w.wastage_date === todayStr)
