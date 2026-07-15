@@ -1000,7 +1000,7 @@ export default function StockPage() {
                                     setItemForm({
                                       name: item.description || item.name || '',
                                       description: item.description || '',
-                                      category_id: catMatch?.id || categories[0]?.id || '',
+                                      category_id: catMatch?.id || item.category || categories[0]?.id || '',
                                       unit: item.unit || 'each',
                                       cost_price: String(Number(item.price) || 0),
                                       par_level: String(Number(item.par_level) || 0),
@@ -1090,14 +1090,7 @@ export default function StockPage() {
                                   setItemForm({
                                     name: item.description || item.name || '',
                                     description: item.description || '',
-                                    category_id: catMatch?.id || categories[0]?.id || '',
-                                    unit: item.unit || 'each',
-                                    cost_price: item.is_catch_weight
-                                      ? String(((Number(item.kg_price) || 0) * (Number(item.avg_weight_kg) || 0)).toFixed(2))
-                                      : String(Number(item.price) || 0),
-                                    par_level: String(Number(item.par_level) || 0),
-                                    supplier: item.supplier || 'Other',
-                                    on_daily_sheet: item.on_daily_sheet || false,
+                                    category_id: catMatch?.id || item.category || categories[0]?.id || '',
                                     is_catch_weight: item.is_catch_weight || false,
                                     kg_price: String(Number(item.kg_price) || ''),
                                     avg_weight_kg: String(Number(item.avg_weight_kg) || ''),
