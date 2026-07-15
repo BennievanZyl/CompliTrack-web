@@ -1805,9 +1805,10 @@ export default function FinancesPage() {
                                const { createClient } = await import('@supabase/supabase-js')
                                const sb = createClient('https://fdixocuxhpafxkfytvxu.supabase.co', process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '')
                                await sb.from('stock_items').update({ price: parseFloat(line.unit_cost), cost_price: parseFloat(line.unit_cost) }).eq('id', line.stock_item_id)
+                               setGrvLines(ls => ls.map((l,idx) => idx===i ? {...l, price_updated: true} : l))
                                alert('Stock price updated to R' + parseFloat(line.unit_cost).toFixed(4) + ' per ' + line.unit)
-                             }} style={{ background: '#1a5c38', color: 'white', border: 'none', borderRadius: 8, padding: '6px 8px', fontSize: 11, cursor: 'pointer', fontWeight: 700 }}>
-                               Update price
+                             }} style={{ background: line.price_updated ? '#1d4ed8' : '#1a5c38', color: 'white', border: 'none', borderRadius: 8, padding: '6px 8px', fontSize: 11, cursor: 'pointer', fontWeight: 700, transition: 'background 0.3s' }}>
+                               {line.price_updated ? '✓ Updated' : 'Update price'}
                              </button>
                            ) : <div />}
                          </div>
