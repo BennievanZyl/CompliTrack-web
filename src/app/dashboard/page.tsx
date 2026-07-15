@@ -20,6 +20,7 @@ function DashboardContent() {
   const [completedTasks, setCompletedTasks] = useState(0)
   const [totalTasks, setTotalTasks] = useState(0)
   const [loading, setLoading] = useState(true)
+  const [accountStatus, setAccountStatus] = useState<string | null>(null)
   const [unreadMessages, setUnreadMessages] = useState(0)
   const [viewingAsStore, setViewingAsStore] = useState<Store | null>(null)
 
@@ -35,6 +36,23 @@ function DashboardContent() {
 
     if (!profileData) { setLoading(false); return }
     setProfile(profileData)
+
+    // Check payment status — skip for platform admin
+    if (profileData.role !== 'platform_admin' && profileData.organisation_id) {
+      const { data: clientData } = await supabase
+        .from('platform_clients')
+        .select('payment_status, client_name')
+        .eq('organisation_id', profileData.organisation_id)
+        .maybeSingle()
+      if (clientData?.payment_status === 'suspended' || clientData?.payment_status === 'cancelled') {
+        setAccountStatus(clientData.payment_status)
+        setLoading(false)
+        return
+      }
+      if (clientData?.payment_status === 'overdue') {
+        setAccountStatus('overdue')
+      }
+    }
 
     const isFranchisor = profileData.role === 'franchisor_admin' || profileData.role === 'platform_admin'
     const isFranchiseeOwner = profileData.role === 'franchisee_owner'
@@ -123,6 +141,33 @@ function DashboardContent() {
   const greeting = () => {
     const h = new Date().getHours()
     return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'
+  }
+
+  // Account suspended or cancelled
+  if (accountStatus === 'suspended' || accountStatus === 'cancelled') {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f8faf8', fontFamily: 'system-ui, sans-serif' }}>
+        <div style={{ textAlign: 'center', maxWidth: 440, padding: 32 }}>
+          <div style={{ fontSize: 64, marginBottom: 20 }}>🚫</div>
+          <div style={{ fontSize: 24, fontWeight: 800, color: '#111', marginBottom: 12 }}>
+            {accountStatus === 'cancelled' ? 'Account Cancelled' : 'Account Suspended'}
+          </div>
+          <div style={{ fontSize: 15, color: '#6b7280', lineHeight: 1.6, marginBottom: 32 }}>
+            {accountStatus === 'cancelled'
+              ? 'Your CompliTrack account has been cancelled. Please contact us to reactivate.'
+              : 'Your account has been suspended due to an outstanding payment. Please contact us to restore access.'}
+          </div>
+          <a href="https://wa.me/27638889702" target="_blank"
+            style={{ display: 'inline-block', background: '#25D366', color: '#fff', borderRadius: 14, padding: '14px 28px', fontWeight: 700, fontSize: 15, textDecoration: 'none' }}>
+            📱 Contact us on WhatsApp
+          </a>
+          <div style={{ marginTop: 16 }}>
+            <span onClick={() => supabase.auth.signOut().then(() => router.push('/login'))}
+              style={{ fontSize: 13, color: '#9ca3af', cursor: 'pointer' }}>Sign out</span>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   if (loading) {
@@ -303,6 +348,19 @@ function DashboardContent() {
       </div>
 
       <main style={{ maxWidth: '1200px', margin: '-60px auto 0', padding: '0 40px 60px', position: 'relative', zIndex: 1 }}>
+        {accountStatus === 'overdue' && (
+          <div style={{ background: '#fffbeb', border: '1.5px solid #fde68a', borderRadius: 16, padding: '14px 20px', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span style={{ fontSize: 24 }}>⚠️</span>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 700, color: '#92400e', fontSize: 15 }}>Payment overdue</div>
+              <div style={{ fontSize: 13, color: '#b45309' }}>Your account has an outstanding payment. Please contact us to avoid suspension.</div>
+            </div>
+            <a href="https://wa.me/27638889702" target="_blank"
+              style={{ background: '#d97706', color: '#fff', borderRadius: 10, padding: '8px 16px', fontWeight: 700, fontSize: 13, textDecoration: 'none' }}>
+              Contact us
+            </a>
+          </div>
+        )}
 
         {isSignedOff && (
           <div style={{ background: 'white', border: '1.5px solid #bbf7d0', borderRadius: '16px', padding: '18px 24px', display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '24px', boxShadow: '0 4px 20px rgba(0,0,0,0.06)' }}>
