@@ -162,7 +162,7 @@ function LoginPage() {
 
           <div style={{ marginTop: 32, textAlign: 'center' }}>
             <span style={{ fontSize: 13, color: '#aaa' }}>New to CompliTrack? </span>
-            <span onClick={() => router.push('/signup')} style={{ fontSize: 13, color: PRIMARY, fontWeight: 600, cursor: 'pointer' }}>Create an account</span>
+            <span onClick={() => router.push('/')} style={{ fontSize: 13, color: PRIMARY, fontWeight: 600, cursor: 'pointer' }}>Learn more about CompliTrack</span>
           </div>
 
           <div style={{ marginTop: 48, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
