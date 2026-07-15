@@ -333,7 +333,7 @@ export default function OrgPage() {
                 return (
                   <div
                     key={store.id}
-                    onClick={() => window.open(`/dashboard?store=${store.id}`, '_blank')}
+                    onClick={() => router.push(`/dashboard?store=${store.id}`)}
                     style={{ background: '#fff', borderRadius: 20, border: `1.5px solid ${borderColor}`, padding: '16px 20px', cursor: 'pointer', boxShadow: '0 2px 8px rgba(0,0,0,0.04)', transition: 'transform 0.15s, box-shadow 0.15s', display: 'flex', alignItems: 'stretch', gap: 0 }}
                     onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 6px 20px rgba(0,0,0,0.1)'; }}
                     onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.04)'; }}
@@ -385,7 +385,7 @@ export default function OrgPage() {
                         { label: 'Analytics', value: '📊', sub: 'View full report', color: PRIMARY, link: true },
                       ].map((kpi, ki) => (
                         <div key={ki}
-                          onClick={kpi.link ? (e) => { e.stopPropagation(); window.open('/analytics', '_blank'); } : undefined}
+                          onClick={kpi.link ? (e) => { e.stopPropagation(); router.push('/analytics'); } : undefined}
                           style={{ textAlign: 'center' as const, padding: '8px 12px', borderLeft: '1px solid #f0f0f0', display: 'flex', flexDirection: 'column' as const, justifyContent: 'center', cursor: kpi.link ? 'pointer' : 'default' }}>
                           <div style={{ fontSize: 10, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase' as const, letterSpacing: 0.4, marginBottom: 4 }}>{kpi.label}</div>
                           <div style={{ fontSize: kpi.link ? 22 : 15, fontWeight: 800, color: kpi.color }}>{kpi.value}</div>
