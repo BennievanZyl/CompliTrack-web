@@ -1,10 +1,10 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { getStoreContext } from '@/lib/store-context'
 import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 
+const STORE_ID = '05328298-fc27-4c9f-b091-bb7f6598b601'
 
 const CATEGORIES = [
   { key: 'fire_safety',  label: 'Fire Safety',        icon: '🔥', color: '#fef2f2', border: '#fecaca', headerBg: '#fee2e2', headerColor: '#991b1b', required: ['Fire extinguisher certificate', 'Fire evacuation plan'] },
@@ -26,7 +26,6 @@ function getExpiryStatus(expiryDate: string | null) {
 }
 
 export default function DocumentsPage() {
-  const [storeId, setStoreId] = useState('')
   const router = useRouter()
   const [documents, setDocuments]         = useState<any[]>([])
   const [loading, setLoading]             = useState(true)
@@ -42,12 +41,11 @@ export default function DocumentsPage() {
     issued_date: '', issued_by: '', notes: '', file: null as File | null,
   })
 
-  useEffect(() => {
-    (async () => { const ctx = await getStoreContext(); const sid = ctx?.storeId || ''; if (sid) setStoreId(sid); if (ctx?.orgId) { try { setOrgId(ctx.orgId) } catch(e){} } await loadDocuments(sid); })() }, [])
+  useEffect(() => { loadDocuments() }, [])
 
   async function loadDocuments() {
     setLoading(true)
-    const { data, error } = await supabase.from('store_documents').select('*').eq('store_id', effectiveSid).order('created_at', { ascending: false })
+    const { data, error } = await supabase.from('store_documents').select('*').eq('store_id', STORE_ID).order('created_at', { ascending: false })
     if (!error) setDocuments(data || [])
     setLoading(false)
   }
@@ -57,11 +55,11 @@ export default function DocumentsPage() {
     setUploading(true)
     try {
       const ext = form.file.name.split('.').pop()
-      const path = `${storeId}/${form.category}/${Date.now()}.${ext}`
+      const path = `${STORE_ID}/${form.category}/${Date.now()}.${ext}`
       const { error: storageError } = await supabase.storage.from('store-documents').upload(path, form.file, { upsert: false })
       if (storageError) throw storageError
       const { error: dbError } = await supabase.from('store_documents').insert({
-        store_id: effectiveSid, category: form.category, document_name: form.document_name,
+        store_id: STORE_ID, category: form.category, document_name: form.document_name,
         file_url: path, file_type: form.file.type.includes('pdf') ? 'pdf' : 'image',
         expiry_date: form.expiry_date || null, issued_date: form.issued_date || null,
         issued_by: form.issued_by || null, notes: form.notes || null,
