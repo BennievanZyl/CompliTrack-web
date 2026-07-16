@@ -27,7 +27,7 @@ function daysUntil(d: string | null) {
 }
 
 export default function ClipboardPage() {
-  const [storeId, setStoreId] = useState(STORE_ID_DEFAULT)
+  const [storeId, setStoreId] = useState('')
   const router = useRouter()
   const [unpaid, setUnpaid] = useState<Invoice[]>([])
   const [unreceived, setUnreceived] = useState<Invoice[]>([])
