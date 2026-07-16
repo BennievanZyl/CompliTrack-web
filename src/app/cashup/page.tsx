@@ -251,23 +251,26 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
   async function checkAuthAndLoad() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { router.push('/login'); return; }
-    await Promise.all([loadCashUp(), loadStaff(), loadEmployees()]);
+    const ctx = await getStoreContext();
+    const sid = ctx?.storeId || DEFAULT_STORE_ID;
+    if (ctx?.storeId) setStoreId(ctx.storeId);
+    await Promise.all([loadCashUp(undefined, sid), loadStaff(sid), loadEmployees(sid)]);
   }
 
-  async function loadStaff() {
-    const { data } = await supabase.from('store_staff').select('id, full_name, role').eq('store_id', storeId).order('full_name');
+  async function loadStaff(sid = storeId) {
+    const { data } = await supabase.from('store_staff').select('id, full_name, role').eq('store_id', sid).order('full_name');
     setStaff(data || []);
   }
 
-  async function loadEmployees() {
-    const { data } = await supabase.from('employees').select('id, full_name, role').eq('store_id', storeId).eq('is_active', true).order('full_name');
+  async function loadEmployees(sid = storeId) {
+    const { data } = await supabase.from('employees').select('id, full_name, role').eq('store_id', sid).eq('is_active', true).order('full_name');
     setEmployees(data || []);
   }
 
-  async function loadCashUp(dateOverride?: string) {
+  async function loadCashUp(dateOverride?: string, sid = storeId) {
     setLoading(true);
     const targetDate = dateOverride || cashUpDate;
-    const { data: existingCashUp } = await supabase.from('cash_ups').select('*').eq('store_id', storeId).eq('cash_up_date', targetDate).maybeSingle();
+    const { data: existingCashUp } = await supabase.from('cash_ups').select('*').eq('store_id', sid).eq('cash_up_date', targetDate).maybeSingle();
     if (existingCashUp) {
       setCashUp(existingCashUp);
       populateForm(existingCashUp);
