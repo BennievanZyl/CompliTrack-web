@@ -4,6 +4,8 @@ import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 
+const STORE_ID = '05328298-fc27-4c9f-b091-bb7f6598b601';
+const ORG_ID = 'e903386b-133a-4bad-b054-ef7ef616a3ff';
 const PRIMARY = '#1a5c38';
 const DARK = '#0a1f12';
 
@@ -157,26 +159,8 @@ function Toggle({ value, onChange, label, color = PRIMARY }: { value: boolean; o
 }
 
 // ─── MAIN PAGE ────────────────────────────────────────────────────────────────
-
-async function getStoreContext(): Promise<{ storeId: string; orgId: string; employerName: string }> {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Not logged in');
-  const { data: profile } = await supabase.from('profiles')
-    .select('store_id, organisation_id').eq('id', user.id).single();
-  if (!profile?.store_id) throw new Error('No store linked');
-  const { data: store } = await supabase.from('stores')
-    .select('name').eq('id', profile.store_id).single();
-  return {
-    storeId: profile.store_id,
-    orgId: profile.organisation_id || '',
-    employerName: store?.name || 'CompliTrack Store',
-  };
-}
-
 export default function PeoplePage() {
   const router = useRouter();
-  const [storeId, setStoreId] = useState('');
-  const [orgId, setOrgId] = useState('');
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -217,25 +201,12 @@ export default function PeoplePage() {
   async function checkAuthAndLoad() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { router.push('/login'); return; }
-    // Get store context directly — don't rely on state variable being set
-    const { data: profile } = await supabase.from('profiles')
-      .select('store_id, organisation_id').eq('id', user.id).single();
-    const sid = profile?.store_id || '';
-    const oid = profile?.organisation_id || '';
-    if (!sid) { setLoading(false); return; }
-    setStoreId(sid);
-    setOrgId(oid);
-    // Get store name for employer name
-    const { data: store } = await supabase.from('stores').select('name').eq('id', sid).single();
-    if (store?.name) {} // employer name used in attendance page
-    await loadEmployees(sid, oid);
+    await loadEmployees();
   }
 
-  async function loadEmployees(sid = storeId, oid = orgId) {
+  async function loadEmployees() {
     setLoading(true);
-    const id = sid || storeId;
-    if (!id) { setLoading(false); return; }
-    const { data } = await supabase.from('employees').select('*').eq('store_id', id).order('full_name');
+    const { data } = await supabase.from('employees').select('*').eq('store_id', STORE_ID).order('full_name');
     setEmployees(data || []);
     setLoading(false);
   }
@@ -265,7 +236,7 @@ export default function PeoplePage() {
     if (!empForm.full_name.trim()) return;
     setSaving(true); setSaveError(null);
     try {
-      const payload = { store_id: storeId, organisation_id: orgId, full_name: empForm.full_name.trim(), role: empForm.role, phone: empForm.phone || null, id_number: empForm.id_number || null, start_date: empForm.start_date || null, employment_type: empForm.employment_type, notes: empForm.notes || null, is_active: empForm.is_active };
+      const payload = { store_id: STORE_ID, organisation_id: ORG_ID, full_name: empForm.full_name.trim(), role: empForm.role, phone: empForm.phone || null, id_number: empForm.id_number || null, start_date: empForm.start_date || null, employment_type: empForm.employment_type, notes: empForm.notes || null, is_active: empForm.is_active };
       if (editEmployee) { await supabase.from('employees').update(payload).eq('id', editEmployee.id); }
       else { await supabase.from('employees').insert(payload); }
       await loadEmployees(); setShowEmployeeModal(false);
@@ -280,7 +251,7 @@ export default function PeoplePage() {
       const ext = docFile.name.split('.').pop();
       const path = `${selectedEmployee.id}/${Date.now()}_${docForm.document_name.replace(/\s+/g, '_')}.${ext}`;
       const fileUrl = await uploadToStorage('employee-documents', path, docFile);
-      await supabase.from('employee_documents').insert({ employee_id: selectedEmployee.id, store_id: storeId, document_type: docForm.document_type, document_name: docForm.document_name, file_url: fileUrl, expiry_date: docForm.expiry_date || null, notes: docForm.notes || null });
+      await supabase.from('employee_documents').insert({ employee_id: selectedEmployee.id, store_id: STORE_ID, document_type: docForm.document_type, document_name: docForm.document_name, file_url: fileUrl, expiry_date: docForm.expiry_date || null, notes: docForm.notes || null });
       await loadEmployeeProfile(selectedEmployee);
       setShowDocModal(false); setDocForm({ document_type: 'Employment Contract', document_name: '', expiry_date: '', notes: '' }); setDocFile(null);
     } catch (e: unknown) { setSaveError(e instanceof Error ? e.message : 'Upload failed'); }
@@ -291,7 +262,7 @@ export default function PeoplePage() {
     if (!selectedEmployee || !leaveForm.start_date || !leaveForm.end_date) return;
     setSaving(true); setSaveError(null);
     try {
-      await supabase.from('employee_leave').insert({ employee_id: selectedEmployee.id, store_id: storeId, leave_type: leaveForm.leave_type, start_date: leaveForm.start_date, end_date: leaveForm.end_date, days_taken: parseFloat(leaveForm.days_taken) || 1, status: leaveForm.status, reason: leaveForm.reason || null, notes: leaveForm.notes || null, paid_hours_per_day: parseFloat(leaveForm.paid_hours_per_day) || 0 });
+      await supabase.from('employee_leave').insert({ employee_id: selectedEmployee.id, store_id: STORE_ID, leave_type: leaveForm.leave_type, start_date: leaveForm.start_date, end_date: leaveForm.end_date, days_taken: parseFloat(leaveForm.days_taken) || 1, status: leaveForm.status, reason: leaveForm.reason || null, notes: leaveForm.notes || null, paid_hours_per_day: parseFloat(leaveForm.paid_hours_per_day) || 0 });
       await loadEmployeeProfile(selectedEmployee); setShowLeaveModal(false); setLeaveForm({ leave_type: 'Annual', start_date: '', end_date: '', days_taken: '', status: 'approved', reason: '', notes: '', paid_hours_per_day: '' });
     } catch (e: unknown) { setSaveError(e instanceof Error ? e.message : 'Failed to save'); }
     setSaving(false);
@@ -307,7 +278,7 @@ export default function PeoplePage() {
         const path = `${selectedEmployee.id}/warnings/${Date.now()}.${ext}`;
         documentUrl = await uploadToStorage('employee-documents', path, warningFile);
       }
-      await supabase.from('employee_warnings').insert({ employee_id: selectedEmployee.id, store_id: storeId, warning_type: warningForm.warning_type, reason: warningForm.reason, incident_date: warningForm.incident_date, issued_by: warningForm.issued_by, document_url: documentUrl, notes: warningForm.notes || null });
+      await supabase.from('employee_warnings').insert({ employee_id: selectedEmployee.id, store_id: STORE_ID, warning_type: warningForm.warning_type, reason: warningForm.reason, incident_date: warningForm.incident_date, issued_by: warningForm.issued_by, document_url: documentUrl, notes: warningForm.notes || null });
       await loadEmployeeProfile(selectedEmployee); setShowWarningModal(false); setWarningForm({ warning_type: 'Written Warning', reason: '', incident_date: '', issued_by: '', notes: '' }); setWarningFile(null);
     } catch (e: unknown) { setSaveError(e instanceof Error ? e.message : 'Failed to save'); }
     setSaving(false);
@@ -317,7 +288,7 @@ export default function PeoplePage() {
     if (!selectedEmployee || !advanceForm.amount || !advanceForm.advance_date) return;
     setSaving(true); setSaveError(null);
     try {
-      await supabase.from('employee_advances').insert({ employee_id: selectedEmployee.id, store_id: storeId, amount: parseFloat(advanceForm.amount), reason: advanceForm.reason || null, advance_date: advanceForm.advance_date, repayment_status: advanceForm.repayment_status, deduct_from_wages: advanceForm.deduct_from_wages, notes: advanceForm.notes || null });
+      await supabase.from('employee_advances').insert({ employee_id: selectedEmployee.id, store_id: STORE_ID, amount: parseFloat(advanceForm.amount), reason: advanceForm.reason || null, advance_date: advanceForm.advance_date, repayment_status: advanceForm.repayment_status, deduct_from_wages: advanceForm.deduct_from_wages, notes: advanceForm.notes || null });
       await loadEmployeeProfile(selectedEmployee); setShowAdvanceModal(false); setAdvanceForm({ amount: '', reason: '', advance_date: new Date().toISOString().split('T')[0], repayment_status: 'outstanding', deduct_from_wages: false, notes: '' });
     } catch (e: unknown) { setSaveError(e instanceof Error ? e.message : 'Failed to save'); }
     setSaving(false);
@@ -330,7 +301,7 @@ export default function PeoplePage() {
       const clockIn = attendanceForm.clock_in ? `${attendanceForm.work_date}T${attendanceForm.clock_in}:00` : null;
       const clockOut = attendanceForm.clock_out ? `${attendanceForm.work_date}T${attendanceForm.clock_out}:00` : null;
       const hours = clockIn && clockOut ? (new Date(clockOut).getTime() - new Date(clockIn).getTime()) / (1000 * 60 * 60) : null;
-      await supabase.from('attendance').insert({ employee_id: selectedEmployee.id, store_id: storeId, work_date: attendanceForm.work_date, clock_in: clockIn, clock_out: clockOut, hours_worked: hours, is_late: attendanceForm.is_late, notes: attendanceForm.notes || null });
+      await supabase.from('attendance').insert({ employee_id: selectedEmployee.id, store_id: STORE_ID, work_date: attendanceForm.work_date, clock_in: clockIn, clock_out: clockOut, hours_worked: hours, is_late: attendanceForm.is_late, notes: attendanceForm.notes || null });
       await loadEmployeeProfile(selectedEmployee); setShowAttendanceModal(false); setAttendanceForm({ work_date: new Date().toISOString().split('T')[0], clock_in: '', clock_out: '', is_late: false, notes: '' });
     } catch (e: unknown) { setSaveError(e instanceof Error ? e.message : 'Failed to save'); }
     setSaving(false);
