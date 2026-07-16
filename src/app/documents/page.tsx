@@ -27,7 +27,7 @@ function getExpiryStatus(expiryDate: string | null) {
 }
 
 export default function DocumentsPage() {
-  const [storeId, setStoreId] = useState(STORE_ID_DEFAULT)
+  const [storeId, setStoreId] = useState('')
   const router = useRouter()
   const [documents, setDocuments]         = useState<any[]>([])
   const [loading, setLoading]             = useState(true)
