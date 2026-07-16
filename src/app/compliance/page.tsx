@@ -110,7 +110,7 @@ export default function CompliancePage() {
   const sessionRef = useRef<Session | null>(null);
 
   useEffect(() => {
-    getStoreContext().then(ctx => { if(ctx?.storeId) setStoreId(ctx.storeId) }); checkAuthAndLoad(); }, []);
+    getStoreContext().then(ctx => { if(ctx?.storeId) setStoreId(ctx.storeId) }).finally(() => checkAuthAndLoad()); }, []);
   useEffect(() => { sessionRef.current = session; }, [session]);
 
   useEffect(() => {
@@ -119,7 +119,7 @@ export default function CompliancePage() {
     const interval = setInterval(() => {
       if (sessionRef.current?.started_at) setElapsed(formatElapsed(sessionRef.current.started_at));
     }, 1000);
-  if (!storeId) {
+  if (!storeId && !loading) {
     return (
       <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f8faf8', fontFamily: 'system-ui, sans-serif' }}>
         <div style={{ textAlign: 'center', maxWidth: 400, padding: 32 }}>
