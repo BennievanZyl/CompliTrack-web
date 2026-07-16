@@ -87,6 +87,7 @@ const emptyQuick = () => ({
 })
 
 export default function FinancesPage() {
+  const [storeId, setStoreId] = useState(STORE_ID_DEFAULT)
   const router = useRouter()
   const [tab, setTab] = useState(0)
   const [historyInvoices, setHistoryInvoices] = useState<Invoice[]>([])
@@ -213,7 +214,8 @@ export default function FinancesPage() {
     setLoading(false)
   }, [month])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    getStoreContext().then(ctx => { if(ctx?.storeId) setStoreId(ctx.storeId) }) load() }, [load])
 
   function fcPeriodRange(): [string, string] {
     if (fcMode === 'week') {
