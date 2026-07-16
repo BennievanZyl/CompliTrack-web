@@ -33,8 +33,8 @@ async function getStoreContext(): Promise<{ storeId: string; orgId: string; empl
 
 export default function WagesPage() {
   const router = useRouter()
-  const [storeId, setStoreId] = useState('05328298-fc27-4c9f-b091-bb7f6598b601')
-  const [orgId, setOrgId] = useState('e903386b-133a-4bad-b054-ef7ef616a3ff')
+  const [storeId, setStoreId] = useState('')
+  const [orgId, setOrgId] = useState('')
   const [tab, setTab] = useState<'advances' | 'slips' | 'settings'>('advances')
   const [employees, setEmployees] = useState<Employee[]>([])
   const [wages, setWages] = useState<EmployeeWage[]>([])
