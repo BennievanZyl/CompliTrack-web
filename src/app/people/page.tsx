@@ -355,7 +355,7 @@ export default function PeoplePage() {
   const totalLeaveDays = leave.filter(l => l.status === 'approved').reduce((sum, l) => sum + l.days_taken, 0);
   const outstandingAdvances = advances.filter(a => a.repayment_status === 'outstanding').reduce((sum, a) => sum + a.amount, 0);
 
-  if (!storeId) {
+  if (!storeId && !loading) {
     return (
       <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f8faf8', fontFamily: 'system-ui, sans-serif' }}>
         <div style={{ textAlign: 'center', maxWidth: 400, padding: 32 }}>
