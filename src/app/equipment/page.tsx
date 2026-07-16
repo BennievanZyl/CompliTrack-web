@@ -155,7 +155,7 @@ export default function EquipmentPage() {
   });
 
   useEffect(() => {
-    getStoreContext().then(ctx => { if(ctx?.storeId) setStoreId(ctx.storeId) }); checkAuthAndLoad(); }, []);
+    getStoreContext().then(ctx => { if(ctx?.storeId) setStoreId(ctx.storeId) }).finally(() => checkAuthAndLoad()); }, []);
 
   async function checkAuthAndLoad() {
     const { data: { user } } = await supabase.auth.getUser();
@@ -371,7 +371,7 @@ export default function EquipmentPage() {
   const cardStyle = { background: '#fff', borderRadius: 20, padding: 24, border: '1px solid #eef2ee', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' };
   const tabBtnStyle = (active: boolean) => ({ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', fontWeight: 600, fontSize: 12, background: active ? PRIMARY : 'transparent', color: active ? '#fff' : '#666' });
 
-  if (!storeId) {
+  if (!storeId && !loading) {
     return (
       <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f8faf8', fontFamily: 'system-ui, sans-serif' }}>
         <div style={{ textAlign: 'center', maxWidth: 400, padding: 32 }}>
