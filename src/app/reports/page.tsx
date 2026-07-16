@@ -102,7 +102,7 @@ export default function ReportsPage() {
 
   // ── FINANCIAL REPORTS ──────────────────────────────────────────────────────
   async function salesReport(fmt_: 'csv' | 'excel' | 'pdf') {
-    const { data } = await supabase.from('cash_ups').select('cash_up_date,cash_up_total,payment_method,status,cashier_name,notes').eq('store_id', storeId).neq('status', 'draft').gte('cash_up_date', startDate).lte('cash_up_date', endDate).order('cash_up_date')
+    const { data } = await supabase.from('cash_ups').select('cash_up_date,cash_up_total,payment_method,status,cashier_name,notes').eq('store_id', sid || storeId).neq('status', 'draft').gte('cash_up_date', startDate).lte('cash_up_date', endDate).order('cash_up_date')
     const rows = (data || []).map(r => ({ Date: r.cash_up_date, 'Sales (incl VAT)': Number(r.cash_up_total || 0).toFixed(2), 'Sales (ex-VAT)': (Number(r.cash_up_total || 0) / 1.15).toFixed(2), 'VAT (15%)': (Number(r.cash_up_total || 0) * 0.15 / 1.15).toFixed(2), 'Payment Method': r.payment_method || '', Cashier: r.cashier_name || '', Status: r.status || '', Notes: r.notes || '' }))
     const total = (data || []).reduce((s, r) => s + Number(r.cash_up_total || 0), 0)
     const totals = { Date: 'TOTAL', 'Sales (incl VAT)': total.toFixed(2), 'Sales (ex-VAT)': (total / 1.15).toFixed(2), 'VAT (15%)': (total * 0.15 / 1.15).toFixed(2), 'Payment Method': '', Cashier: '', Status: '', Notes: '' }
@@ -113,8 +113,8 @@ export default function ReportsPage() {
 
   async function expensesReport(fmt_: 'csv' | 'excel' | 'pdf') {
     const [{ data: exp }, { data: inv }] = await Promise.all([
-      supabase.from('expenses').select('expense_date,category_name,description,amount,vat_amount,supplier,invoice_number,payment_method').eq('store_id', storeId).gte('expense_date', startDate).lte('expense_date', endDate).order('expense_date'),
-      supabase.from('invoices').select('invoice_date,supplier,invoice_number,total_amount,total_vat,status,payment_method').eq('store_id', storeId).in('status', ['received', 'paid']).gte('invoice_date', startDate).lte('invoice_date', endDate).order('invoice_date'),
+      supabase.from('expenses').select('expense_date,category_name,description,amount,vat_amount,supplier,invoice_number,payment_method').eq('store_id', sid || storeId).gte('expense_date', startDate).lte('expense_date', endDate).order('expense_date'),
+      supabase.from('invoices').select('invoice_date,supplier,invoice_number,total_amount,total_vat,status,payment_method').eq('store_id', sid || storeId).in('status', ['received', 'paid']).gte('invoice_date', startDate).lte('invoice_date', endDate).order('invoice_date'),
     ])
     const expRows = (exp || []).map(r => ({ Date: r.expense_date, Type: 'Quick Expense', Category: r.category_name || '', Description: r.description || '', Supplier: r.supplier || '', 'Invoice #': r.invoice_number || '', 'Amount (excl VAT)': Number(r.amount || 0).toFixed(2), VAT: Number(r.vat_amount || 0).toFixed(2), 'Amount (incl VAT)': (Number(r.amount || 0) + Number(r.vat_amount || 0)).toFixed(2), 'Payment Method': r.payment_method || '' }))
     const invRows = (inv || []).map(r => ({ Date: r.invoice_date, Type: 'Supplier Invoice', Category: 'Supplier Bill', Description: '', Supplier: r.supplier || '', 'Invoice #': r.invoice_number || '', 'Amount (excl VAT)': (Number(r.total_amount || 0) - Number(r.total_vat || 0)).toFixed(2), VAT: Number(r.total_vat || 0).toFixed(2), 'Amount (incl VAT)': Number(r.total_amount || 0).toFixed(2), 'Payment Method': r.payment_method || '' }))
@@ -125,7 +125,7 @@ export default function ReportsPage() {
   }
 
   async function invoiceReport(fmt_: 'csv' | 'excel' | 'pdf') {
-    const { data: invs } = await supabase.from('invoices').select('invoice_date,due_date,supplier,invoice_number,total_amount,total_vat,status,payment_method,notes').eq('store_id', storeId).gte('invoice_date', startDate).lte('invoice_date', endDate).order('invoice_date')
+    const { data: invs } = await supabase.from('invoices').select('invoice_date,due_date,supplier,invoice_number,total_amount,total_vat,status,payment_method,notes').eq('store_id', sid || storeId).gte('invoice_date', startDate).lte('invoice_date', endDate).order('invoice_date')
     const rows = (invs || []).map(r => ({ Date: r.invoice_date, 'Due Date': r.due_date || '', Supplier: r.supplier || '', 'Invoice #': r.invoice_number || '', Status: r.status || '', 'Total (excl VAT)': (Number(r.total_amount || 0) - Number(r.total_vat || 0)).toFixed(2), VAT: Number(r.total_vat || 0).toFixed(2), 'Total (incl VAT)': Number(r.total_amount || 0).toFixed(2), 'Payment Method': r.payment_method || '', Notes: r.notes || '' }))
     if (fmt_ === 'csv') downloadCSV(rows, `Invoices_${startDate}`)
     else if (fmt_ === 'excel') downloadExcel([{ name: 'Invoices', rows }], `Invoices_${startDate}`)
@@ -133,7 +133,7 @@ export default function ReportsPage() {
   }
 
   async function outstandingBillsReport(fmt_: 'csv' | 'excel' | 'pdf') {
-    const { data } = await supabase.from('invoices').select('invoice_date,due_date,supplier,invoice_number,total_amount,notes').eq('store_id', storeId).eq('status', 'received').order('due_date', { ascending: true, nullsFirst: false })
+    const { data } = await supabase.from('invoices').select('invoice_date,due_date,supplier,invoice_number,total_amount,notes').eq('store_id', sid || storeId).eq('status', 'received').order('due_date', { ascending: true, nullsFirst: false })
     const today_ = today()
     const rows = (data || []).map(r => ({ Supplier: r.supplier || '', 'Invoice #': r.invoice_number || '', 'Invoice Date': r.invoice_date, 'Due Date': r.due_date || 'No due date', 'Days Overdue': r.due_date && r.due_date < today_ ? Math.round((new Date(today_).getTime() - new Date(r.due_date).getTime()) / 86400000) : 0, 'Amount (incl VAT)': Number(r.total_amount || 0).toFixed(2), Notes: r.notes || '' }))
     const total = (data || []).reduce((s, r) => s + Number(r.total_amount || 0), 0)
@@ -144,7 +144,7 @@ export default function ReportsPage() {
 
   // ── LABOUR / PAYROLL ───────────────────────────────────────────────────────
   async function payrollReport(fmt_: 'csv' | 'excel' | 'pdf') {
-    const { data } = await supabase.from('wage_payments').select('paid_date,payment_method,gross_pay,net_pay,uif_employee,uif_employer,employee_id,period').eq('store_id', storeId).gte('paid_date', startDate).lte('paid_date', endDate).order('paid_date')
+    const { data } = await supabase.from('wage_payments').select('paid_date,payment_method,gross_pay,net_pay,uif_employee,uif_employer,employee_id,period').eq('store_id', sid || storeId).gte('paid_date', startDate).lte('paid_date', endDate).order('paid_date')
     const empIds = [...new Set((data || []).map(r => r.employee_id).filter(Boolean))]
     const { data: emps } = empIds.length ? await supabase.from('employees').select('id,full_name,id_number,role').in('id', empIds) : { data: [] }
     const empMap: Record<string, any> = {}; (emps || []).forEach(e => empMap[e.id] = e)
@@ -160,7 +160,7 @@ export default function ReportsPage() {
   }
 
   async function attendanceReport(fmt_: 'csv' | 'excel' | 'pdf') {
-    const { data } = await supabase.from('attendance').select('work_date,clock_in,clock_out,hours_worked,is_late,employee_id').eq('store_id', storeId).gte('work_date', startDate).lte('work_date', endDate).order('work_date')
+    const { data } = await supabase.from('attendance').select('work_date,clock_in,clock_out,hours_worked,is_late,employee_id').eq('store_id', sid || storeId).gte('work_date', startDate).lte('work_date', endDate).order('work_date')
     const empIds = [...new Set((data || []).map(r => r.employee_id).filter(Boolean))]
     const { data: emps } = empIds.length ? await supabase.from('employees').select('id,full_name,role').in('id', empIds) : { data: [] }
     const empMap: Record<string, any> = {}; (emps || []).forEach(e => empMap[e.id] = e)
@@ -171,7 +171,7 @@ export default function ReportsPage() {
   }
 
   async function uifReport(fmt_: 'csv' | 'excel' | 'pdf') {
-    const { data } = await supabase.from('wage_payments').select('period,gross_pay,uif_employee,uif_employer,employee_id').eq('store_id', storeId).gte('paid_date', startDate).lte('paid_date', endDate)
+    const { data } = await supabase.from('wage_payments').select('period,gross_pay,uif_employee,uif_employer,employee_id').eq('store_id', sid || storeId).gte('paid_date', startDate).lte('paid_date', endDate)
     const empIds = [...new Set((data || []).map(r => r.employee_id).filter(Boolean))]
     const { data: emps } = empIds.length ? await supabase.from('employees').select('id,full_name,id_number').in('id', empIds) : { data: [] }
     const empMap: Record<string, any> = {}; (emps || []).forEach(e => empMap[e.id] = e)
@@ -184,7 +184,7 @@ export default function ReportsPage() {
 
   // ── STOCK REPORTS ──────────────────────────────────────────────────────────
   async function stockValuationReport(fmt_: 'csv' | 'excel' | 'pdf') {
-    const { data } = await supabase.from('stock_items').select('name,description,unit,current_qty,cost_price,price,supplier,category').eq('store_id', storeId).eq('is_active', true).order('name')
+    const { data } = await supabase.from('stock_items').select('name,description,unit,current_qty,cost_price,price,supplier,category').eq('store_id', sid || storeId).eq('is_active', true).order('name')
     const rows = (data || []).map(r => ({ Item: r.description || r.name || '', Unit: r.unit || '', Supplier: r.supplier || '', 'On Hand': Number(r.current_qty || 0).toFixed(3), 'Cost Price': Number(r.cost_price || r.price || 0).toFixed(2), 'Total Value': (Number(r.current_qty || 0) * Number(r.cost_price || r.price || 0)).toFixed(2) }))
     const totalValue = rows.reduce((s, r) => s + parseFloat(r['Total Value']), 0)
     if (fmt_ === 'csv') downloadCSV(rows, `Stock_Valuation_${today()}`)
@@ -193,7 +193,7 @@ export default function ReportsPage() {
   }
 
   async function purchasesReport(fmt_: 'csv' | 'excel' | 'pdf') {
-    const { data } = await supabase.from('stock_purchases').select('purchase_date,stock_item_id,item_name,qty_received,unit,unit_cost,total_cost,supplier').eq('store_id', storeId).gte('purchase_date', startDate).lte('purchase_date', endDate).order('purchase_date')
+    const { data } = await supabase.from('stock_purchases').select('purchase_date,stock_item_id,item_name,qty_received,unit,unit_cost,total_cost,supplier').eq('store_id', sid || storeId).gte('purchase_date', startDate).lte('purchase_date', endDate).order('purchase_date')
     const rows = (data || []).map(r => ({ Date: r.purchase_date, Item: r.item_name || '', Supplier: r.supplier || '', 'Qty Received': Number(r.qty_received || 0).toFixed(3), Unit: r.unit || '', 'Unit Cost': Number(r.unit_cost || 0).toFixed(4), 'Total Cost': Number(r.total_cost || 0).toFixed(2) }))
     const total = (data || []).reduce((s, r) => s + Number(r.total_cost || 0), 0)
     if (fmt_ === 'csv') downloadCSV(rows, `Purchases_${startDate}`)
@@ -202,7 +202,7 @@ export default function ReportsPage() {
   }
 
   async function wastageReport(fmt_: 'csv' | 'excel' | 'pdf') {
-    const { data } = await supabase.from('stock_wastage').select('wastage_date,item_name,qty,unit,unit_cost,total_cost,reason,recorded_by').eq('store_id', storeId).gte('wastage_date', startDate).lte('wastage_date', endDate).order('wastage_date')
+    const { data } = await supabase.from('stock_wastage').select('wastage_date,item_name,qty,unit,unit_cost,total_cost,reason,recorded_by').eq('store_id', sid || storeId).gte('wastage_date', startDate).lte('wastage_date', endDate).order('wastage_date')
     const rows = (data || []).map(r => ({ Date: r.wastage_date, Item: r.item_name || '', Qty: Number(r.qty || 0).toFixed(3), Unit: r.unit || '', 'Unit Cost': Number(r.unit_cost || 0).toFixed(4), 'Total Loss': Number(r.total_cost || 0).toFixed(2), Reason: r.reason || '', 'Recorded By': r.recorded_by || '' }))
     const total = (data || []).reduce((s, r) => s + Number(r.total_cost || 0), 0)
     if (fmt_ === 'csv') downloadCSV(rows, `Wastage_${startDate}`)
@@ -212,9 +212,9 @@ export default function ReportsPage() {
 
   async function stockMovementReport(fmt_: 'csv' | 'excel' | 'pdf') {
     const [{ data: purchases }, { data: issues }, { data: wastage }] = await Promise.all([
-      supabase.from('stock_purchases').select('purchase_date,item_name,qty_received,unit,total_cost').eq('store_id', storeId).gte('purchase_date', startDate).lte('purchase_date', endDate),
-      supabase.from('stock_issues').select('issue_date,item_name,quantity,unit,issued_to').eq('store_id', storeId).gte('issue_date', startDate).lte('issue_date', endDate),
-      supabase.from('stock_wastage').select('wastage_date,item_name,qty,unit,total_cost').eq('store_id', storeId).gte('wastage_date', startDate).lte('wastage_date', endDate),
+      supabase.from('stock_purchases').select('purchase_date,item_name,qty_received,unit,total_cost').eq('store_id', sid || storeId).gte('purchase_date', startDate).lte('purchase_date', endDate),
+      supabase.from('stock_issues').select('issue_date,item_name,quantity,unit,issued_to').eq('store_id', sid || storeId).gte('issue_date', startDate).lte('issue_date', endDate),
+      supabase.from('stock_wastage').select('wastage_date,item_name,qty,unit,total_cost').eq('store_id', sid || storeId).gte('wastage_date', startDate).lte('wastage_date', endDate),
     ])
     const purchRows = (purchases || []).map(r => ({ Date: r.purchase_date, Type: 'IN — Purchase', Item: r.item_name || '', Qty: `+${Number(r.qty_received || 0).toFixed(3)}`, Unit: r.unit || '', Value: Number(r.total_cost || 0).toFixed(2), Notes: '' }))
     const issueRows = (issues || []).map(r => ({ Date: r.issue_date, Type: 'OUT — Issue', Item: r.item_name || '', Qty: `-${Number(r.quantity || 0).toFixed(3)}`, Unit: r.unit || '', Value: '', Notes: r.issued_to || '' }))
@@ -227,7 +227,7 @@ export default function ReportsPage() {
 
   // ── COMPLIANCE REPORTS ────────────────────────────────────────────────────
   async function complianceReport(fmt_: 'csv' | 'excel' | 'pdf') {
-    const { data: sessions } = await supabase.from('daily_sessions').select('id,session_date,status,duration_seconds,session_type').eq('store_id', storeId).eq('session_type', 'daily').gte('session_date', startDate).lte('session_date', endDate).order('session_date')
+    const { data: sessions } = await supabase.from('daily_sessions').select('id,session_date,status,duration_seconds,session_type').eq('store_id', sid || storeId).eq('session_type', 'daily').gte('session_date', startDate).lte('session_date', endDate).order('session_date')
     const rows = await Promise.all((sessions || []).map(async s => {
       const [{ data: total }, { data: done }] = await Promise.all([
         supabase.from('checklist_items').select('id', { count: 'exact' }).eq('session_id', s.id),
@@ -244,7 +244,7 @@ export default function ReportsPage() {
   }
 
   async function temperatureReport(fmt_: 'csv' | 'excel' | 'pdf') {
-    const { data } = await supabase.from('temperature_logs').select('logged_at,equipment_name,temperature,min_temp,max_temp,is_compliant,notes,logged_by').eq('store_id', storeId).gte('logged_at', startDate).lte('logged_at', endDate + 'T23:59:59').order('logged_at')
+    const { data } = await supabase.from('temperature_logs').select('logged_at,equipment_name,temperature,min_temp,max_temp,is_compliant,notes,logged_by').eq('store_id', sid || storeId).gte('logged_at', startDate).lte('logged_at', endDate + 'T23:59:59').order('logged_at')
     const rows = (data || []).map(r => ({ 'Date/Time': r.logged_at?.replace('T', ' ').slice(0, 16) || '', Equipment: r.equipment_name || '', 'Temp (°C)': r.temperature, 'Min (°C)': r.min_temp || '', 'Max (°C)': r.max_temp || '', Compliant: r.is_compliant ? 'Yes' : 'No', Notes: r.notes || '', 'Logged By': r.logged_by || '' }))
     const violations = rows.filter(r => r.Compliant === 'No').length
     if (fmt_ === 'csv') downloadCSV(rows, `Temperature_Log_${startDate}`)
@@ -254,7 +254,7 @@ export default function ReportsPage() {
 
   // ── HR REPORTS ─────────────────────────────────────────────────────────────
   async function employeeListReport(fmt_: 'csv' | 'excel' | 'pdf') {
-    const { data } = await supabase.from('employees').select('full_name,id_number,role,phone,email,hourly_rate,pay_frequency,is_active').eq('store_id', storeId).order('full_name')
+    const { data } = await supabase.from('employees').select('full_name,id_number,role,phone,email,hourly_rate,pay_frequency,is_active').eq('store_id', sid || storeId).order('full_name')
     const rows = (data || []).map(r => ({ Name: r.full_name || '', 'ID Number': r.id_number || '', Role: r.role || '', Phone: r.phone || '', Email: r.email || '', 'Hourly Rate': Number(r.hourly_rate || 0).toFixed(2), 'Pay Frequency': r.pay_frequency || '', Active: r.is_active ? 'Yes' : 'No' }))
     if (fmt_ === 'csv') downloadCSV(rows, `Employees_${today()}`)
     else if (fmt_ === 'excel') downloadExcel([{ name: 'Employees', rows }], `Employees_${today()}`)
@@ -275,12 +275,12 @@ export default function ReportsPage() {
   // ── COMBINED ACCOUNTANT PACK ───────────────────────────────────────────────
   async function accountantPack() {
     const [salesRes, expRes, invRes, payrollRes, purchRes, wastRes] = await Promise.all([
-      supabase.from('cash_ups').select('cash_up_date,cash_up_total').eq('store_id', storeId).neq('status', 'draft').gte('cash_up_date', startDate).lte('cash_up_date', endDate).order('cash_up_date'),
-      supabase.from('expenses').select('expense_date,category_name,description,amount,vat_amount,supplier,invoice_number').eq('store_id', storeId).gte('expense_date', startDate).lte('expense_date', endDate).order('expense_date'),
-      supabase.from('invoices').select('invoice_date,supplier,invoice_number,total_amount,total_vat,status').eq('store_id', storeId).in('status', ['received', 'paid']).gte('invoice_date', startDate).lte('invoice_date', endDate).order('invoice_date'),
-      supabase.from('wage_payments').select('paid_date,period,gross_pay,net_pay,uif_employee,uif_employer,employee_id').eq('store_id', storeId).gte('paid_date', startDate).lte('paid_date', endDate).order('paid_date'),
-      supabase.from('stock_purchases').select('purchase_date,item_name,qty_received,unit,unit_cost,total_cost,supplier').eq('store_id', storeId).gte('purchase_date', startDate).lte('purchase_date', endDate).order('purchase_date'),
-      supabase.from('stock_wastage').select('wastage_date,item_name,qty,unit,total_cost,reason').eq('store_id', storeId).gte('wastage_date', startDate).lte('wastage_date', endDate).order('wastage_date'),
+      supabase.from('cash_ups').select('cash_up_date,cash_up_total').eq('store_id', sid || storeId).neq('status', 'draft').gte('cash_up_date', startDate).lte('cash_up_date', endDate).order('cash_up_date'),
+      supabase.from('expenses').select('expense_date,category_name,description,amount,vat_amount,supplier,invoice_number').eq('store_id', sid || storeId).gte('expense_date', startDate).lte('expense_date', endDate).order('expense_date'),
+      supabase.from('invoices').select('invoice_date,supplier,invoice_number,total_amount,total_vat,status').eq('store_id', sid || storeId).in('status', ['received', 'paid']).gte('invoice_date', startDate).lte('invoice_date', endDate).order('invoice_date'),
+      supabase.from('wage_payments').select('paid_date,period,gross_pay,net_pay,uif_employee,uif_employer,employee_id').eq('store_id', sid || storeId).gte('paid_date', startDate).lte('paid_date', endDate).order('paid_date'),
+      supabase.from('stock_purchases').select('purchase_date,item_name,qty_received,unit,unit_cost,total_cost,supplier').eq('store_id', sid || storeId).gte('purchase_date', startDate).lte('purchase_date', endDate).order('purchase_date'),
+      supabase.from('stock_wastage').select('wastage_date,item_name,qty,unit,total_cost,reason').eq('store_id', sid || storeId).gte('wastage_date', startDate).lte('wastage_date', endDate).order('wastage_date'),
     ])
     const empIds = [...new Set((payrollRes.data || []).map(r => r.employee_id).filter(Boolean))]
     const { data: emps } = empIds.length ? await supabase.from('employees').select('id,full_name,id_number').in('id', empIds) : { data: [] }
