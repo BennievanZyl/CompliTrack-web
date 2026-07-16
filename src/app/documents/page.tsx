@@ -92,7 +92,7 @@ export default function DocumentsPage() {
   const expiringCount = documents.filter(d => { if (!d.expiry_date) return false; const days = Math.floor((new Date(d.expiry_date).getTime() - Date.now()) / 86400000); return days >= 0 && days <= 30 }).length
   const expiredCount  = documents.filter(d => d.expiry_date && new Date(d.expiry_date) < new Date()).length
 
-  if (!storeId) {
+  if (!storeId && !loading) {
     return (
       <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f8faf8', fontFamily: 'system-ui, sans-serif' }}>
         <div style={{ textAlign: 'center', maxWidth: 400, padding: 32 }}>
