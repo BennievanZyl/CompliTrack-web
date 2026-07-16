@@ -112,7 +112,7 @@ function generateQRDataURL(text: string): string {
 }
 
 export default function EquipmentPage() {
-  const [storeId, setStoreId] = useState(STORE_ID_DEFAULT)
+  const [storeId, setStoreId] = useState('')
   const router = useRouter();
   const [equipment, setEquipment] = useState<Equipment[]>([]);
   const [schedules, setSchedules] = useState<Record<string, ServiceSchedule[]>>({});
