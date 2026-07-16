@@ -48,7 +48,7 @@ export default function DocumentsPage() {
 
   async function loadDocuments() {
     setLoading(true)
-    const { data, error } = await supabase.from('store_documents').select('*').eq('store_id', storeId).order('created_at', { ascending: false })
+    const { data, error } = await supabase.from('store_documents').select('*').eq('store_id', sid || storeId).order('created_at', { ascending: false })
     if (!error) setDocuments(data || [])
     setLoading(false)
   }
@@ -62,7 +62,7 @@ export default function DocumentsPage() {
       const { error: storageError } = await supabase.storage.from('store-documents').upload(path, form.file, { upsert: false })
       if (storageError) throw storageError
       const { error: dbError } = await supabase.from('store_documents').insert({
-        store_id: storeId, category: form.category, document_name: form.document_name,
+        store_id: sid || storeId, category: form.category, document_name: form.document_name,
         file_url: path, file_type: form.file.type.includes('pdf') ? 'pdf' : 'image',
         expiry_date: form.expiry_date || null, issued_date: form.issued_date || null,
         issued_by: form.issued_by || null, notes: form.notes || null,
