@@ -4,8 +4,6 @@ import { getStoreContext } from '@/lib/store-context'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 
-const STORE_ID_DEFAULT = '05328298-fc27-4c9f-b091-bb7f6598b601' // fallback only
-const ORG_ID_DEFAULT = 'e903386b-133a-4bad-b054-ef7ef616a3ff' // fallback only
 const VAT_RATE = 0.15
 
 const TABS = ['Summary', 'Cash-Ups / Sales', 'Supplier Bills', 'Quick Expenses', 'Food Cost', 'History']
