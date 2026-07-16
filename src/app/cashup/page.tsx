@@ -256,20 +256,21 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
     await Promise.all([loadCashUp(undefined, sid), loadStaff(sid), loadEmployees(sid)]);
   }
 
-  async function loadStaff(sid = storeId) {
+  async function loadStaff(sid: string) {
     const { data } = await supabase.from('store_staff').select('id, full_name, role').eq('store_id', sid).order('full_name');
     setStaff(data || []);
   }
 
-  async function loadEmployees(sid = storeId) {
+  async function loadEmployees(sid: string) {
     const { data } = await supabase.from('employees').select('id, full_name, role').eq('store_id', sid).eq('is_active', true).order('full_name');
     setEmployees(data || []);
   }
 
-  async function loadCashUp(dateOverride?: string, sid = storeId) {
+  async function loadCashUp(dateOverride?: string, sid?: string) {
+    const _sid = sid || storeId;
     setLoading(true);
     const targetDate = dateOverride || cashUpDate;
-    const { data: existingCashUp } = await supabase.from('cash_ups').select('*').eq('store_id', sid).eq('cash_up_date', targetDate).maybeSingle();
+    const { data: existingCashUp } = await supabase.from('cash_ups').select('*').eq('store_id', _sid).eq('cash_up_date', targetDate).maybeSingle();
     if (existingCashUp) {
       setCashUp(existingCashUp);
       populateForm(existingCashUp);
@@ -292,10 +293,10 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
       setCashUp(null);
       // Load previous day float as starting float
       const prevDate = new Date(targetDate); prevDate.setDate(prevDate.getDate() - 1);
-      const { data: prevCashUp } = await supabase.from('cash_ups').select('float_total').eq('store_id', sid).eq('cash_up_date', prevDate.toISOString().split('T')[0]).maybeSingle();
+      const { data: prevCashUp } = await supabase.from('cash_ups').select('float_total').eq('store_id', _sid).eq('cash_up_date', prevDate.toISOString().split('T')[0]).maybeSingle();
       if (prevCashUp?.float_total) setRecon(p => ({ ...p, previous_float: prevCashUp.float_total.toString() }));
     }
-    const { data: hist } = await supabase.from('cash_ups').select('*').eq('store_id', sid).order('cash_up_date', { ascending: false }).limit(14);
+    const { data: hist } = await supabase.from('cash_ups').select('*').eq('store_id', _sid).order('cash_up_date', { ascending: false }).limit(14);
     setHistory(hist || []);
     setLoading(false);
   }
