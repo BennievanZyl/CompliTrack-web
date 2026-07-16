@@ -48,9 +48,14 @@ export default function WagesPage() {
 
   useEffect(() => {
     getStoreContext().then(ctx => {
-      setStoreId(ctx.storeId)
-      setOrgId(ctx.orgId)
-    }).catch(() => {}).finally(() => loadAll())
+      if (ctx?.storeId) {
+        setStoreId(ctx.storeId)
+        setOrgId(ctx.orgId)
+        loadAll(ctx.storeId)
+      } else {
+        loadAll()
+      }
+    }).catch(() => loadAll())
   }, [])
 
   async function loadAll(sid?: string) {
