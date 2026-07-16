@@ -140,6 +140,8 @@ export default function CompliancePage() {
   }, [session?.id, selectedItem]);
 
   async function checkAuthAndLoad(sid?: string) {
+    const effectiveSid = sid || storeId;
+    if (!effectiveSid) return;
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { router.push('/login'); return; }
     const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single();
@@ -148,6 +150,8 @@ export default function CompliancePage() {
   }
 
   async function loadData(sid?: string) {
+    const effectiveSid = sid || storeId;
+    if (!effectiveSid) return;
     setLoading(true);
     const today = new Date().toISOString().split('T')[0];
     // Use maybeSingle replaced with limit — handles multiple sessions gracefully
@@ -155,7 +159,7 @@ export default function CompliancePage() {
     const { data: sessions } = await supabase
       .from('daily_sessions')
       .select('*')
-      .eq('store_id', sid || storeId)
+      .eq('store_id', effectiveSid)
       .eq('session_date', today)
       .eq('session_type', 'daily')
       .order('created_at', { ascending: false });
@@ -226,7 +230,7 @@ export default function CompliancePage() {
     await supabase.from('compliance_comments').insert({
       checklist_item_id: selectedItem.id,
       session_id: session.id,
-      store_id: sid || storeId,
+      store_id: effectiveSid,
       sender_id: currentUser.id,
       message: newComment.trim(),
     });
