@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 
@@ -54,6 +54,65 @@ const roleColor = (role: string) => {
     default: return '#333';
   }
 };
+
+function ShoppingListCard({ listData }: { listData: any }) {
+  const [ticked, setTicked] = React.useState<Record<string, boolean>>({});
+  const items = listData.items || [];
+  const tickedCount = Object.values(ticked).filter(Boolean).length +
+    items.filter((i: any) => i.ticked).length;
+  const total = items.length;
+
+  // Group by supplier
+  const bySupplier: Record<string, any[]> = {};
+  for (const item of items) {
+    if (!bySupplier[item.supplier]) bySupplier[item.supplier] = [];
+    bySupplier[item.supplier].push(item);
+  }
+
+  return (
+    <div style={{ minWidth: 280, maxWidth: 360 }}>
+      {/* Header */}
+      <div style={{ background: '#1a5c38', padding: '12px 16px' }}>
+        <div style={{ color: '#fff', fontWeight: 800, fontSize: 14 }}>🛒 {listData.title}</div>
+        <div style={{ color: 'rgba(255,255,255,0.7)', fontSize: 12, marginTop: 2 }}>
+          {tickedCount}/{total} items done
+        </div>
+        {/* Progress bar */}
+        <div style={{ height: 4, background: 'rgba(255,255,255,0.2)', borderRadius: 2, marginTop: 8 }}>
+          <div style={{ height: '100%', width: `${total > 0 ? (tickedCount / total) * 100 : 0}%`, background: '#4ade80', borderRadius: 2, transition: 'width 0.3s' }} />
+        </div>
+      </div>
+      {/* Items */}
+      <div style={{ padding: '10px 12px', background: '#fff' }}>
+        {Object.entries(bySupplier).map(([supplier, sitems]) => (
+          <div key={supplier} style={{ marginBottom: 10 }}>
+            <div style={{ fontWeight: 700, fontSize: 11, color: '#6b7280', marginBottom: 6 }}>🛒 {supplier}</div>
+            {sitems.map((item: any) => {
+              const done = ticked[item.id] ?? item.ticked;
+              return (
+                <div key={item.id} onClick={() => setTicked(t => ({ ...t, [item.id]: !done }))}
+                  style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderBottom: '1px solid #f3f4f6', cursor: 'pointer' }}>
+                  <div style={{ width: 20, height: 20, borderRadius: 10, border: `2px solid ${done ? '#16a34a' : '#d1d5db'}`, background: done ? '#16a34a' : '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    {done && <span style={{ color: '#fff', fontSize: 11, fontWeight: 800 }}>✓</span>}
+                  </div>
+                  <span style={{ flex: 1, fontSize: 13, color: done ? '#9ca3af' : '#111', fontWeight: done ? 400 : 600, textDecoration: done ? 'line-through' : 'none' }}>
+                    {item.name}
+                  </span>
+                  <span style={{ fontSize: 12, color: '#6b7280', fontWeight: 700 }}>×{item.qty} {item.unit}</span>
+                </div>
+              );
+            })}
+          </div>
+        ))}
+        {tickedCount === total && total > 0 && (
+          <div style={{ background: '#f0fdf4', borderRadius: 8, padding: '8px 12px', textAlign: 'center', marginTop: 8 }}>
+            <span style={{ color: '#16a34a', fontWeight: 700, fontSize: 13 }}>✓ All done! Shopping complete</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 export default function ChatPage() {
   const router = useRouter();
@@ -354,16 +413,26 @@ export default function ChatPage() {
                 {messages.map(msg => {
                   const isMe = msg.sender_id === currentUser?.id;
                   const isPhoto = msg.message.startsWith('[PHOTO]:');
+                  const isShoppingList = msg.message.startsWith('[SHOPPING_LIST]:');
                   const photoUrl = isPhoto ? msg.message.replace('[PHOTO]:', '').split('\n')[0].trim() : null;
                   const photoCaption = isPhoto ? msg.message.split('\n').slice(1).join('\n').trim() : null;
+
+                  // Parse shopping list
+                  let listData: any = null;
+                  if (isShoppingList) {
+                    try { listData = JSON.parse(msg.message.replace('[SHOPPING_LIST]:', '')); } catch {}
+                  }
+
                   return (
                     <div key={msg.id} style={{ display: 'flex', flexDirection: 'column', alignItems: isMe ? 'flex-end' : 'flex-start' }}>
-                      <div style={{ background: isMe ? PRIMARY : '#fff', color: isMe ? '#fff' : '#333', padding: isPhoto ? '8px 8px 10px' : '10px 16px', borderRadius: isMe ? '18px 18px 4px 18px' : '18px 18px 18px 4px', maxWidth: '65%', fontSize: 14, lineHeight: 1.5, boxShadow: '0 1px 4px rgba(0,0,0,0.08)', overflow: 'hidden' }}>
+                      <div style={{ background: isMe ? PRIMARY : '#fff', color: isMe ? '#fff' : '#333', padding: isPhoto ? '8px 8px 10px' : isShoppingList ? 0 : '10px 16px', borderRadius: isMe ? '18px 18px 4px 18px' : '18px 18px 18px 4px', maxWidth: '75%', fontSize: 14, lineHeight: 1.5, boxShadow: '0 1px 4px rgba(0,0,0,0.08)', overflow: 'hidden' }}>
                         {isPhoto && photoUrl ? (
                           <>
                             <img src={photoUrl} alt="compliance photo" onClick={() => window.open(photoUrl, '_blank')} style={{ width: '100%', borderRadius: 10, objectFit: 'cover', maxHeight: 220, cursor: 'zoom-in', display: 'block' }} />
                             {photoCaption && <div style={{ marginTop: 6, fontSize: 13, padding: '0 4px' }}>{photoCaption}</div>}
                           </>
+                        ) : isShoppingList && listData ? (
+                          <ShoppingListCard listData={listData} />
                         ) : (
                           msg.message
                         )}
