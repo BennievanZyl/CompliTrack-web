@@ -112,6 +112,7 @@ function generateQRDataURL(text: string): string {
 }
 
 export default function EquipmentPage() {
+  const [storeId, setStoreId] = useState(STORE_ID_DEFAULT)
   const router = useRouter();
   const [equipment, setEquipment] = useState<Equipment[]>([]);
   const [schedules, setSchedules] = useState<Record<string, ServiceSchedule[]>>({});
@@ -153,7 +154,8 @@ export default function EquipmentPage() {
     document_type: 'Purchase Invoice', document_name: '', notes: '', file_url: ''
   });
 
-  useEffect(() => { checkAuthAndLoad(); }, []);
+  useEffect(() => {
+    getStoreContext().then(ctx => { if(ctx?.storeId) setStoreId(ctx.storeId) }) checkAuthAndLoad(); }, []);
 
   async function checkAuthAndLoad() {
     const { data: { user } } = await supabase.auth.getUser();
