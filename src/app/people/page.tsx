@@ -215,17 +215,25 @@ export default function PeoplePage() {
   async function checkAuthAndLoad() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { router.push('/login'); return; }
-    try {
-      const ctx = await getStoreContext();
-      setStoreId(ctx.storeId);
-      setOrgId(ctx.orgId);
-      await loadEmployees(ctx.storeId, ctx.orgId);
-    } catch { await loadEmployees(); }
+    // Get store context directly — don't rely on state variable being set
+    const { data: profile } = await supabase.from('profiles')
+      .select('store_id, organisation_id').eq('id', user.id).single();
+    const sid = profile?.store_id || '';
+    const oid = profile?.organisation_id || '';
+    if (!sid) { setLoading(false); return; }
+    setStoreId(sid);
+    setOrgId(oid);
+    // Get store name for employer name
+    const { data: store } = await supabase.from('stores').select('name').eq('id', sid).single();
+    if (store?.name) setEmployerName?.(store.name);
+    await loadEmployees(sid, oid);
   }
 
   async function loadEmployees(sid = storeId, oid = orgId) {
     setLoading(true);
-    const { data } = await supabase.from('employees').select('*').eq('store_id', sid || '05328298-fc27-4c9f-b091-bb7f6598b601').order('full_name');
+    const id = sid || storeId;
+    if (!id) { setLoading(false); return; }
+    const { data } = await supabase.from('employees').select('*').eq('store_id', id).order('full_name');
     setEmployees(data || []);
     setLoading(false);
   }
