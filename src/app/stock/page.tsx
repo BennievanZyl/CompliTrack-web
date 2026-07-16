@@ -522,7 +522,7 @@ export default function StockPage() {
   const sc = (s: string) => s === 'delivered' ? { bg: '#dcfce7', color: '#166534' } : s === 'pending' ? { bg: '#fef3c7', color: '#92400e' } : s === 'partial' ? { bg: '#dbeafe', color: '#1e40af' } : { bg: '#fee2e2', color: '#dc2626' }
 
 
-  if (!storeId) {
+  if (!storeId && !loading) {
     return (
       <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f8faf8', fontFamily: 'system-ui, sans-serif' }}>
         <div style={{ textAlign: 'center', maxWidth: 400, padding: 32 }}>
