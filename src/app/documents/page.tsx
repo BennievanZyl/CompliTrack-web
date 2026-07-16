@@ -1,10 +1,11 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
+import { getStoreContext } from '@/lib/store-context'
 import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 
-const STORE_ID = '05328298-fc27-4c9f-b091-bb7f6598b601'
+const STORE_ID_DEFAULT = '05328298-fc27-4c9f-b091-bb7f6598b601' // fallback only
 
 const CATEGORIES = [
   { key: 'fire_safety',  label: 'Fire Safety',        icon: '🔥', color: '#fef2f2', border: '#fecaca', headerBg: '#fee2e2', headerColor: '#991b1b', required: ['Fire extinguisher certificate', 'Fire evacuation plan'] },
