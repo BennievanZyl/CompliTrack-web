@@ -185,24 +185,24 @@ export default function FinancesPage() {
     const [cuRes, invRes, catRes, suppRes, qRes, stockRes] = await Promise.all([
       supabase.from('cash_ups')
         .select('id,cash_up_date,cash_up_total,total_cash,eft_total,payouts,variance,customer_count,average_spend,status,notes')
-        .eq('store_id', storeId)
+        .eq('store_id', sid || storeId)
         .gte('cash_up_date', monthStart).lte('cash_up_date', monthEnd)
         .not('status', 'eq', 'draft')
         .order('cash_up_date', { ascending: false }),
       supabase.from('invoices')
         .select('*, invoice_lines(*)')
-        .eq('store_id', storeId)
+        .eq('store_id', sid || storeId)
         .gte('invoice_date', monthStart).lte('invoice_date', monthEnd)
         .order('invoice_date', { ascending: false }),
       supabase.from('expense_categories').select('id, name, key, colour, sort_order').eq('organisation_id', orgId).eq('is_active', true).order('sort_order'),
-      supabase.from('stock_suppliers').select('id, name, payment_terms_days, invoice_columns, invoice_vat_included, delivers_stock').eq('store_id', storeId).eq('is_active', true).order('sort_order'),
+      supabase.from('stock_suppliers').select('id, name, payment_terms_days, invoice_columns, invoice_vat_included, delivers_stock').eq('store_id', sid || storeId).eq('is_active', true).order('sort_order'),
       supabase.from('expenses')
-        .select('*').eq('store_id', storeId)
+        .select('*').eq('store_id', sid || storeId)
         .gte('expense_date', monthStart).lte('expense_date', monthEnd)
         .order('expense_date', { ascending: false }),
       supabase.from('stock_items')
         .select('id, description, unit, supplier')
-        .eq('store_id', storeId).eq('is_active', true).order('description'),
+        .eq('store_id', sid || storeId).eq('is_active', true).order('description'),
     ])
     setCashUps(cuRes.data || [])
     setInvoices(invRes.data || [])
@@ -233,7 +233,7 @@ export default function FinancesPage() {
 
     // Pull recent completed stock counts so we can find the closest one before/within this period
     const { data: counts } = await supabase.from('stock_counts')
-      .select('id, count_date, status').eq('store_id', storeId).eq('status', 'completed')
+      .select('id, count_date, status').eq('store_id', sid || storeId).eq('status', 'completed')
       .order('count_date', { ascending: false }).limit(100)
 
     const closing = (counts || []).find(c => c.count_date <= periodEnd) || null
@@ -247,7 +247,7 @@ export default function FinancesPage() {
 
     // A manual override for this exact period takes precedence over whatever count we'd otherwise use.
     const { data: overrides } = await supabase.from('food_cost_overrides').select('*')
-      .eq('store_id', storeId).eq('period_start', periodStart).eq('period_end', periodEnd)
+      .eq('store_id', sid || storeId).eq('period_start', periodStart).eq('period_end', periodEnd)
     const openingOverride = (overrides || []).find(o => o.field === 'opening')
     const closingOverride = (overrides || []).find(o => o.field === 'closing')
 
@@ -258,10 +258,10 @@ export default function FinancesPage() {
     const closingMissing = !closing && !closingOverride
 
     const [purchRes, wasteRes, salesRes, recentOverridesRes] = await Promise.all([
-      supabase.from('stock_purchases').select('total_cost').eq('store_id', storeId).gte('purchase_date', periodStart).lte('purchase_date', periodEnd),
-      supabase.from('stock_wastage').select('total_cost').eq('store_id', storeId).gte('wastage_date', periodStart).lte('wastage_date', periodEnd),
-      supabase.from('cash_ups').select('cash_up_total').eq('store_id', storeId).not('status', 'eq', 'draft').gte('cash_up_date', periodStart).lte('cash_up_date', periodEnd),
-      supabase.from('food_cost_overrides').select('id', { count: 'exact', head: true }).eq('store_id', storeId).gte('created_at', new Date(Date.now() - 90 * 86400000).toISOString()),
+      supabase.from('stock_purchases').select('total_cost').eq('store_id', sid || storeId).gte('purchase_date', periodStart).lte('purchase_date', periodEnd),
+      supabase.from('stock_wastage').select('total_cost').eq('store_id', sid || storeId).gte('wastage_date', periodStart).lte('wastage_date', periodEnd),
+      supabase.from('cash_ups').select('cash_up_total').eq('store_id', sid || storeId).not('status', 'eq', 'draft').gte('cash_up_date', periodStart).lte('cash_up_date', periodEnd),
+      supabase.from('food_cost_overrides').select('id', { count: 'exact', head: true }).eq('store_id', sid || storeId).gte('created_at', new Date(Date.now() - 90 * 86400000).toISOString()),
     ])
     const purchases = (purchRes.data || []).reduce((s, p) => s + (Number(p.total_cost) || 0), 0)
     const wastage = (wasteRes.data || []).reduce((s, w) => s + (Number(w.total_cost) || 0), 0)
@@ -287,7 +287,7 @@ export default function FinancesPage() {
     // Mark any old pending scans for this store as done so they don't re-trigger
     supabase.from('pending_invoice_scans')
       .update({ status: 'done' })
-      .eq('store_id', storeId)
+      .eq('store_id', sid || storeId)
       .eq('status', 'uploaded')
       .then(() => {})
 
@@ -390,7 +390,7 @@ export default function FinancesPage() {
     if (!fcOverrideField || !fcOverrideForm.value) return
     const [periodStart, periodEnd] = fcPeriodRange()
     await supabase.from('food_cost_overrides').upsert({
-      store_id: storeId, period_start: periodStart, period_end: periodEnd,
+      store_id: sid || storeId, period_start: periodStart, period_end: periodEnd,
       field: fcOverrideField, value: parseFloat(fcOverrideForm.value) || 0, reason: fcOverrideForm.reason || null,
     }, { onConflict: 'store_id,period_start,period_end,field' })
     setFcOverrideField(null)
@@ -401,7 +401,7 @@ export default function FinancesPage() {
   async function clearFoodCostOverride(field: 'opening' | 'closing') {
     const [periodStart, periodEnd] = fcPeriodRange()
     await supabase.from('food_cost_overrides').delete()
-      .eq('store_id', storeId).eq('period_start', periodStart).eq('period_end', periodEnd).eq('field', field)
+      .eq('store_id', sid || storeId).eq('period_start', periodStart).eq('period_end', periodEnd).eq('field', field)
     await loadFoodCost()
   }
 
@@ -410,7 +410,7 @@ export default function FinancesPage() {
     setHistoryLoading(true)
     const { data } = await supabase.from('invoices')
       .select('*, invoice_lines(*)')
-      .eq('store_id', storeId)
+      .eq('store_id', sid || storeId)
       .order('invoice_date', { ascending: false })
       .limit(300)
     setHistoryInvoices(data || [])
@@ -542,7 +542,7 @@ export default function FinancesPage() {
     const { data: items } = await supabase
       .from('stock_items')
       .select('id, description, unit, supplier, is_catch_weight, cost_price, price')
-      .eq('store_id', storeId)
+      .eq('store_id', sid || storeId)
       .eq('is_active', true)
       .eq('supplier', inv.supplier)
       .order('description')
@@ -627,7 +627,7 @@ export default function FinancesPage() {
     }
     // Insert stock purchases
     const purchases = linesToSave.map(l => ({
-      store_id: storeId,
+      store_id: sid || storeId,
       purchase_date: grvInvoice.invoice_date,
       supplier_name: grvInvoice.supplier,
       stock_item_id: l.stock_item_id,
@@ -751,7 +751,7 @@ export default function FinancesPage() {
     if (invLines.every(l => !l.amount)) { setError('At least one line item with an amount is required'); return }
     setSaving(true); setError('')
     const payload = {
-      store_id: storeId,
+      store_id: sid || storeId,
       organisation_id: orgId,
       ...invForm,
       status: andReceive ? invForm.status : 'draft',
@@ -770,7 +770,7 @@ export default function FinancesPage() {
       invoiceId = data.id
     }
     const lines = invLines.filter(l => Number(l.amount) > 0).map(l => ({
-      invoice_id: invoiceId, store_id: storeId,
+      invoice_id: invoiceId, store_id: sid || storeId,
       category_key: l.category_key, description: l.description,
       qty: Number(l.qty) || 1, uom: l.uom || 'each', unit_price: Number(l.unit_price) || 0,
       amount: Number(l.amount), vat_amount: Number(l.vat_amount || 0),
@@ -827,7 +827,7 @@ export default function FinancesPage() {
     setSaving(true); setError('')
     const cat = categories.find(c => c.key === qForm.category_key)
     const payload = {
-      store_id: storeId, expense_date: qForm.expense_date,
+      store_id: sid || storeId, expense_date: qForm.expense_date,
       category_key: qForm.category_key, category_name: cat?.name || '',
       description: qForm.description, amount: parseFloat(String(qForm.amount)) || 0,
       vat_amount: parseFloat(String(qForm.vat_amount)) || 0,
