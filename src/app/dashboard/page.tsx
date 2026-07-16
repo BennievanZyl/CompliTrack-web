@@ -157,7 +157,7 @@ function DashboardContent() {
               ? 'Your CompliTrack account has been cancelled. Please contact us to reactivate.'
               : 'Your account has been suspended due to an outstanding payment. Please contact us to restore access.'}
           </div>
-          <a href="https://wa.me/27638889702" target="_blank"
+          <a href="https://wa.me/27824900489" target="_blank"
             style={{ display: 'inline-block', background: '#25D366', color: '#fff', borderRadius: 14, padding: '14px 28px', fontWeight: 700, fontSize: 15, textDecoration: 'none' }}>
             📱 Contact us on WhatsApp
           </a>
@@ -355,7 +355,7 @@ function DashboardContent() {
               <div style={{ fontWeight: 700, color: '#92400e', fontSize: 15 }}>Payment overdue</div>
               <div style={{ fontSize: 13, color: '#b45309' }}>Your account has an outstanding payment. Please contact us to avoid suspension.</div>
             </div>
-            <a href="https://wa.me/27638889702" target="_blank"
+            <a href="https://wa.me/27824900489" target="_blank"
               style={{ background: '#d97706', color: '#fff', borderRadius: 10, padding: '8px 16px', fontWeight: 700, fontSize: 13, textDecoration: 'none' }}>
               Contact us
             </a>
