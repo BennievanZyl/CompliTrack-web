@@ -27,6 +27,7 @@ function getExpiryStatus(expiryDate: string | null) {
 }
 
 export default function DocumentsPage() {
+  const [storeId, setStoreId] = useState(STORE_ID_DEFAULT)
   const router = useRouter()
   const [documents, setDocuments]         = useState<any[]>([])
   const [loading, setLoading]             = useState(true)
@@ -42,7 +43,8 @@ export default function DocumentsPage() {
     issued_date: '', issued_by: '', notes: '', file: null as File | null,
   })
 
-  useEffect(() => { loadDocuments() }, [])
+  useEffect(() => {
+    getStoreContext().then(ctx => { if(ctx?.storeId) setStoreId(ctx.storeId) }) loadDocuments() }, [])
 
   async function loadDocuments() {
     setLoading(true)
