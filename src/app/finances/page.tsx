@@ -87,7 +87,7 @@ const emptyQuick = () => ({
 })
 
 export default function FinancesPage() {
-  const [storeId, setStoreId] = useState(STORE_ID_DEFAULT)
+  const [storeId, setStoreId] = useState('')
   const router = useRouter()
   const [tab, setTab] = useState(0)
   const [historyInvoices, setHistoryInvoices] = useState<Invoice[]>([])
