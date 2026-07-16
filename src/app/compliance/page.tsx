@@ -110,7 +110,7 @@ export default function CompliancePage() {
   const sessionRef = useRef<Session | null>(null);
 
   useEffect(() => {
-    getStoreContext().then(ctx => { if(ctx?.storeId) setStoreId(ctx.storeId) }) checkAuthAndLoad(); }, []);
+    getStoreContext().then(ctx => { if(ctx?.storeId) setStoreId(ctx.storeId) }); checkAuthAndLoad(); }, []);
   useEffect(() => { sessionRef.current = session; }, [session]);
 
   useEffect(() => {
@@ -154,7 +154,7 @@ export default function CompliancePage() {
     const { data: sessions } = await supabase
       .from('daily_sessions')
       .select('*')
-      .eq('store_id', STORE_ID)
+      .eq('store_id', storeId)
       .eq('session_date', today)
       .eq('session_type', 'daily')
       .order('created_at', { ascending: false });
@@ -225,7 +225,7 @@ export default function CompliancePage() {
     await supabase.from('compliance_comments').insert({
       checklist_item_id: selectedItem.id,
       session_id: session.id,
-      store_id: STORE_ID,
+      store_id: storeId,
       sender_id: currentUser.id,
       message: newComment.trim(),
     });
