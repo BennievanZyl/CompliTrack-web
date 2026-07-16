@@ -90,6 +90,7 @@ function sortChecklist(items: ChecklistItem[]): ChecklistItem[] {
 }
 
 export default function CompliancePage() {
+  const [storeId, setStoreId] = useState(STORE_ID_DEFAULT)
   const router = useRouter();
   const [session, setSession] = useState<Session | null>(null);
   const [checklist, setChecklist] = useState<ChecklistItem[]>([]);
@@ -108,7 +109,8 @@ export default function CompliancePage() {
   const [currentUser, setCurrentUser] = useState<{ id: string; role: string } | null>(null);
   const sessionRef = useRef<Session | null>(null);
 
-  useEffect(() => { checkAuthAndLoad(); }, []);
+  useEffect(() => {
+    getStoreContext().then(ctx => { if(ctx?.storeId) setStoreId(ctx.storeId) }) checkAuthAndLoad(); }, []);
   useEffect(() => { sessionRef.current = session; }, [session]);
 
   useEffect(() => {
