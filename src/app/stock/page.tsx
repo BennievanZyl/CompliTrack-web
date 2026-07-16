@@ -93,7 +93,7 @@ function Modal({ show, onClose, title, children, maxWidth = '480px' }: { show: b
 }
 
 export default function StockPage() {
-  const [storeId, setStoreId] = useState(STORE_ID_DEFAULT)
+  const [storeId, setStoreId] = useState('')
   const router = useRouter()
   const [tab, setTab] = useState('counts')
   const [categories, setCategories] = useState<StockCategory[]>([])
