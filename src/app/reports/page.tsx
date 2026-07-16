@@ -1,9 +1,10 @@
 'use client'
 import React, { useState, useCallback } from 'react'
+import { getStoreContext } from '@/lib/store-context'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 
-const STORE_ID = '05328298-fc27-4c9f-b091-bb7f6598b601'
+const STORE_ID_DEFAULT = '05328298-fc27-4c9f-b091-bb7f6598b601' // fallback only
 const PRIMARY = '#1a5c38'
 const DARK = '#0a1f12'
 
