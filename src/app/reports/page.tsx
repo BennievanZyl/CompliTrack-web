@@ -88,7 +88,7 @@ function tableHTML(rows: Record<string, any>[], totals?: Record<string, any>) {
 
 // ── Main Component ─────────────────────────────────────────────────────────────
 export default function ReportsPage() {
-  const [storeId, setStoreId] = useState(STORE_ID_DEFAULT)
+  const [storeId, setStoreId] = useState('')
   const router = useRouter()
   const [startDate, setStartDate] = useState(lastMonthStart())
   const [endDate, setEndDate] = useState(lastMonthEnd())
