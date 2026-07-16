@@ -5,7 +5,6 @@ import { getStoreContext } from '@/lib/store-context'
 import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 
-const STORE_ID_DEFAULT = '05328298-fc27-4c9f-b091-bb7f6598b601' // fallback only
 
 type Store = {
   id: string; name: string; city: string; phone: string | null; email: string | null
