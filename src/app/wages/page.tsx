@@ -307,29 +307,6 @@ export default function WagesPage() {
         <div style={{ marginTop: '48px', textAlign: 'center' }}><p style={{ fontSize: '12px', color: '#9ca3af' }}>CompliTrack © 2026 • Store Management Platform • South Africa 🇿🇦</p></div>
       </main>
 
-      {/* New Period Modal */}
-      {showNewPeriod && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: '16px' }}>
-          <div style={{ background: 'white', borderRadius: '24px', width: '100%', maxWidth: '440px', boxShadow: '0 24px 60px rgba(0,0,0,0.2)' }}>
-            <div style={{ padding: '24px 28px 16px', borderBottom: '1px solid #f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <h2 style={{ fontSize: '18px', fontWeight: '800', color: '#111', margin: 0 }}>New Pay Period</h2>
-              <button onClick={() => setShowNewPeriod(false)} style={{ background: '#f3f4f6', border: 'none', borderRadius: '8px', width: '32px', height: '32px', cursor: 'pointer', fontSize: '16px' }}>✕</button>
-            </div>
-            <div style={{ padding: '20px 28px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              <div><label style={LABEL_STYLE}>Pay Frequency</label><select value={periodForm.pay_frequency} onChange={e => setPeriodForm(f => ({ ...f, pay_frequency: e.target.value }))} style={INPUT_STYLE}><option value="weekly">Weekly</option><option value="biweekly">Bi-weekly</option><option value="monthly">Monthly</option></select></div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                <div><label style={LABEL_STYLE}>Start Date</label><input type="date" value={periodForm.period_start} onChange={e => setPeriodForm(f => ({ ...f, period_start: e.target.value }))} style={INPUT_STYLE} /></div>
-                <div><label style={LABEL_STYLE}>End Date</label><input type="date" value={periodForm.period_end} onChange={e => setPeriodForm(f => ({ ...f, period_end: e.target.value }))} style={INPUT_STYLE} /></div>
-              </div>
-            </div>
-            <div style={{ padding: '16px 28px 24px', display: 'flex', gap: '12px' }}>
-              <button onClick={() => setShowNewPeriod(false)} style={{ flex: 1, border: '1.5px solid #e5e7eb', color: '#374151', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: '700', cursor: 'pointer', background: 'white' }}>Cancel</button>
-              <button onClick={createPeriod} disabled={saving} style={{ flex: 1, background: '#1a5c38', color: 'white', border: 'none', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: '800', cursor: 'pointer' }}>Create Period</button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Advance Modal */}
       {showAdvanceModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: '16px' }}>
@@ -394,98 +371,6 @@ export default function WagesPage() {
         </div>
       )}
 
-      {/* Wage Slip Modal */}
-      {showSlip && (() => {
-        const emp = employees.find(e => e.id === showSlip.employee_id)
-        const wage = wages.find(w => w.employee_id === showSlip.employee_id)
-        const period = periods.find(p => p.id === showSlip.payroll_period_id)
-        return (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: '16px' }}>
-            <div style={{ background: 'white', borderRadius: '20px', width: '100%', maxWidth: '560px', boxShadow: '0 24px 60px rgba(0,0,0,0.3)', maxHeight: '90vh', overflowY: 'auto' }}>
-              <div style={{ background: 'linear-gradient(135deg, #0a1f12, #1a5c38)', padding: '28px 32px', borderRadius: '20px 20px 0 0' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <div>
-                    <div style={{ fontSize: '20px', fontWeight: '900', color: 'white', letterSpacing: '-0.5px' }}>WAGE SLIP</div>
-                    <div style={{ fontSize: '13px', color: 'rgba(255,255,255,0.6)', marginTop: '4px' }}>Mochachos Hartswater (Pty) Ltd</div>
-                  </div>
-                  <button onClick={() => setShowSlip(null)} style={{ background: 'rgba(255,255,255,0.15)', border: 'none', borderRadius: '8px', width: '32px', height: '32px', cursor: 'pointer', fontSize: '16px', color: 'white' }}>✕</button>
-                </div>
-              </div>
-              <div style={{ padding: '28px 32px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-                  <div style={{ background: '#f9fafb', borderRadius: '12px', padding: '14px 16px' }}>
-                    <div style={{ fontSize: '11px', fontWeight: '700', color: '#9ca3af', textTransform: 'uppercase' as const, letterSpacing: '0.5px', marginBottom: '6px' }}>Employee</div>
-                    <div style={{ fontWeight: '800', fontSize: '15px', color: '#111' }}>{emp?.full_name}</div>
-                    <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '2px' }}>{emp?.role}</div>
-                    {wage?.id_number && <div style={{ fontSize: '12px', color: '#6b7280' }}>ID: {wage.id_number}</div>}
-                  </div>
-                  <div style={{ background: '#f9fafb', borderRadius: '12px', padding: '14px 16px' }}>
-                    <div style={{ fontSize: '11px', fontWeight: '700', color: '#9ca3af', textTransform: 'uppercase' as const, letterSpacing: '0.5px', marginBottom: '6px' }}>Pay Period</div>
-                    <div style={{ fontWeight: '700', fontSize: '14px', color: '#111' }}>{period ? new Date(period.period_start).toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' }) : '—'}</div>
-                    <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '2px' }}>{period ? `${new Date(period.period_start).toLocaleDateString('en-ZA')} – ${new Date(period.period_end).toLocaleDateString('en-ZA')}` : '—'}</div>
-                  </div>
-                </div>
-                <div>
-                  <div style={{ fontSize: '12px', fontWeight: '700', color: '#9ca3af', textTransform: 'uppercase' as const, letterSpacing: '0.5px', marginBottom: '10px' }}>Earnings</div>
-                  <div style={{ background: '#f9fafb', borderRadius: '12px', overflow: 'hidden' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 16px', borderBottom: '1px solid #e5e7eb' }}>
-                      <span style={{ fontSize: '14px', color: '#374151' }}>Basic Pay ({formatHours(showSlip.hours_worked)} × R{showSlip.hourly_rate.toFixed(2)}/h)</span>
-                      <span style={{ fontSize: '14px', fontWeight: '700', color: '#111' }}>{formatCurrency(showSlip.gross_pay)}</span>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 16px', background: '#f0fdf4' }}>
-                      <span style={{ fontSize: '14px', fontWeight: '700', color: '#166534' }}>Gross Pay</span>
-                      <span style={{ fontSize: '15px', fontWeight: '800', color: '#166534' }}>{formatCurrency(showSlip.gross_pay)}</span>
-                    </div>
-                  </div>
-                </div>
-                <div>
-                  <div style={{ fontSize: '12px', fontWeight: '700', color: '#9ca3af', textTransform: 'uppercase' as const, letterSpacing: '0.5px', marginBottom: '10px' }}>Deductions</div>
-                  <div style={{ background: '#f9fafb', borderRadius: '12px', overflow: 'hidden' }}>
-                    {[
-                      { label: 'UIF (Employee 1%)', value: showSlip.uif_employee },
-                      { label: 'PAYE Tax', value: showSlip.paye_tax },
-                      { label: 'Advances Deducted', value: showSlip.advances_deducted },
-                    ].map((row, i) => (
-                      <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 16px', borderBottom: '1px solid #e5e7eb' }}>
-                        <span style={{ fontSize: '14px', color: '#374151' }}>{row.label}</span>
-                        <span style={{ fontSize: '14px', fontWeight: '700', color: '#dc2626' }}>- {formatCurrency(row.value)}</span>
-                      </div>
-                    ))}
-                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 16px', background: '#fef2f2' }}>
-                      <span style={{ fontSize: '14px', fontWeight: '700', color: '#991b1b' }}>Total Deductions</span>
-                      <span style={{ fontSize: '15px', fontWeight: '800', color: '#991b1b' }}>- {formatCurrency(showSlip.uif_employee + showSlip.paye_tax + showSlip.advances_deducted)}</span>
-                    </div>
-                  </div>
-                </div>
-                <div style={{ background: '#eff6ff', borderRadius: '10px', padding: '12px 16px', fontSize: '12px', color: '#1e40af' }}>
-                  <strong>Employer UIF Contribution:</strong> {formatCurrency(showSlip.uif_employer)} (paid by employer, not deducted from employee)
-                </div>
-                <div style={{ background: 'linear-gradient(135deg, #0a1f12, #1a5c38)', borderRadius: '16px', padding: '20px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: '16px', fontWeight: '800', color: 'white' }}>NET PAY</span>
-                  <span style={{ fontSize: '28px', fontWeight: '900', color: 'white' }}>{formatCurrency(showSlip.net_pay)}</span>
-                </div>
-                {(wage?.bank_name || wage?.bank_account) && (
-                  <div style={{ background: '#f9fafb', borderRadius: '12px', padding: '14px 16px' }}>
-                    <div style={{ fontSize: '11px', fontWeight: '700', color: '#9ca3af', textTransform: 'uppercase' as const, letterSpacing: '0.5px', marginBottom: '8px' }}>Banking Details</div>
-                    {wage?.bank_name && <div style={{ fontSize: '13px', color: '#374151' }}>Bank: <strong>{wage.bank_name}</strong></div>}
-                    {wage?.bank_branch && <div style={{ fontSize: '13px', color: '#374151' }}>Branch: <strong>{wage.bank_branch}</strong></div>}
-                    {wage?.bank_account && <div style={{ fontSize: '13px', color: '#374151' }}>Account: <strong>{wage.bank_account}</strong></div>}
-                  </div>
-                )}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', paddingTop: '8px' }}>
-                  {['Employee Signature', 'Employer Signature'].map(label => (
-                    <div key={label}>
-                      <div style={{ borderBottom: '1.5px solid #374151', marginBottom: '6px', height: '32px' }} />
-                      <div style={{ fontSize: '11px', color: '#9ca3af', textAlign: 'center' as const }}>{label}</div>
-                    </div>
-                  ))}
-                </div>
-                <button onClick={() => window.print()} style={{ width: '100%', padding: '14px', background: '#1a5c38', color: 'white', border: 'none', borderRadius: '12px', fontSize: '14px', fontWeight: '800', cursor: 'pointer' }}>🖨️ Print Wage Slip</button>
-              </div>
-            </div>
-          </div>
-        )
-      })()}
     </div>
   )
 }
