@@ -38,11 +38,11 @@ export default function ClipboardPage() {
     const [unpaidRes, unreceivedRes] = await Promise.all([
       // Stock has already landed (received), but not yet paid — this is the money you still owe.
       supabase.from('invoices').select('*')
-        .eq('store_id', STORE_ID).eq('status', 'received')
+        .eq('store_id', storeId).eq('status', 'received')
         .order('due_date', { ascending: true, nullsFirst: false }),
       // Drafts sitting around that were never submitted/received — easy to lose track of.
       supabase.from('invoices').select('*')
-        .eq('store_id', STORE_ID).eq('status', 'draft')
+        .eq('store_id', storeId).eq('status', 'draft')
         .order('invoice_date', { ascending: false }),
     ])
     setUnpaid(unpaidRes.data || [])
@@ -51,7 +51,7 @@ export default function ClipboardPage() {
   }, [])
 
   useEffect(() => {
-    getStoreContext().then(ctx => { if(ctx?.storeId) setStoreId(ctx.storeId) }) load() }, [load])
+    getStoreContext().then(ctx => { if(ctx?.storeId) setStoreId(ctx.storeId) }); load() }, [load])
 
   async function markPaid(id: string) {
     await supabase.from('invoices').update({ status: 'paid' }).eq('id', id)
