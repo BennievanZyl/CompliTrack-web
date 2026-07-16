@@ -92,7 +92,8 @@ export default function SettingsPage() {
 
   const SECTIONS = [...new Set(templates.map(t => t.section)), 'Opening', 'During Service', 'Closing', 'Cleaning', 'Safety'].filter((v, i, a) => a.indexOf(v) === i)
 
-  useEffect(() => { loadAll(); supabase.auth.getUser().then(({ data }) => setUserEmail(data.user?.email || '')) }, [])
+  useEffect(() => {
+    getStoreContext().then(ctx => { if(ctx?.storeId) setStoreId(ctx.storeId) }) loadAll(); supabase.auth.getUser().then(({ data }) => setUserEmail(data.user?.email || '')) }, [])
 
   async function loadAll() {
     setLoading(true)
