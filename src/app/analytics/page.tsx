@@ -103,25 +103,25 @@ export default function AnalyticsPage(){
     const lmEnd=new Date(lmDate.getFullYear(),lmDate.getMonth()+1,0).toISOString().slice(0,10)
 
     const[invIdsRes,lmInvIdsRes]=await Promise.all([
-      supabase.from('invoices').select('id').eq('store_id',storeId).in('status',['received','paid']).gte('invoice_date',start).lte('invoice_date',end),
-      supabase.from('invoices').select('id').eq('store_id',storeId).in('status',['received','paid']).gte('invoice_date',lmStart).lte('invoice_date',lmEnd),
+      supabase.from('invoices').select('id').eq('store_id', sid || storeId).in('status',['received','paid']).gte('invoice_date',start).lte('invoice_date',end),
+      supabase.from('invoices').select('id').eq('store_id', sid || storeId).in('status',['received','paid']).gte('invoice_date',lmStart).lte('invoice_date',lmEnd),
     ])
     const invIds=(invIdsRes.data||[]).map((r:any)=>r.id)
     const lmInvIds=(lmInvIdsRes.data||[]).map((r:any)=>r.id)
 
     const[cashUpsRes,expRes,invLinesRes,wagesRes,purchRes,wastRes,countsRes,lmExpRes,lmInvLinesRes,lmWagesRes,sessionsRes]=await Promise.all([
-      supabase.from('cash_ups').select('cash_up_date,cash_up_total').eq('store_id',storeId).neq('status','draft').gte('cash_up_date',start).lte('cash_up_date',end).order('cash_up_date'),
-      supabase.from('expenses').select('amount,category_key,category_name').eq('store_id',storeId).gte('expense_date',start).lte('expense_date',end),
+      supabase.from('cash_ups').select('cash_up_date,cash_up_total').eq('store_id', sid || storeId).neq('status','draft').gte('cash_up_date',start).lte('cash_up_date',end).order('cash_up_date'),
+      supabase.from('expenses').select('amount,category_key,category_name').eq('store_id', sid || storeId).gte('expense_date',start).lte('expense_date',end),
       invIds.length?supabase.from('invoice_lines').select('amount,vat_amount,category_key').in('invoice_id',invIds):Promise.resolve({data:[]}),
-      supabase.from('wage_payments').select('net_pay,gross_pay,uif_employer').eq('store_id',storeId).gte('paid_date',start).lte('paid_date',end),
-      supabase.from('stock_purchases').select('total_cost').eq('store_id',storeId).gte('purchase_date',start).lte('purchase_date',end),
-      supabase.from('stock_wastage').select('total_cost').eq('store_id',storeId).gte('wastage_date',start).lte('wastage_date',end),
-      supabase.from('stock_counts').select('id,count_date').eq('store_id',storeId).eq('status','completed').order('count_date',{ascending:false}).limit(20),
-      supabase.from('expenses').select('amount,category_key').eq('store_id',storeId).gte('expense_date',lmStart).lte('expense_date',lmEnd),
+      supabase.from('wage_payments').select('net_pay,gross_pay,uif_employer').eq('store_id', sid || storeId).gte('paid_date',start).lte('paid_date',end),
+      supabase.from('stock_purchases').select('total_cost').eq('store_id', sid || storeId).gte('purchase_date',start).lte('purchase_date',end),
+      supabase.from('stock_wastage').select('total_cost').eq('store_id', sid || storeId).gte('wastage_date',start).lte('wastage_date',end),
+      supabase.from('stock_counts').select('id,count_date').eq('store_id', sid || storeId).eq('status','completed').order('count_date',{ascending:false}).limit(20),
+      supabase.from('expenses').select('amount,category_key').eq('store_id', sid || storeId).gte('expense_date',lmStart).lte('expense_date',lmEnd),
       lmInvIds.length?supabase.from('invoice_lines').select('amount,vat_amount,category_key').in('invoice_id',lmInvIds):Promise.resolve({data:[]}),
-      supabase.from('wage_payments').select('gross_pay').eq('store_id',storeId).gte('paid_date',lmStart).lte('paid_date',lmEnd),
+      supabase.from('wage_payments').select('gross_pay').eq('store_id', sid || storeId).gte('paid_date',lmStart).lte('paid_date',lmEnd),
       // Compliance: fetch last 14 daily sessions regardless of selected period (rolling window)
-      supabase.from('daily_sessions').select('session_date,id').eq('store_id',storeId).eq('session_type','daily').order('session_date',{ascending:false}).limit(14),
+      supabase.from('daily_sessions').select('session_date,id').eq('store_id', sid || storeId).eq('session_type','daily').order('session_date',{ascending:false}).limit(14),
     ])
 
     const dailyCashUps:Record<string,number>={}
