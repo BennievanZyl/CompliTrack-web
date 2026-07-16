@@ -89,6 +89,7 @@ function tableHTML(rows: Record<string, any>[], totals?: Record<string, any>) {
 // ── Main Component ─────────────────────────────────────────────────────────────
 export default function ReportsPage() {
   const [storeId, setStoreId] = useState('')
+  useEffect(() => { getStoreContext().then(ctx => { if (ctx?.storeId) setStoreId(ctx.storeId) }) }, [])
   const router = useRouter()
   const [startDate, setStartDate] = useState(lastMonthStart())
   const [endDate, setEndDate] = useState(lastMonthEnd())
