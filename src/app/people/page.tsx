@@ -175,6 +175,8 @@ async function getStoreContext(): Promise<{ storeId: string; orgId: string; empl
 
 export default function PeoplePage() {
   const router = useRouter();
+  const [storeId, setStoreId] = useState('');
+  const [orgId, setOrgId] = useState('');
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
