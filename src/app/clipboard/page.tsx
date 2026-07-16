@@ -51,7 +51,7 @@ export default function ClipboardPage() {
   }, [])
 
   useEffect(() => {
-    getStoreContext().then(ctx => { if(ctx?.storeId) setStoreId(ctx.storeId) }); load() }, [load])
+    (async () => { const ctx = await getStoreContext(); if (ctx?.storeId) { setStoreId(ctx.storeId); if (ctx.orgId) setOrgId?.(ctx.orgId); } await load(ctx?.storeId); })() }, [load])
 
   async function markPaid(id: string) {
     await supabase.from('invoices').update({ status: 'paid' }).eq('id', id)
@@ -60,19 +60,6 @@ export default function ClipboardPage() {
 
   const totalOwed = unpaid.reduce((s, i) => s + Number(i.total_amount || 0), 0)
   const overdue = unpaid.filter(i => { const d = daysUntil(i.due_date); return d !== null && d < 0 })
-
-  if (!storeId && !loading) {
-    return (
-      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f8faf8', fontFamily: 'system-ui, sans-serif' }}>
-        <div style={{ textAlign: 'center', maxWidth: 400, padding: 32 }}>
-          <div style={{ fontSize: 48, marginBottom: 16 }}>🏪</div>
-          <div style={{ fontWeight: 800, fontSize: 20, color: '#111', marginBottom: 8 }}>Select a Store First</div>
-          <div style={{ color: '#6b7280', fontSize: 14, marginBottom: 24, lineHeight: '1.6' }}>This page is store-specific. Go to your organisation overview and click into a store.</div>
-          <a href="/org" style={{ background: '#1a5c38', color: '#fff', borderRadius: 12, padding: '12px 24px', fontWeight: 700, fontSize: 14, textDecoration: 'none' }}>← Organisation Overview</a>
-        </div>
-      </div>
-    )
-  }
 
 
   return (
