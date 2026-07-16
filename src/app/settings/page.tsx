@@ -93,18 +93,18 @@ export default function SettingsPage() {
   const SECTIONS = [...new Set(templates.map(t => t.section)), 'Opening', 'During Service', 'Closing', 'Cleaning', 'Safety'].filter((v, i, a) => a.indexOf(v) === i)
 
   useEffect(() => {
-    getStoreContext().then(ctx => { if(ctx?.storeId) setStoreId(ctx.storeId) }) loadAll(); supabase.auth.getUser().then(({ data }) => setUserEmail(data.user?.email || '')) }, [])
+    getStoreContext().then(ctx => { if(ctx?.storeId) setStoreId(ctx.storeId) }); loadAll(); supabase.auth.getUser().then(({ data }) => setUserEmail(data.user?.email || '')) }, [])
 
   async function loadAll() {
     setLoading(true)
     const [storeRes, templRes, catRes, permsRes] = await Promise.all([
-      supabase.from('stores').select('*').eq('id', STORE_ID).single(),
-      supabase.from('checklist_templates').select('*').eq('store_id', STORE_ID).order('section').order('sort_order'),
+      supabase.from('stores').select('*').eq('id', storeId).single(),
+      supabase.from('checklist_templates').select('*').eq('store_id', storeId).order('section').order('sort_order'),
       supabase.from('expense_categories').select('*').eq('organisation_id', 'e903386b-133a-4bad-b054-ef7ef616a3ff').order('sort_order'),
-      supabase.from('store_role_permissions').select('*').eq('store_id', STORE_ID),
+      supabase.from('store_role_permissions').select('*').eq('store_id', storeId),
     ])
     if (storeRes.data) { setStore(storeRes.data); setForm(storeRes.data) }
-    setStoreId(STORE_ID)
+    setStoreId(storeId)
     setTemplates(templRes.data || [])
     setCategories(catRes.data || [])
     // Build permissions map: { role: { card: true/false } }
@@ -118,7 +118,7 @@ export default function SettingsPage() {
 
   async function saveStore() {
     setSaving(true)
-    await supabase.from('stores').update(form).eq('id', STORE_ID)
+    await supabase.from('stores').update(form).eq('id', storeId)
     setSaved(true)
     setTimeout(() => setSaved(false), 3000)
     setSaving(false)
@@ -130,7 +130,7 @@ export default function SettingsPage() {
     setSaving(true)
     const maxOrder = templates.filter(t => t.section === taskForm.section).length
     await supabase.from('checklist_templates').insert({
-      store_id: STORE_ID, task_name: taskForm.task_name, section: taskForm.section,
+      store_id: storeId, task_name: taskForm.task_name, section: taskForm.section,
       requires_photo: taskForm.requires_photo, sort_order: maxOrder + 1, is_active: true,
     })
     setTaskForm({ task_name: '', section: 'Opening', requires_photo: false })
@@ -616,7 +616,7 @@ export default function SettingsPage() {
                   const updated = { ...perms, [cardKey]: !current }
                   setRolePerms(p => ({ ...p, [role]: updated }))
                   await supabase.from('store_role_permissions').upsert({
-                    store_id: STORE_ID,
+                    store_id: storeId,
                     role,
                     permissions: updated,
                     updated_at: new Date().toISOString(),
