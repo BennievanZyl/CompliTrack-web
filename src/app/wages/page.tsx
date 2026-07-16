@@ -43,14 +43,37 @@ export default function WagesPage() {
   async function loadAll() {
     setLoading(true)
     const [empRes, wageRes, periodRes, runRes, advRes] = await Promise.all([
-      supabase.from('employees').select('id, full_name, role').eq('store_id', STORE_ID).eq('is_active', true).order('full_name'),
+      supabase.from('employees').select('id, full_name, role, hourly_rate, pay_frequency, id_number').eq('store_id', STORE_ID).eq('is_active', true).order('full_name'),
       supabase.from('employee_wages').select('*').eq('store_id', STORE_ID),
       supabase.from('payroll_periods').select('*').eq('store_id', STORE_ID).order('period_start', { ascending: false }),
       supabase.from('payroll_runs').select('*').eq('store_id', STORE_ID),
       supabase.from('employee_advances').select('*').eq('store_id', STORE_ID).order('advance_date', { ascending: false }),
     ])
-    setEmployees(empRes.data || [])
-    setWages(wageRes.data || [])
+    const emps = empRes.data || []
+    let wageData = wageRes.data || []
+
+    // Merge: for employees with hourly_rate on employees table but no wage record,
+    // create a virtual wage record so the wages page shows the correct rate
+    for (const emp of emps) {
+      if (!emp.hourly_rate) continue
+      const hasWage = wageData.find((w: any) => w.employee_id === emp.id)
+      if (!hasWage) {
+        wageData = [...wageData, {
+          id: `virtual-${emp.id}`,
+          employee_id: emp.id,
+          store_id: STORE_ID,
+          hourly_rate: emp.hourly_rate,
+          pay_frequency: emp.pay_frequency || 'monthly',
+          uif_employee: 0.01,
+          uif_employer: 0.01,
+          tax_rate: 0,
+          id_number: emp.id_number || null,
+        }]
+      }
+    }
+
+    setEmployees(emps)
+    setWages(wageData)
     setPeriods(periodRes.data || [])
     setRuns(runRes.data || [])
     setAdvances(advRes.data || [])
@@ -161,10 +184,11 @@ export default function WagesPage() {
   async function saveWage() {
     if (!wageForm.employee_id || !wageForm.hourly_rate) return
     setSaving(true)
+    const hourlyRate = parseFloat(wageForm.hourly_rate)
     const existing = wages.find(w => w.employee_id === wageForm.employee_id)
     const payload = {
       store_id: STORE_ID, employee_id: wageForm.employee_id,
-      hourly_rate: parseFloat(wageForm.hourly_rate),
+      hourly_rate: hourlyRate,
       uif_employee: parseFloat(wageForm.uif_employee),
       uif_employer: parseFloat(wageForm.uif_employer),
       tax_rate: parseFloat(wageForm.tax_rate),
@@ -174,8 +198,17 @@ export default function WagesPage() {
       bank_branch: wageForm.bank_branch || null,
       id_number: wageForm.id_number || null,
     }
+    // Save to employee_wages (for UIF, bank details etc.)
     if (existing) await supabase.from('employee_wages').update(payload).eq('id', existing.id)
     else await supabase.from('employee_wages').insert(payload)
+
+    // ALSO update employees.hourly_rate so Time & Attendance stays in sync
+    await supabase.from('employees').update({
+      hourly_rate: hourlyRate,
+      pay_frequency: wageForm.pay_frequency,
+      id_number: wageForm.id_number || null,
+    }).eq('id', wageForm.employee_id)
+
     setShowWageModal(false)
     setWageForm({ employee_id: '', hourly_rate: '', uif_employee: '0.01', uif_employer: '0.01', tax_rate: '0', pay_frequency: 'monthly', bank_name: '', bank_account: '', bank_branch: '', id_number: '' })
     await loadAll()
