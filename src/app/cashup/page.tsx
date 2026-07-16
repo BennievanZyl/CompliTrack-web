@@ -1056,8 +1056,8 @@ function CashUpContent() {
   const searchParams = useSearchParams();
   const storeParam = searchParams.get('store');
   const [role, setRole] = useState<string | null>(null);
-  const [storeId, setStoreId] = useState(DEFAULT_STORE_ID);
-  const [orgId, setOrgId] = useState(DEFAULT_ORG_ID);
+  const [storeId, setStoreId] = useState('');
+  const [orgId, setOrgId] = useState('');
   const [storeName, setStoreName] = useState(DEFAULT_STORE_NAME);
   const [ready, setReady] = useState(false);
 
