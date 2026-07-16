@@ -4,7 +4,6 @@ import { getStoreContext } from '@/lib/store-context'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 
-const STORE_ID_DEFAULT = '05328298-fc27-4c9f-b091-bb7f6598b601' // fallback only
 
 type Invoice = {
   id: string; supplier: string; invoice_number: string; invoice_date: string
