@@ -103,18 +103,19 @@ export default function AttendancePage() {
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [settingsForm, setSettingsForm] = useState({ sunday_multiplier: '1.5', holiday_multiplier: '2', overtime_multiplier: '1.5', weekly_ot_threshold: '45', monthly_ot_threshold: '195', night_allowance_start_hour: '18', default_night_rate: '0.5', uif_employee_rate: '1', uif_employer_rate: '1', uif_ceiling: '17712', uif_reference_number: '' });
 
-  async function loadPayrollData() {
+  async function loadPayrollData(sid = storeId) {
+    if (!sid) return;
     const [py, pm] = payrollMonth.split('-').map(Number);
     const monthEnd = `${payrollMonth}-${String(new Date(py, pm, 0).getDate()).padStart(2, '0')}`;
     const [attRes, leaveRes, advRes, holRes, setRes, payRes] = await Promise.all([
-      supabase.from('attendance').select('*').eq('store_id', storeId)
+      supabase.from('attendance').select('*').eq('store_id', sid)
         .gte('work_date', payrollMonth + '-01').lte('work_date', monthEnd),
-      supabase.from('employee_leave').select('*').eq('store_id', storeId)
+      supabase.from('employee_leave').select('*').eq('store_id', sid)
         .lte('start_date', monthEnd).gte('end_date', payrollMonth + '-01'),
-      supabase.from('employee_advances').select('*').eq('store_id', storeId).order('advance_date', { ascending: false }),
-      supabase.from('public_holidays').select('*').eq('store_id', storeId),
-      supabase.from('payroll_settings').select('*').eq('store_id', storeId).maybeSingle(),
-      supabase.from('wage_payments').select('*').eq('store_id', storeId).eq('period', payrollMonth),
+      supabase.from('employee_advances').select('*').eq('store_id', sid).order('advance_date', { ascending: false }),
+      supabase.from('public_holidays').select('*').eq('store_id', sid),
+      supabase.from('payroll_settings').select('*').eq('store_id', sid).maybeSingle(),
+      supabase.from('wage_payments').select('*').eq('store_id', sid).eq('period', payrollMonth),
     ]);
     setMonthAttendance(attRes.data || []);
     setMonthLeave(leaveRes.data || []);
@@ -143,7 +144,7 @@ export default function AttendancePage() {
     setPayrollLoaded(true);
   }
 
-  useEffect(() => { if (activeTab === 'payroll') loadPayrollData(); }, [activeTab, payrollMonth]);
+  useEffect(() => { if (activeTab === 'payroll' && storeId) loadPayrollData(storeId); }, [activeTab, payrollMonth, storeId]);
 
   const holidaySet = new Set(holidays.map(h => h.holiday_date));
   function dayMultiplier(dateStr: string) {
@@ -651,6 +652,7 @@ export default function AttendancePage() {
         loadEmployees(ctx.storeId),
         loadTodayRecords(ctx.storeId),
         loadShifts(ctx.storeId),
+        loadPayrollData(ctx.storeId),
       ]);
     } catch (e) {
       console.error('Failed to load store context:', e);
@@ -684,7 +686,7 @@ export default function AttendancePage() {
     setHistoryLoading(false);
   }
 
-  useEffect(() => { if (activeTab === 'history') loadHistory(); }, [activeTab, selectedEmployee]);
+  useEffect(() => { if (activeTab === 'history' && storeId) loadHistory(); }, [activeTab, selectedEmployee, storeId]);
 
   async function clockIn(employeeId: string) {
     setSaving(employeeId);
