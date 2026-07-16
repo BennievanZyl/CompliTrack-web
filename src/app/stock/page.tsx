@@ -93,6 +93,7 @@ function Modal({ show, onClose, title, children, maxWidth = '480px' }: { show: b
 }
 
 export default function StockPage() {
+  const [storeId, setStoreId] = useState(STORE_ID_DEFAULT)
   const router = useRouter()
   const [tab, setTab] = useState('counts')
   const [categories, setCategories] = useState<StockCategory[]>([])
@@ -145,7 +146,8 @@ export default function StockPage() {
   const [orderForm, setOrderForm] = useState({ supplier_name: '', order_date: new Date().toISOString().split('T')[0], expected_delivery: '', notes: '' })
   const [categoryForm, setCategoryForm] = useState({ name: '', color: '#1a5c38' })
 
-  useEffect(() => { loadAll() }, [])
+  useEffect(() => {
+    getStoreContext().then(ctx => { if(ctx?.storeId) setStoreId(ctx.storeId) }) loadAll() }, [])
 
   async function loadAll() {
     setLoading(true)
