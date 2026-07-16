@@ -215,7 +215,7 @@ export default function FinancesPage() {
   }, [month])
 
   useEffect(() => {
-    (async () => { const ctx = await getStoreContext(); if (ctx?.storeId) { setStoreId(ctx.storeId); if (ctx.orgId) setOrgId?.(ctx.orgId); } await load(ctx?.storeId); })() }, [load])
+    (async () => { const ctx = await getStoreContext(); const sid = ctx?.storeId || ''; if (sid) setStoreId(sid); if (ctx?.orgId) { try { setOrgId(ctx.orgId) } catch(e){} } await load(sid); })() }, [load])
 
   function fcPeriodRange(): [string, string] {
     if (fcMode === 'week') {
