@@ -155,7 +155,7 @@ export default function EquipmentPage() {
   });
 
   useEffect(() => {
-    getStoreContext().then(ctx => { if(ctx?.storeId) setStoreId(ctx.storeId) }).finally(() => checkAuthAndLoad()); }, []);
+    (async () => { const ctx = await getStoreContext(); if (ctx?.storeId) { setStoreId(ctx.storeId); if (ctx.orgId) setOrgId?.(ctx.orgId); } await checkAuthAndLoad(ctx?.storeId); })(); }, []);
 
   async function checkAuthAndLoad() {
     const { data: { user } } = await supabase.auth.getUser();
@@ -370,19 +370,6 @@ export default function EquipmentPage() {
   const labelStyle = { display: 'block' as const, fontSize: 13, fontWeight: 600 as const, color: '#333', marginBottom: 6 };
   const cardStyle = { background: '#fff', borderRadius: 20, padding: 24, border: '1px solid #eef2ee', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' };
   const tabBtnStyle = (active: boolean) => ({ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', fontWeight: 600, fontSize: 12, background: active ? PRIMARY : 'transparent', color: active ? '#fff' : '#666' });
-
-  if (!storeId && !loading) {
-    return (
-      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f8faf8', fontFamily: 'system-ui, sans-serif' }}>
-        <div style={{ textAlign: 'center', maxWidth: 400, padding: 32 }}>
-          <div style={{ fontSize: 48, marginBottom: 16 }}>🏪</div>
-          <div style={{ fontWeight: 800, fontSize: 20, color: '#111', marginBottom: 8 }}>Select a Store First</div>
-          <div style={{ color: '#6b7280', fontSize: 14, marginBottom: 24, lineHeight: '1.6' }}>This page is store-specific. Go to your organisation overview and click into a store.</div>
-          <a href="/org" style={{ background: '#1a5c38', color: '#fff', borderRadius: 12, padding: '12px 24px', fontWeight: 700, fontSize: 14, textDecoration: 'none' }}>← Organisation Overview</a>
-        </div>
-      </div>
-    )
-  }
 
   return (
     <div style={{ minHeight: '100vh', background: '#f8faf8', fontFamily: 'system-ui, sans-serif' }}>
