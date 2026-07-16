@@ -53,12 +53,12 @@ export default function WagesPage() {
     }).catch(() => {}).finally(() => loadAll())
   }, [])
 
-  async function loadAll() {
+  async function loadAll(sid?: string) {
     setLoading(true)
     const [empRes, wageRes, advRes] = await Promise.all([
-      supabase.from('employees').select('id, full_name, role, hourly_rate, pay_frequency, id_number').eq('store_id', storeId).eq('is_active', true).order('full_name'),
-      supabase.from('employee_wages').select('*').eq('store_id', storeId),
-      supabase.from('employee_advances').select('*').eq('store_id', storeId).order('advance_date', { ascending: false }),
+      supabase.from('employees').select('id, full_name, role, hourly_rate, pay_frequency, id_number').eq('store_id', sid || storeId).eq('is_active', true).order('full_name'),
+      supabase.from('employee_wages').select('*').eq('store_id', sid || storeId),
+      supabase.from('employee_advances').select('*').eq('store_id', sid || storeId).order('advance_date', { ascending: false }),
     ])
     const emps = empRes.data || []
     let wageData = wageRes.data || []
@@ -72,7 +72,7 @@ export default function WagesPage() {
         wageData = [...wageData, {
           id: `virtual-${emp.id}`,
           employee_id: emp.id,
-          store_id: storeId,
+          store_id: sid || storeId,
           hourly_rate: emp.hourly_rate,
           pay_frequency: emp.pay_frequency || 'monthly',
           uif_employee: 0.01,
@@ -93,7 +93,7 @@ export default function WagesPage() {
     if (!advanceForm.employee_id || !advanceForm.amount) return
     setSaving(true)
     await supabase.from('employee_advances').insert({
-      store_id: storeId,
+      store_id: sid || storeId,
       employee_id: advanceForm.employee_id,
       amount: parseFloat(advanceForm.amount),
       reason: advanceForm.reason || null,
@@ -113,7 +113,7 @@ export default function WagesPage() {
     const hourlyRate = parseFloat(wageForm.hourly_rate)
     const existing = wages.find(w => w.employee_id === wageForm.employee_id)
     const payload = {
-      store_id: storeId, employee_id: wageForm.employee_id,
+      store_id: sid || storeId, employee_id: wageForm.employee_id,
       hourly_rate: hourlyRate,
       uif_employee: parseFloat(wageForm.uif_employee),
       uif_employer: parseFloat(wageForm.uif_employer),
