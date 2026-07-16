@@ -215,12 +215,17 @@ export default function PeoplePage() {
   async function checkAuthAndLoad() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { router.push('/login'); return; }
-    await loadEmployees();
+    try {
+      const ctx = await getStoreContext();
+      setStoreId(ctx.storeId);
+      setOrgId(ctx.orgId);
+      await loadEmployees(ctx.storeId, ctx.orgId);
+    } catch { await loadEmployees(); }
   }
 
-  async function loadEmployees() {
+  async function loadEmployees(sid = storeId, oid = orgId) {
     setLoading(true);
-    const { data } = await supabase.from('employees').select('*').eq('store_id', storeId || '05328298-fc27-4c9f-b091-bb7f6598b601').order('full_name');
+    const { data } = await supabase.from('employees').select('*').eq('store_id', sid || '05328298-fc27-4c9f-b091-bb7f6598b601').order('full_name');
     setEmployees(data || []);
     setLoading(false);
   }
