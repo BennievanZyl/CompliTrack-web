@@ -1,9 +1,9 @@
 'use client'
 import { useState, useEffect, useCallback } from 'react'
-import { getStoreContext } from '@/lib/store-context'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 
+const STORE_ID = '05328298-fc27-4c9f-b091-bb7f6598b601'
 
 type Invoice = {
   id: string; supplier: string; invoice_number: string; invoice_date: string
@@ -26,7 +26,6 @@ function daysUntil(d: string | null) {
 }
 
 export default function ClipboardPage() {
-  const [storeId, setStoreId] = useState('')
   const router = useRouter()
   const [unpaid, setUnpaid] = useState<Invoice[]>([])
   const [unreceived, setUnreceived] = useState<Invoice[]>([])
@@ -37,11 +36,11 @@ export default function ClipboardPage() {
     const [unpaidRes, unreceivedRes] = await Promise.all([
       // Stock has already landed (received), but not yet paid — this is the money you still owe.
       supabase.from('invoices').select('*')
-        .eq('store_id', effectiveSid).eq('status', 'received')
+        .eq('store_id', STORE_ID).eq('status', 'received')
         .order('due_date', { ascending: true, nullsFirst: false }),
       // Drafts sitting around that were never submitted/received — easy to lose track of.
       supabase.from('invoices').select('*')
-        .eq('store_id', effectiveSid).eq('status', 'draft')
+        .eq('store_id', STORE_ID).eq('status', 'draft')
         .order('invoice_date', { ascending: false }),
     ])
     setUnpaid(unpaidRes.data || [])
@@ -49,8 +48,7 @@ export default function ClipboardPage() {
     setLoading(false)
   }, [])
 
-  useEffect(() => {
-    (async () => { const ctx = await getStoreContext(); const sid = ctx?.storeId || ''; if (sid) setStoreId(sid); if (ctx?.orgId) { try { setOrgId(ctx.orgId) } catch(e){} } await load(sid); })() }, [load])
+  useEffect(() => { load() }, [load])
 
   async function markPaid(id: string) {
     await supabase.from('invoices').update({ status: 'paid' }).eq('id', id)
@@ -59,7 +57,6 @@ export default function ClipboardPage() {
 
   const totalOwed = unpaid.reduce((s, i) => s + Number(i.total_amount || 0), 0)
   const overdue = unpaid.filter(i => { const d = daysUntil(i.due_date); return d !== null && d < 0 })
-
 
   return (
     <div style={{ minHeight: '100vh', background: '#f0f4f0' }}>
