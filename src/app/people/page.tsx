@@ -225,7 +225,7 @@ export default function PeoplePage() {
     setOrgId(oid);
     // Get store name for employer name
     const { data: store } = await supabase.from('stores').select('name').eq('id', sid).single();
-    if (store?.name) setEmployerName?.(store.name);
+    if (store?.name) {} // employer name used in attendance page
     await loadEmployees(sid, oid);
   }
 
