@@ -1066,11 +1066,16 @@ function CashUpContent() {
   async function detectContext() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { setReady(true); return; }
-    const { data: profile } = await supabase.from('profiles').select('role, organisation_id').eq('id', user.id).single();
+    const { data: profile } = await supabase.from('profiles').select('role, organisation_id, store_id').eq('id', user.id).single();
     setRole(profile?.role || null);
     if (storeParam) {
+      // Franchisor clicking into a specific store via URL
       const { data: store } = await supabase.from('stores').select('id, name, organisation_id').eq('id', storeParam).single();
       if (store) { setStoreId(store.id); setStoreName(store.name); setOrgId(store.organisation_id); }
+    } else if (profile?.store_id) {
+      // Regular store owner — load from their profile
+      const { data: store } = await supabase.from('stores').select('id, name, organisation_id').eq('id', profile.store_id).single();
+      if (store) { setStoreId(store.id); setStoreName(store.name); setOrgId(store.organisation_id || profile.organisation_id || ''); }
     }
     setReady(true);
   }
