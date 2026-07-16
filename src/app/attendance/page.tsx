@@ -4,11 +4,23 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 
-const STORE_ID = '05328298-fc27-4c9f-b091-bb7f6598b601';
-const ORG_ID = 'e903386b-133a-4bad-b054-ef7ef616a3ff';
 const PRIMARY = '#1a5c38';
 const DARK = '#0a1f12';
-const EMPLOYER_NAME = 'Mochachos Hartswater (Pty) Ltd';
+
+async function getStoreContext(): Promise<{ storeId: string; orgId: string; employerName: string }> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not logged in');
+  const { data: profile } = await supabase.from('profiles')
+    .select('store_id, organisation_id').eq('id', user.id).single();
+  if (!profile?.store_id) throw new Error('No store linked to account');
+  const { data: store } = await supabase.from('stores')
+    .select('name').eq('id', profile.store_id).single();
+  return {
+    storeId: profile.store_id,
+    orgId: profile.organisation_id || '',
+    employerName: store?.name || 'CompliTrack Store',
+  };
+}
 
 type Employee = { id: string; full_name: string; role: string; is_active: boolean; hourly_rate: number | null; pay_frequency: string | null; night_allowance_rate: number | null; phone: string | null; id_number: string | null };
 type AttendanceRecord = { id: string; employee_id: string; work_date: string; clock_in: string | null; clock_out: string | null; hours_worked: number | null; is_late: boolean; notes: string | null };
@@ -50,6 +62,9 @@ function ModalWrap({ children, onClose }: { children: React.ReactNode; onClose: 
 
 export default function AttendancePage() {
   const router = useRouter();
+  const [storeId, setStoreId] = useState('');
+  const [orgId, setOrgId] = useState('');
+  const [employerName, setEmployerName] = useState('CompliTrack Store');
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [todayRecords, setTodayRecords] = useState<AttendanceRecord[]>([]);
   const [shifts, setShifts] = useState<Shift[]>([]);
@@ -92,14 +107,14 @@ export default function AttendancePage() {
     const [py, pm] = payrollMonth.split('-').map(Number);
     const monthEnd = `${payrollMonth}-${String(new Date(py, pm, 0).getDate()).padStart(2, '0')}`;
     const [attRes, leaveRes, advRes, holRes, setRes, payRes] = await Promise.all([
-      supabase.from('attendance').select('*').eq('store_id', STORE_ID)
+      supabase.from('attendance').select('*').eq('store_id', storeId)
         .gte('work_date', payrollMonth + '-01').lte('work_date', monthEnd),
-      supabase.from('employee_leave').select('*').eq('store_id', STORE_ID)
+      supabase.from('employee_leave').select('*').eq('store_id', storeId)
         .lte('start_date', monthEnd).gte('end_date', payrollMonth + '-01'),
-      supabase.from('employee_advances').select('*').eq('store_id', STORE_ID).order('advance_date', { ascending: false }),
-      supabase.from('public_holidays').select('*').eq('store_id', STORE_ID),
-      supabase.from('payroll_settings').select('*').eq('store_id', STORE_ID).maybeSingle(),
-      supabase.from('wage_payments').select('*').eq('store_id', STORE_ID).eq('period', payrollMonth),
+      supabase.from('employee_advances').select('*').eq('store_id', storeId).order('advance_date', { ascending: false }),
+      supabase.from('public_holidays').select('*').eq('store_id', storeId),
+      supabase.from('payroll_settings').select('*').eq('store_id', storeId).maybeSingle(),
+      supabase.from('wage_payments').select('*').eq('store_id', storeId).eq('period', payrollMonth),
     ]);
     setMonthAttendance(attRes.data || []);
     setMonthLeave(leaveRes.data || []);
@@ -272,7 +287,7 @@ export default function AttendancePage() {
 
   async function savePayrollSettings() {
     const payload = {
-      store_id: STORE_ID,
+      store_id: storeId,
       sunday_multiplier: parseFloat(settingsForm.sunday_multiplier) || 1.5,
       holiday_multiplier: parseFloat(settingsForm.holiday_multiplier) || 2,
       overtime_multiplier: parseFloat(settingsForm.overtime_multiplier) || 1.5,
@@ -293,7 +308,7 @@ export default function AttendancePage() {
   async function saveLeave() {
     if (!selectedPayrollEmployee || !leaveForm.start_date || !leaveForm.end_date) return;
     await supabase.from('employee_leave').insert({
-      employee_id: selectedPayrollEmployee.id, store_id: STORE_ID, leave_type: leaveForm.leave_type,
+      employee_id: selectedPayrollEmployee.id, store_id: storeId, leave_type: leaveForm.leave_type,
       start_date: leaveForm.start_date, end_date: leaveForm.end_date, days_taken: parseFloat(leaveForm.days_taken) || 1,
       status: leaveForm.status, reason: leaveForm.reason || null, paid_hours_per_day: parseFloat(leaveForm.paid_hours_per_day) || 0,
     });
@@ -317,16 +332,16 @@ export default function AttendancePage() {
     const monthLabel = new Date(payrollMonth + '-01').toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' });
 
     // Make sure a Wages expense category exists so this lands in the right bucket on Income & Expenses
-    let { data: wagesCat } = await supabase.from('expense_categories').select('key, name').eq('organisation_id', ORG_ID).eq('key', 'wages').maybeSingle();
+    let { data: wagesCat } = await supabase.from('expense_categories').select('key, name').eq('organisation_id', orgId).eq('key', 'wages').maybeSingle();
     if (!wagesCat) {
-      const { data: catCountData } = await supabase.from('expense_categories').select('id', { count: 'exact', head: true }).eq('organisation_id', ORG_ID);
-      await supabase.from('expense_categories').insert({ organisation_id: ORG_ID, name: 'Wages / Salaries', key: 'wages', colour: '#1a5c38', is_active: true, sort_order: (catCountData ? 0 : 0) + 1 });
+      const { data: catCountData } = await supabase.from('expense_categories').select('id', { count: 'exact', head: true }).eq('organisation_id', orgId);
+      await supabase.from('expense_categories').insert({ organisation_id: orgId, name: 'Wages / Salaries', key: 'wages', colour: '#1a5c38', is_active: true, sort_order: (catCountData ? 0 : 0) + 1 });
       wagesCat = { key: 'wages', name: 'Wages / Salaries' };
     }
 
     // Write the actual cash-out expense so it shows up in Income & Expenses / food cost
     const { data: expenseRow, error: expError } = await supabase.from('expenses').insert({
-      store_id: STORE_ID, expense_date: payForm.paid_date,
+      store_id: storeId, expense_date: payForm.paid_date,
       category_key: 'wages', category_name: wagesCat?.name || 'Wages / Salaries',
       description: `Wages — ${emp.full_name} — ${monthLabel}`,
       amount: summary.netPay, vat_amount: 0,
@@ -336,7 +351,7 @@ export default function AttendancePage() {
 
     // Audit record tying this payment to the payroll period, and preventing accidental double-pay
     const { error: payError } = await supabase.from('wage_payments').insert({
-      store_id: STORE_ID, employee_id: emp.id, period: payrollMonth, paid_date: payForm.paid_date,
+      store_id: storeId, employee_id: emp.id, period: payrollMonth, paid_date: payForm.paid_date,
       gross_pay: summary.totalPay, uif_employee: summary.uifEmployee, uif_employer: summary.uifEmployer,
       advances_deducted: summary.outstandingAdvances, net_pay: summary.netPay, payment_method: payForm.payment_method,
       expense_id: expenseRow?.id || null,
@@ -507,7 +522,7 @@ export default function AttendancePage() {
       ${brandTopbar()}
       <div class="ct-doc">
       <div class="head">
-        <div><h1>${EMPLOYER_NAME}</h1><div class="sub">Payslip · ${monthLabel}${payrollSettings.uif_reference_number ? ` · UIF Ref: ${payrollSettings.uif_reference_number}` : ''}</div></div>
+        <div><h1>${employerName}</h1><div class="sub">Payslip · ${monthLabel}${payrollSettings.uif_reference_number ? ` · UIF Ref: ${payrollSettings.uif_reference_number}` : ''}</div></div>
         <div class="badge">PAYSLIP</div>
       </div>
       <div class="grid">
@@ -541,7 +556,7 @@ export default function AttendancePage() {
     const monthLabel = new Date(payrollMonth + '-01').toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' });
     const subject = encodeURIComponent(`Payslip — ${monthLabel}`);
     const body = encodeURIComponent(
-      `Hi ${emp.full_name},\n\nYour payslip for ${monthLabel}:\n\nGross Pay: R${summary.totalPay.toFixed(2)}\nUIF Deduction: -R${summary.uifEmployee.toFixed(2)}\n${summary.outstandingAdvances > 0 ? `Advance Deduction: -R${summary.outstandingAdvances.toFixed(2)}\n` : ''}Net Pay: R${summary.netPay.toFixed(2)}\n\nA printable copy is attached.\n\nRegards,\n${EMPLOYER_NAME}\n\n— Sent via CompliTrack (complitrack.co.za)`
+      `Hi ${emp.full_name},\n\nYour payslip for ${monthLabel}:\n\nGross Pay: R${summary.totalPay.toFixed(2)}\nUIF Deduction: -R${summary.uifEmployee.toFixed(2)}\n${summary.outstandingAdvances > 0 ? `Advance Deduction: -R${summary.outstandingAdvances.toFixed(2)}\n` : ''}Net Pay: R${summary.netPay.toFixed(2)}\n\nA printable copy is attached.\n\nRegards,\n${employerName}\n\n— Sent via CompliTrack (complitrack.co.za)`
     );
     window.open(`mailto:?subject=${subject}&body=${body}`, '_blank');
   }
@@ -550,7 +565,7 @@ export default function AttendancePage() {
     if (!emp.phone) { alert(`No phone number on file for ${emp.full_name}. Add one on the People page first.`); return; }
     const monthLabel = new Date(payrollMonth + '-01').toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' });
     const text = encodeURIComponent(
-      `Hi ${emp.full_name}, here's your payslip for ${monthLabel}:\n\nGross Pay: R${summary.totalPay.toFixed(2)}\nUIF Deduction: -R${summary.uifEmployee.toFixed(2)}\n${summary.outstandingAdvances > 0 ? `Advance Deduction: -R${summary.outstandingAdvances.toFixed(2)}\n` : ''}Net Pay: R${summary.netPay.toFixed(2)}\n\n- ${EMPLOYER_NAME}\n\n_Sent via CompliTrack_`
+      `Hi ${emp.full_name}, here's your payslip for ${monthLabel}:\n\nGross Pay: R${summary.totalPay.toFixed(2)}\nUIF Deduction: -R${summary.uifEmployee.toFixed(2)}\n${summary.outstandingAdvances > 0 ? `Advance Deduction: -R${summary.outstandingAdvances.toFixed(2)}\n` : ''}Net Pay: R${summary.netPay.toFixed(2)}\n\n- ${employerName}\n\n_Sent via CompliTrack_`
     );
     window.open(`https://wa.me/${formatZaPhone(emp.phone)}?text=${text}`, '_blank');
   }
@@ -559,7 +574,7 @@ export default function AttendancePage() {
     const monthLabel = payrollMonth;
     const rows: string[][] = [
       ['CompliTrack — Restaurant Compliance & Operations Platform (complitrack.co.za)'],
-      [`${EMPLOYER_NAME} — Payroll Summary — ${monthLabel}`],
+      [`${employerName} — Payroll Summary — ${monthLabel}`],
       [],
       ['Employee', 'ID Number', 'Role', 'Pay Frequency', 'Rate (R/hr)', 'Normal Hrs', 'Normal Pay', 'OT Hrs', 'OT Pay', 'Sunday/Holiday Hrs', 'Sunday/Holiday Pay', 'Night Hrs', 'Night Pay', 'Leave Hrs', 'Leave Pay', 'Gross Pay', 'UIF Employee', 'UIF Employer', 'Advances', 'Net Pay'],
     ];
@@ -605,7 +620,7 @@ export default function AttendancePage() {
       </style></head><body>
       ${brandTopbar()}
       <div class="ct-doc">
-      <h1>${EMPLOYER_NAME}</h1>
+      <h1>${employerName}</h1>
       <div class="sub">Payroll Summary · ${monthLabel}${payrollSettings.uif_reference_number ? ` · UIF Ref: ${payrollSettings.uif_reference_number}` : ''} · UIF: ${payrollSettings.uif_employee_rate}% employee / ${payrollSettings.uif_employer_rate}% employer, capped at R${payrollSettings.uif_ceiling.toLocaleString()}/month</div>
       <table><thead><tr><th>Employee</th><th>ID Number</th><th>Role</th><th style="text-align:right">Hours</th><th style="text-align:right">Gross</th><th style="text-align:right">UIF (Emp)</th><th style="text-align:right">UIF (Empr)</th><th style="text-align:right">Advances</th><th style="text-align:right">Net Pay</th></tr></thead>
       <tbody>${rowsHtml}</tbody></table>
@@ -627,29 +642,42 @@ export default function AttendancePage() {
   async function checkAuthAndLoad() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { router.push('/login'); return; }
-    await Promise.all([loadEmployees(), loadTodayRecords(), loadShifts()]);
+    try {
+      const ctx = await getStoreContext();
+      setStoreId(ctx.storeId);
+      setOrgId(ctx.orgId);
+      setEmployerName(ctx.employerName);
+      await Promise.all([
+        loadEmployees(ctx.storeId),
+        loadTodayRecords(ctx.storeId),
+        loadShifts(ctx.storeId),
+      ]);
+    } catch (e) {
+      console.error('Failed to load store context:', e);
+    }
     setLoading(false);
   }
 
-  async function loadEmployees() {
-    const { data } = await supabase.from('employees').select('id, full_name, role, is_active, hourly_rate, pay_frequency, night_allowance_rate, phone, id_number').eq('store_id', STORE_ID).eq('is_active', true).order('full_name');
+  async function loadEmployees(sid = storeId) {
+    const { data } = await supabase.from('employees').select('id, full_name, role, is_active, hourly_rate, pay_frequency, night_allowance_rate, phone, id_number').eq('store_id', sid).eq('is_active', true).order('full_name');
     setEmployees(data || []);
   }
 
-  async function loadTodayRecords() {
-    const { data } = await supabase.from('attendance').select('*').eq('store_id', STORE_ID).eq('work_date', today);
+  async function loadTodayRecords(sid = storeId) {
+    const { data } = await supabase.from('attendance').select('*').eq('store_id', sid).eq('work_date', today);
     setTodayRecords(data || []);
   }
 
-  async function loadShifts() {
-    const { data } = await supabase.from('store_shifts').select('*').eq('store_id', STORE_ID).order('day_type').order('start_time');
+  async function loadShifts(sid = storeId) {
+    const { data } = await supabase.from('store_shifts').select('*').eq('store_id', sid).order('day_type').order('start_time');
     setShifts(data || []);
   }
 
   async function loadHistory() {
+    if (!storeId) return;
     setHistoryLoading(true);
     const thirtyDaysAgo = new Date(); thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-    let query = supabase.from('attendance').select('*').eq('store_id', STORE_ID).gte('work_date', thirtyDaysAgo.toISOString().split('T')[0]).order('work_date', { ascending: false }).limit(200);
+    let query = supabase.from('attendance').select('*').eq('store_id', storeId).gte('work_date', thirtyDaysAgo.toISOString().split('T')[0]).order('work_date', { ascending: false }).limit(200);
     if (selectedEmployee !== 'all') query = query.eq('employee_id', selectedEmployee);
     const { data } = await query;
     setHistoryRecords(data || []);
@@ -666,7 +694,7 @@ export default function AttendancePage() {
     const todayShifts = shifts.filter(s => s.day_type === dayType && s.is_active);
     const alreadyHasSessionToday = todayRecords.some(r => r.employee_id === employeeId);
     const late = !alreadyHasSessionToday && todayShifts.length > 0 && todayShifts.every(s => currentTime > s.start_time);
-    await supabase.from('attendance').insert({ employee_id: employeeId, store_id: STORE_ID, work_date: today, clock_in: now, is_late: late });
+    await supabase.from('attendance').insert({ employee_id: employeeId, store_id: storeId, work_date: today, clock_in: now, is_late: late });
     await loadTodayRecords();
     setSaving(null);
   }
@@ -683,7 +711,7 @@ export default function AttendancePage() {
   async function saveShift() {
     if (!shiftForm.shift_name.trim()) return;
     setShiftSaving(true);
-    const payload = { store_id: STORE_ID, shift_name: shiftForm.shift_name, day_type: shiftForm.day_type, start_time: shiftForm.start_time, end_time: shiftForm.end_time, is_active: true };
+    const payload = { store_id: storeId, shift_name: shiftForm.shift_name, day_type: shiftForm.day_type, start_time: shiftForm.start_time, end_time: shiftForm.end_time, is_active: true };
     if (editShift) { await supabase.from('store_shifts').update(payload).eq('id', editShift.id); }
     else { await supabase.from('store_shifts').insert(payload); }
     await loadShifts();
@@ -699,7 +727,7 @@ export default function AttendancePage() {
     const clockInTime = `${today}T${manualForm.clock_in}:00`;
     const clockOutTime = manualForm.clock_out ? `${today}T${manualForm.clock_out}:00` : null;
     const hours = clockOutTime ? (new Date(clockOutTime).getTime() - new Date(clockInTime).getTime()) / (1000 * 60 * 60) : null;
-    await supabase.from('attendance').insert({ employee_id: manualForm.employee_id, store_id: STORE_ID, work_date: today, clock_in: clockInTime, clock_out: clockOutTime, hours_worked: hours, is_late: manualForm.is_late, notes: manualForm.notes || null });
+    await supabase.from('attendance').insert({ employee_id: manualForm.employee_id, store_id: storeId, work_date: today, clock_in: clockInTime, clock_out: clockOutTime, hours_worked: hours, is_late: manualForm.is_late, notes: manualForm.notes || null });
     await loadTodayRecords();
     setShowManualModal(false); setManualForm({ employee_id: '', clock_in: '', clock_out: '', is_late: false, notes: '' });
     setManualSaving(false);
