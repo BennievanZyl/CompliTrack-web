@@ -155,7 +155,7 @@ export default function EquipmentPage() {
   });
 
   useEffect(() => {
-    (async () => { const ctx = await getStoreContext(); if (ctx?.storeId) { setStoreId(ctx.storeId); if (ctx.orgId) setOrgId?.(ctx.orgId); } await checkAuthAndLoad(ctx?.storeId); })(); }, []);
+    (async () => { const ctx = await getStoreContext(); const sid = ctx?.storeId || ''; if (sid) setStoreId(sid); if (ctx?.orgId) { try { setOrgId(ctx.orgId) } catch(e){} } await checkAuthAndLoad(sid); })(); }, []);
 
   async function checkAuthAndLoad(sid?: string) {
     const { data: { user } } = await supabase.auth.getUser();
