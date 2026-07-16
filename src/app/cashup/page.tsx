@@ -1,11 +1,12 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { getStoreContext } from '@/lib/store-context'
 import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { Suspense } from 'react';
 
+const DEFAULT_STORE_ID = '05328298-fc27-4c9f-b091-bb7f6598b601';
+const DEFAULT_ORG_ID = 'e903386b-133a-4bad-b054-ef7ef616a3ff';
 const DEFAULT_STORE_NAME = 'Mochachos Hartswater';
 const PRIMARY = '#1a5c38';
 const DARK = '#0a1f12';
@@ -249,26 +250,23 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
   async function checkAuthAndLoad() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { router.push('/login'); return; }
-    const ctx = await getStoreContext();
-    const sid = ctx?.storeId || storeId ;
-    await Promise.all([loadCashUp(undefined, sid), loadStaff(sid), loadEmployees(sid)]);
+    await Promise.all([loadCashUp(), loadStaff(), loadEmployees()]);
   }
 
-  async function loadStaff(sid: string) {
-    const { data } = await supabase.from('store_staff').select('id, full_name, role').eq('store_id', sid).order('full_name');
+  async function loadStaff() {
+    const { data } = await supabase.from('store_staff').select('id, full_name, role').eq('store_id', storeId).order('full_name');
     setStaff(data || []);
   }
 
-  async function loadEmployees(sid: string) {
-    const { data } = await supabase.from('employees').select('id, full_name, role').eq('store_id', sid).eq('is_active', true).order('full_name');
+  async function loadEmployees() {
+    const { data } = await supabase.from('employees').select('id, full_name, role').eq('store_id', storeId).eq('is_active', true).order('full_name');
     setEmployees(data || []);
   }
 
-  async function loadCashUp(dateOverride?: string, sid?: string) {
-    const _sid = sid || storeId;
+  async function loadCashUp(dateOverride?: string) {
     setLoading(true);
     const targetDate = dateOverride || cashUpDate;
-    const { data: existingCashUp } = await supabase.from('cash_ups').select('*').eq('store_id', _sid).eq('cash_up_date', targetDate).maybeSingle();
+    const { data: existingCashUp } = await supabase.from('cash_ups').select('*').eq('store_id', storeId).eq('cash_up_date', targetDate).maybeSingle();
     if (existingCashUp) {
       setCashUp(existingCashUp);
       populateForm(existingCashUp);
@@ -291,10 +289,10 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
       setCashUp(null);
       // Load previous day float as starting float
       const prevDate = new Date(targetDate); prevDate.setDate(prevDate.getDate() - 1);
-      const { data: prevCashUp } = await supabase.from('cash_ups').select('float_total').eq('store_id', _sid).eq('cash_up_date', prevDate.toISOString().split('T')[0]).maybeSingle();
+      const { data: prevCashUp } = await supabase.from('cash_ups').select('float_total').eq('store_id', storeId).eq('cash_up_date', prevDate.toISOString().split('T')[0]).maybeSingle();
       if (prevCashUp?.float_total) setRecon(p => ({ ...p, previous_float: prevCashUp.float_total.toString() }));
     }
-    const { data: hist } = await supabase.from('cash_ups').select('*').eq('store_id', _sid).order('cash_up_date', { ascending: false }).limit(14);
+    const { data: hist } = await supabase.from('cash_ups').select('*').eq('store_id', storeId).order('cash_up_date', { ascending: false }).limit(14);
     setHistory(hist || []);
     setLoading(false);
   }
@@ -1054,8 +1052,8 @@ function CashUpContent() {
   const searchParams = useSearchParams();
   const storeParam = searchParams.get('store');
   const [role, setRole] = useState<string | null>(null);
-  const [storeId, setStoreId] = useState('');
-  const [orgId, setOrgId] = useState('');
+  const [storeId, setStoreId] = useState(DEFAULT_STORE_ID);
+  const [orgId, setOrgId] = useState(DEFAULT_ORG_ID);
   const [storeName, setStoreName] = useState(DEFAULT_STORE_NAME);
   const [ready, setReady] = useState(false);
 
@@ -1064,32 +1062,16 @@ function CashUpContent() {
   async function detectContext() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { setReady(true); return; }
-    const { data: profile } = await supabase.from('profiles').select('role, organisation_id, store_id').eq('id', user.id).single();
+    const { data: profile } = await supabase.from('profiles').select('role, organisation_id').eq('id', user.id).single();
     setRole(profile?.role || null);
     if (storeParam) {
-      // Franchisor clicking into a specific store via URL
       const { data: store } = await supabase.from('stores').select('id, name, organisation_id').eq('id', storeParam).single();
       if (store) { setStoreId(store.id); setStoreName(store.name); setOrgId(store.organisation_id); }
-    } else if (profile?.store_id) {
-      // Regular store owner — load from their profile
-      const { data: store } = await supabase.from('stores').select('id, name, organisation_id').eq('id', profile.store_id).single();
-      if (store) { setStoreId(store.id); setStoreName(store.name); setOrgId(store.organisation_id || profile.organisation_id || ''); }
     }
     setReady(true);
   }
 
   if (!ready) return <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f8faf8' }}><div style={{ color: '#666' }}>Loading...</div></div>;
-
-  if (!storeId) return (
-    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f8faf8', fontFamily: 'system-ui, sans-serif' }}>
-      <div style={{ textAlign: 'center', maxWidth: 400, padding: 32 }}>
-        <div style={{ fontSize: 48, marginBottom: 16 }}>🏪</div>
-        <div style={{ fontWeight: 800, fontSize: 20, color: '#111', marginBottom: 8 }}>Select a Store First</div>
-        <div style={{ color: '#6b7280', fontSize: 14, marginBottom: 24, lineHeight: '1.6' }}>This page is store-specific. Please select a store from the organisation overview.</div>
-        <a href="/org" style={{ background: '#1a5c38', color: '#fff', borderRadius: 12, padding: '12px 24px', fontWeight: 700, fontSize: 14, textDecoration: 'none' }}>← Organisation Overview</a>
-      </div>
-    </div>
-  );
 
   const isFranchisor = role === 'franchisor_admin' || role === 'platform_admin';
   const isFranchiseeOwner = role === 'franchisee_owner';
