@@ -61,7 +61,7 @@ export default function ClipboardPage() {
   const totalOwed = unpaid.reduce((s, i) => s + Number(i.total_amount || 0), 0)
   const overdue = unpaid.filter(i => { const d = daysUntil(i.due_date); return d !== null && d < 0 })
 
-  if (!storeId) {
+  if (!storeId && !loading) {
     return (
       <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f8faf8', fontFamily: 'system-ui, sans-serif' }}>
         <div style={{ textAlign: 'center', maxWidth: 400, padding: 32 }}>
