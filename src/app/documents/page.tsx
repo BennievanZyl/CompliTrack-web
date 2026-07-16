@@ -44,11 +44,11 @@ export default function DocumentsPage() {
   })
 
   useEffect(() => {
-    getStoreContext().then(ctx => { if(ctx?.storeId) setStoreId(ctx.storeId) }) loadDocuments() }, [])
+    getStoreContext().then(ctx => { if(ctx?.storeId) setStoreId(ctx.storeId) }); loadDocuments() }, [])
 
   async function loadDocuments() {
     setLoading(true)
-    const { data, error } = await supabase.from('store_documents').select('*').eq('store_id', STORE_ID).order('created_at', { ascending: false })
+    const { data, error } = await supabase.from('store_documents').select('*').eq('store_id', storeId).order('created_at', { ascending: false })
     if (!error) setDocuments(data || [])
     setLoading(false)
   }
@@ -58,11 +58,11 @@ export default function DocumentsPage() {
     setUploading(true)
     try {
       const ext = form.file.name.split('.').pop()
-      const path = `${STORE_ID}/${form.category}/${Date.now()}.${ext}`
+      const path = `${storeId}/${form.category}/${Date.now()}.${ext}`
       const { error: storageError } = await supabase.storage.from('store-documents').upload(path, form.file, { upsert: false })
       if (storageError) throw storageError
       const { error: dbError } = await supabase.from('store_documents').insert({
-        store_id: STORE_ID, category: form.category, document_name: form.document_name,
+        store_id: storeId, category: form.category, document_name: form.document_name,
         file_url: path, file_type: form.file.type.includes('pdf') ? 'pdf' : 'image',
         expiry_date: form.expiry_date || null, issued_date: form.issued_date || null,
         issued_by: form.issued_by || null, notes: form.notes || null,
