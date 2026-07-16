@@ -90,7 +90,7 @@ function sortChecklist(items: ChecklistItem[]): ChecklistItem[] {
 }
 
 export default function CompliancePage() {
-  const [storeId, setStoreId] = useState(STORE_ID_DEFAULT)
+  const [storeId, setStoreId] = useState('')
   const router = useRouter();
   const [session, setSession] = useState<Session | null>(null);
   const [checklist, setChecklist] = useState<ChecklistItem[]>([]);
