@@ -1,10 +1,10 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { getStoreContext } from '@/lib/store-context'
 import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 
+const STORE_ID = '05328298-fc27-4c9f-b091-bb7f6598b601'
 
 type Store = {
   id: string; name: string; city: string; phone: string | null; email: string | null
@@ -91,19 +91,18 @@ export default function SettingsPage() {
 
   const SECTIONS = [...new Set(templates.map(t => t.section)), 'Opening', 'During Service', 'Closing', 'Cleaning', 'Safety'].filter((v, i, a) => a.indexOf(v) === i)
 
-  useEffect(() => {
-    getStoreContext().then(ctx => { if(ctx?.storeId) setStoreId(ctx.storeId) }); loadAll(); supabase.auth.getUser().then(({ data }) => setUserEmail(data.user?.email || '')) }, [])
+  useEffect(() => { loadAll(); supabase.auth.getUser().then(({ data }) => setUserEmail(data.user?.email || '')) }, [])
 
   async function loadAll() {
     setLoading(true)
     const [storeRes, templRes, catRes, permsRes] = await Promise.all([
-      supabase.from('stores').select('*').eq('id', storeId).single(),
-      supabase.from('checklist_templates').select('*').eq('store_id', storeId).order('section').order('sort_order'),
+      supabase.from('stores').select('*').eq('id', STORE_ID).single(),
+      supabase.from('checklist_templates').select('*').eq('store_id', STORE_ID).order('section').order('sort_order'),
       supabase.from('expense_categories').select('*').eq('organisation_id', 'e903386b-133a-4bad-b054-ef7ef616a3ff').order('sort_order'),
-      supabase.from('store_role_permissions').select('*').eq('store_id', storeId),
+      supabase.from('store_role_permissions').select('*').eq('store_id', STORE_ID),
     ])
     if (storeRes.data) { setStore(storeRes.data); setForm(storeRes.data) }
-    setStoreId(storeId)
+    setStoreId(STORE_ID)
     setTemplates(templRes.data || [])
     setCategories(catRes.data || [])
     // Build permissions map: { role: { card: true/false } }
@@ -117,7 +116,7 @@ export default function SettingsPage() {
 
   async function saveStore() {
     setSaving(true)
-    await supabase.from('stores').update(form).eq('id', storeId)
+    await supabase.from('stores').update(form).eq('id', STORE_ID)
     setSaved(true)
     setTimeout(() => setSaved(false), 3000)
     setSaving(false)
@@ -129,7 +128,7 @@ export default function SettingsPage() {
     setSaving(true)
     const maxOrder = templates.filter(t => t.section === taskForm.section).length
     await supabase.from('checklist_templates').insert({
-      store_id: storeId, task_name: taskForm.task_name, section: taskForm.section,
+      store_id: STORE_ID, task_name: taskForm.task_name, section: taskForm.section,
       requires_photo: taskForm.requires_photo, sort_order: maxOrder + 1, is_active: true,
     })
     setTaskForm({ task_name: '', section: 'Opening', requires_photo: false })
@@ -210,20 +209,6 @@ export default function SettingsPage() {
     if (items.length) acc[sec] = items
     return acc
   }, {} as Record<string, ChecklistTemplate[]>)
-
-  if (!storeId) {
-    return (
-      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f8faf8', fontFamily: 'system-ui, sans-serif' }}>
-        <div style={{ textAlign: 'center', maxWidth: 400, padding: 32 }}>
-          <div style={{ fontSize: 48, marginBottom: 16 }}>🏪</div>
-          <div style={{ fontWeight: 800, fontSize: 20, color: '#111', marginBottom: 8 }}>Select a Store First</div>
-          <div style={{ color: '#6b7280', fontSize: 14, marginBottom: 24, lineHeight: '1.6' }}>This page is store-specific. Go to your organisation overview and click into a store.</div>
-          <a href="/org" style={{ background: '#1a5c38', color: '#fff', borderRadius: 12, padding: '12px 24px', fontWeight: 700, fontSize: 14, textDecoration: 'none' }}>← Organisation Overview</a>
-        </div>
-      </div>
-    )
-  }
-
 
   return (
     <div style={{ minHeight: '100vh', background: '#f0f4f0', fontFamily: 'system-ui, sans-serif' }}>
@@ -629,7 +614,7 @@ export default function SettingsPage() {
                   const updated = { ...perms, [cardKey]: !current }
                   setRolePerms(p => ({ ...p, [role]: updated }))
                   await supabase.from('store_role_permissions').upsert({
-                    store_id: storeId,
+                    store_id: STORE_ID,
                     role,
                     permissions: updated,
                     updated_at: new Date().toISOString(),
