@@ -252,8 +252,7 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { router.push('/login'); return; }
     const ctx = await getStoreContext();
-    const sid = ctx?.storeId || DEFAULT_STORE_ID;
-    if (ctx?.storeId) setStoreId(ctx.storeId);
+    const sid = ctx?.storeId || storeId || DEFAULT_STORE_ID;
     await Promise.all([loadCashUp(undefined, sid), loadStaff(sid), loadEmployees(sid)]);
   }
 
@@ -293,10 +292,10 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
       setCashUp(null);
       // Load previous day float as starting float
       const prevDate = new Date(targetDate); prevDate.setDate(prevDate.getDate() - 1);
-      const { data: prevCashUp } = await supabase.from('cash_ups').select('float_total').eq('store_id', storeId).eq('cash_up_date', prevDate.toISOString().split('T')[0]).maybeSingle();
+      const { data: prevCashUp } = await supabase.from('cash_ups').select('float_total').eq('store_id', sid).eq('cash_up_date', prevDate.toISOString().split('T')[0]).maybeSingle();
       if (prevCashUp?.float_total) setRecon(p => ({ ...p, previous_float: prevCashUp.float_total.toString() }));
     }
-    const { data: hist } = await supabase.from('cash_ups').select('*').eq('store_id', storeId).order('cash_up_date', { ascending: false }).limit(14);
+    const { data: hist } = await supabase.from('cash_ups').select('*').eq('store_id', sid).order('cash_up_date', { ascending: false }).limit(14);
     setHistory(hist || []);
     setLoading(false);
   }
