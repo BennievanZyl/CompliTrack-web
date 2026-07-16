@@ -35,6 +35,7 @@ const TABS = [
   { key: 'payroll', label: '💰 Payroll Defaults' },
   { key: 'checklist', label: '✅ Checklist Templates' },
   { key: 'categories', label: '🏷️ Expense Categories' },
+  { key: 'permissions', label: '🔑 Role Permissions' },
 ]
 
 const INPUT = { width: '100%', border: '1.5px solid #e5e7eb', borderRadius: '10px', padding: '10px 12px', fontSize: '14px', outline: 'none', boxSizing: 'border-box' as const, background: '#fff', fontFamily: 'system-ui' }
@@ -53,6 +54,9 @@ export default function SettingsPage() {
   const router = useRouter()
   const [tab, setTab] = useState('profile')
   const [store, setStore] = useState<Store | null>(null)
+  const [storeId, setStoreId] = useState<string | null>(null)
+  const [rolePerms, setRolePerms] = useState<Record<string, Record<string, boolean>>>({})
+  const [savingPerms, setSavingPerms] = useState(false)
   const [form, setForm] = useState<Partial<Store>>({})
   const [templates, setTemplates] = useState<ChecklistTemplate[]>([])
   const [loading, setLoading] = useState(true)
@@ -91,14 +95,22 @@ export default function SettingsPage() {
 
   async function loadAll() {
     setLoading(true)
-    const [storeRes, templRes, catRes] = await Promise.all([
+    const [storeRes, templRes, catRes, permsRes] = await Promise.all([
       supabase.from('stores').select('*').eq('id', STORE_ID).single(),
       supabase.from('checklist_templates').select('*').eq('store_id', STORE_ID).order('section').order('sort_order'),
       supabase.from('expense_categories').select('*').eq('organisation_id', 'e903386b-133a-4bad-b054-ef7ef616a3ff').order('sort_order'),
+      supabase.from('store_role_permissions').select('*').eq('store_id', STORE_ID),
     ])
     if (storeRes.data) { setStore(storeRes.data); setForm(storeRes.data) }
+    setStoreId(STORE_ID)
     setTemplates(templRes.data || [])
     setCategories(catRes.data || [])
+    // Build permissions map: { role: { card: true/false } }
+    const permsMap: Record<string, Record<string, boolean>> = {}
+    for (const row of (permsRes.data || [])) {
+      permsMap[row.role] = row.permissions
+    }
+    setRolePerms(permsMap)
     setLoading(false)
   }
 
@@ -562,6 +574,76 @@ export default function SettingsPage() {
                   ))}
                 </div>
               )}
+            </div>
+          )}
+
+          {tab === 'permissions' && (
+            <div style={{ padding: '24px 28px' }}>
+              <div style={{ fontWeight: 700, fontSize: 14, color: '#374151', marginBottom: 4 }}>Role Permissions</div>
+              <div style={{ fontSize: 13, color: '#9ca3af', marginBottom: 24 }}>Control which features are visible for each role on the mobile app. Untick to hide from that role.</div>
+
+              {[
+                { role: 'manager', label: '👔 Manager', desc: 'Store managers — full access by default' },
+                { role: 'staff', label: '👤 Staff', desc: 'General staff members' },
+                { role: 'kitchen', label: '🍗 Kitchen', desc: 'Kitchen staff' },
+                { role: 'buyer', label: '🛒 Buyer', desc: 'Person doing daily shopping' },
+                { role: 'clock_system', label: '🕐 Clock System', desc: 'Dedicated kiosk device' },
+                { role: 'viewer', label: '📊 Viewer', desc: 'Read-only access' },
+              ].map(({ role, label, desc }) => {
+                const perms = rolePerms[role] || {}
+                const ALL_CARDS = [
+                  { key: 'cashup', label: '💵 Cash Up' },
+                  { key: 'income', label: '📊 Income & Expenses' },
+                  { key: 'compliance', label: '✅ Compliance' },
+                  { key: 'messages', label: '💬 Messages' },
+                  { key: 'people', label: '👥 People' },
+                  { key: 'timeAttendance', label: '🕐 Time & Attendance' },
+                  { key: 'stock', label: '📦 Stock' },
+                  { key: 'issueStock', label: '🍳 Issue Stock' },
+                  { key: 'buyList', label: '🛒 Buy List' },
+                  { key: 'clockIn', label: '📱 Clock In/Out' },
+                  { key: 'reports', label: '📈 Analytics' },
+                  { key: 'pdfReports', label: '📋 PDF Reports' },
+                  { key: 'documents', label: '📁 Documents' },
+                  { key: 'equipment', label: '🔧 Equipment' },
+                  { key: 'settings', label: '⚙️ Settings' },
+                ]
+
+                async function togglePerm(cardKey: string) {
+                  const current = perms[cardKey] !== false // default true
+                  const updated = { ...perms, [cardKey]: !current }
+                  setRolePerms(p => ({ ...p, [role]: updated }))
+                  await supabase.from('store_role_permissions').upsert({
+                    store_id: STORE_ID,
+                    role,
+                    permissions: updated,
+                    updated_at: new Date().toISOString(),
+                  }, { onConflict: 'store_id,role' })
+                }
+
+                return (
+                  <div key={role} style={{ background: '#f8faf8', borderRadius: 16, padding: '20px 24px', marginBottom: 16, border: '1.5px solid #eef2ee' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+                      <div>
+                        <div style={{ fontWeight: 800, fontSize: 15, color: '#111' }}>{label}</div>
+                        <div style={{ fontSize: 12, color: '#9ca3af' }}>{desc}</div>
+                      </div>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
+                      {ALL_CARDS.map(card => {
+                        const enabled = perms[card.key] !== false
+                        return (
+                          <label key={card.key} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', background: '#fff', borderRadius: 10, padding: '10px 12px', border: `1.5px solid ${enabled ? '#bbf7d0' : '#e5e7eb'}` }}>
+                            <input type="checkbox" checked={enabled} onChange={() => togglePerm(card.key)}
+                              style={{ width: 16, height: 16, cursor: 'pointer', accentColor: '#1a5c38' }} />
+                            <span style={{ fontSize: 13, fontWeight: 600, color: enabled ? '#111' : '#9ca3af' }}>{card.label}</span>
+                          </label>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )
+              })}
             </div>
           )}
 
