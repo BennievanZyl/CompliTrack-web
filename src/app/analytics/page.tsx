@@ -89,6 +89,7 @@ function ComplianceTrend({sessions}:{sessions:{date:string;pct:number}[]}){
 
 export default function AnalyticsPage(){
   const [storeId, setStoreId] = useState('')
+  useEffect(() => { getStoreContext().then(ctx => { if (ctx?.storeId) setStoreId(ctx.storeId) }) }, [])
   const router=useRouter()
   const [month,setMonth]=useState(thisMonth())
   const [view,setView]=useState<'period'|'compare'>('period')
