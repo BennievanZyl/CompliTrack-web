@@ -155,7 +155,7 @@ export default function EquipmentPage() {
   });
 
   useEffect(() => {
-    getStoreContext().then(ctx => { if(ctx?.storeId) setStoreId(ctx.storeId) }) checkAuthAndLoad(); }, []);
+    getStoreContext().then(ctx => { if(ctx?.storeId) setStoreId(ctx.storeId) }); checkAuthAndLoad(); }, []);
 
   async function checkAuthAndLoad() {
     const { data: { user } } = await supabase.auth.getUser();
@@ -166,7 +166,7 @@ export default function EquipmentPage() {
   async function loadEquipment() {
     setLoading(true);
     const { data: equipData } = await supabase
-      .from('equipment').select('*').eq('store_id', STORE_ID).eq('is_active', true).order('name');
+      .from('equipment').select('*').eq('store_id', storeId).eq('is_active', true).order('name');
     setEquipment(equipData || []);
     if (equipData) {
       const schedMap: Record<string, ServiceSchedule[]> = {};
@@ -191,7 +191,7 @@ export default function EquipmentPage() {
     if (!newEquipment.name) return;
     setSaving(true);
     await supabase.from('equipment').insert({
-      store_id: STORE_ID, organisation_id: ORG_ID,
+      store_id: storeId, organisation_id: orgId,
       name: newEquipment.name, equipment_type: newEquipment.equipment_type,
       make: newEquipment.make || null, model: newEquipment.model || null,
       serial_number: newEquipment.serial_number || null,
@@ -213,7 +213,7 @@ export default function EquipmentPage() {
     if (!selectedEquipment || !newLog.service_date) return;
     setSaving(true);
     await supabase.from('equipment_service_log').insert({
-      equipment_id: selectedEquipment.id, store_id: STORE_ID,
+      equipment_id: selectedEquipment.id, store_id: storeId,
       service_date: newLog.service_date, service_type: newLog.service_type,
       technician_name: newLog.technician_name || null, company_name: newLog.company_name || null,
       notes: newLog.notes || null,
@@ -265,7 +265,7 @@ export default function EquipmentPage() {
     setSaving(true);
     const { data: { user } } = await supabase.auth.getUser();
     await supabase.from('equipment_documents').insert({
-      equipment_id: selectedEquipment.id, store_id: STORE_ID,
+      equipment_id: selectedEquipment.id, store_id: storeId,
       document_type: newDocument.document_type, document_name: newDocument.document_name,
       file_url: newDocument.file_url, notes: newDocument.notes || null,
       uploaded_by: user?.id,
