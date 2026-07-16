@@ -870,7 +870,7 @@ export default function FinancesPage() {
     return <span style={{ background: s.bg, color: s.color, padding: '2px 10px', borderRadius: 20, fontSize: size, fontWeight: 600, textTransform: 'capitalize' as const }}>{status || 'draft'}</span>
   }
 
-  if (!storeId) {
+  if (!storeId && !loading) {
     return (
       <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f8faf8', fontFamily: 'system-ui, sans-serif' }}>
         <div style={{ textAlign: 'center', maxWidth: 400, padding: 32 }}>
