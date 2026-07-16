@@ -1,12 +1,11 @@
 'use client';
 
 import { useEffect, useState, useRef } from 'react';
-import { getStoreContext } from '@/lib/store-context'
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 
-
-
+const STORE_ID = '05328298-fc27-4c9f-b091-bb7f6598b601';
+const ORG_ID = 'e903386b-133a-4bad-b054-ef7ef616a3ff';
 const STORE_NAME = 'Mochachos Hartswater';
 const PRIMARY = '#1a5c38';
 const DARK = '#0a1f12';
@@ -112,7 +111,6 @@ function generateQRDataURL(text: string): string {
 }
 
 export default function EquipmentPage() {
-  const [storeId, setStoreId] = useState('')
   const router = useRouter();
   const [equipment, setEquipment] = useState<Equipment[]>([]);
   const [schedules, setSchedules] = useState<Record<string, ServiceSchedule[]>>({});
@@ -154,12 +152,9 @@ export default function EquipmentPage() {
     document_type: 'Purchase Invoice', document_name: '', notes: '', file_url: ''
   });
 
-  useEffect(() => {
-    (async () => { const ctx = await getStoreContext(); const sid = ctx?.storeId || ''; if (sid) setStoreId(sid); if (ctx?.orgId) { try { setOrgId(ctx.orgId) } catch(e){} } await checkAuthAndLoad(sid); })(); }, []);
+  useEffect(() => { checkAuthAndLoad(); }, []);
 
-  async function checkAuthAndLoad(sid?: string) {
-    const effectiveSid = sid || storeId;
-    if (!effectiveSid) return;
+  async function checkAuthAndLoad() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { router.push('/login'); return; }
     await loadEquipment();
@@ -168,7 +163,7 @@ export default function EquipmentPage() {
   async function loadEquipment() {
     setLoading(true);
     const { data: equipData } = await supabase
-      .from('equipment').select('*').eq('store_id', effectiveSid).eq('is_active', true).order('name');
+      .from('equipment').select('*').eq('store_id', STORE_ID).eq('is_active', true).order('name');
     setEquipment(equipData || []);
     if (equipData) {
       const schedMap: Record<string, ServiceSchedule[]> = {};
@@ -193,7 +188,7 @@ export default function EquipmentPage() {
     if (!newEquipment.name) return;
     setSaving(true);
     await supabase.from('equipment').insert({
-      store_id: effectiveSid, organisation_id: orgId,
+      store_id: STORE_ID, organisation_id: ORG_ID,
       name: newEquipment.name, equipment_type: newEquipment.equipment_type,
       make: newEquipment.make || null, model: newEquipment.model || null,
       serial_number: newEquipment.serial_number || null,
@@ -215,7 +210,7 @@ export default function EquipmentPage() {
     if (!selectedEquipment || !newLog.service_date) return;
     setSaving(true);
     await supabase.from('equipment_service_log').insert({
-      equipment_id: selectedEquipment.id, store_id: effectiveSid,
+      equipment_id: selectedEquipment.id, store_id: STORE_ID,
       service_date: newLog.service_date, service_type: newLog.service_type,
       technician_name: newLog.technician_name || null, company_name: newLog.company_name || null,
       notes: newLog.notes || null,
@@ -267,7 +262,7 @@ export default function EquipmentPage() {
     setSaving(true);
     const { data: { user } } = await supabase.auth.getUser();
     await supabase.from('equipment_documents').insert({
-      equipment_id: selectedEquipment.id, store_id: effectiveSid,
+      equipment_id: selectedEquipment.id, store_id: STORE_ID,
       document_type: newDocument.document_type, document_name: newDocument.document_name,
       file_url: newDocument.file_url, notes: newDocument.notes || null,
       uploaded_by: user?.id,
