@@ -1,11 +1,10 @@
 'use client';
 
 import { useEffect, useState, useRef } from 'react';
-import { getStoreContext } from '@/lib/store-context'
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 
-
+const STORE_ID = '05328298-fc27-4c9f-b091-bb7f6598b601';
 const PRIMARY = '#1a5c38';
 const DARK = '#0a1f12';
 const POLL_INTERVAL = 30000;
@@ -90,7 +89,6 @@ function sortChecklist(items: ChecklistItem[]): ChecklistItem[] {
 }
 
 export default function CompliancePage() {
-  const [storeId, setStoreId] = useState('')
   const router = useRouter();
   const [session, setSession] = useState<Session | null>(null);
   const [checklist, setChecklist] = useState<ChecklistItem[]>([]);
@@ -109,8 +107,7 @@ export default function CompliancePage() {
   const [currentUser, setCurrentUser] = useState<{ id: string; role: string } | null>(null);
   const sessionRef = useRef<Session | null>(null);
 
-  useEffect(() => {
-    (async () => { const ctx = await getStoreContext(); const sid = ctx?.storeId || ''; if (sid) setStoreId(sid); if (ctx?.orgId) { try { setOrgId(ctx.orgId) } catch(e){} } await checkAuthAndLoad(sid); })(); }, []);
+  useEffect(() => { checkAuthAndLoad(); }, []);
   useEffect(() => { sessionRef.current = session; }, [session]);
 
   useEffect(() => {
@@ -119,7 +116,6 @@ export default function CompliancePage() {
     const interval = setInterval(() => {
       if (sessionRef.current?.started_at) setElapsed(formatElapsed(sessionRef.current.started_at));
     }, 1000);
-
     return () => clearInterval(interval);
   }, [session?.started_at, session?.status]);
 
@@ -139,9 +135,7 @@ export default function CompliancePage() {
     return () => { supabase.removeChannel(channel); clearInterval(poll); };
   }, [session?.id, selectedItem]);
 
-  async function checkAuthAndLoad(sid?: string) {
-    const effectiveSid = sid || storeId;
-    if (!effectiveSid) return;
+  async function checkAuthAndLoad() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { router.push('/login'); return; }
     const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single();
@@ -149,9 +143,7 @@ export default function CompliancePage() {
     await loadData();
   }
 
-  async function loadData(sid?: string) {
-    const effectiveSid = sid || storeId;
-    if (!effectiveSid) return;
+  async function loadData() {
     setLoading(true);
     const today = new Date().toISOString().split('T')[0];
     // Use maybeSingle replaced with limit — handles multiple sessions gracefully
@@ -159,7 +151,7 @@ export default function CompliancePage() {
     const { data: sessions } = await supabase
       .from('daily_sessions')
       .select('*')
-      .eq('store_id', effectiveSid)
+      .eq('store_id', STORE_ID)
       .eq('session_date', today)
       .eq('session_type', 'daily')
       .order('created_at', { ascending: false });
@@ -230,7 +222,7 @@ export default function CompliancePage() {
     await supabase.from('compliance_comments').insert({
       checklist_item_id: selectedItem.id,
       session_id: session.id,
-      store_id: effectiveSid,
+      store_id: STORE_ID,
       sender_id: currentUser.id,
       message: newComment.trim(),
     });
