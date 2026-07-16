@@ -147,7 +147,7 @@ export default function StockPage() {
   const [categoryForm, setCategoryForm] = useState({ name: '', color: '#1a5c38' })
 
   useEffect(() => {
-    (async () => { const ctx = await getStoreContext(); if (ctx?.storeId) { setStoreId(ctx.storeId); if (ctx.orgId) setOrgId?.(ctx.orgId); } await loadAll(ctx?.storeId); })() }, [])
+    (async () => { const ctx = await getStoreContext(); const sid = ctx?.storeId || ''; if (sid) setStoreId(sid); if (ctx?.orgId) { try { setOrgId(ctx.orgId) } catch(e){} } await loadAll(sid); })() }, [])
 
   async function loadAll(sid?: string) {
     setLoading(true)
