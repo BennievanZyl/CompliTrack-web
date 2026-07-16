@@ -4,7 +4,6 @@ import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 
-const STORE_ID = '05328298-fc27-4c9f-b091-bb7f6598b601'
 type Employee = { id: string; full_name: string; role: string }
 type EmployeeWage = { id: string; employee_id: string; hourly_rate: number; uif_employee: number; uif_employer: number; tax_rate: number; pay_frequency: string; bank_name?: string; bank_account?: string; bank_branch?: string; id_number?: string }
 type PayrollPeriod = { id: string; period_start: string; period_end: string; pay_frequency: string; status: string }
@@ -18,8 +17,26 @@ const LABEL_STYLE = { display: 'block', fontSize: '12px', fontWeight: '700', col
 function formatCurrency(val: number) { return `R ${val.toFixed(2)}` }
 function formatHours(val: number) { return `${Math.floor(val)}h ${Math.round((val % 1) * 60)}m` }
 
+
+async function getStoreContext(): Promise<{ storeId: string; orgId: string; employerName: string }> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not logged in');
+  const { data: profile } = await supabase.from('profiles')
+    .select('store_id, organisation_id').eq('id', user.id).single();
+  if (!profile?.store_id) throw new Error('No store linked');
+  const { data: store } = await supabase.from('stores')
+    .select('name').eq('id', profile.store_id).single();
+  return {
+    storeId: profile.store_id,
+    orgId: profile.organisation_id || '',
+    employerName: store?.name || 'CompliTrack Store',
+  };
+}
+
 export default function WagesPage() {
   const router = useRouter()
+  const [storeId, setStoreId] = useState('05328298-fc27-4c9f-b091-bb7f6598b601')
+  const [orgId, setOrgId] = useState('e903386b-133a-4bad-b054-ef7ef616a3ff')
   const [tab, setTab] = useState<'payroll' | 'advances' | 'slips' | 'settings'>('payroll')
   const [employees, setEmployees] = useState<Employee[]>([])
   const [wages, setWages] = useState<EmployeeWage[]>([])
@@ -38,16 +55,21 @@ export default function WagesPage() {
   const [advanceForm, setAdvanceForm] = useState({ employee_id: '', amount: '', reason: '', advance_date: new Date().toISOString().split('T')[0] })
   const [wageForm, setWageForm] = useState({ employee_id: '', hourly_rate: '', uif_employee: '0.01', uif_employer: '0.01', tax_rate: '0', pay_frequency: 'monthly', bank_name: '', bank_account: '', bank_branch: '', id_number: '' })
 
-  useEffect(() => { loadAll() }, [])
+  useEffect(() => {
+    getStoreContext().then(ctx => {
+      setStoreId(ctx.storeId)
+      setOrgId(ctx.orgId)
+    }).catch(() => {}).finally(() => loadAll())
+  }, [])
 
   async function loadAll() {
     setLoading(true)
     const [empRes, wageRes, periodRes, runRes, advRes] = await Promise.all([
-      supabase.from('employees').select('id, full_name, role, hourly_rate, pay_frequency, id_number').eq('store_id', STORE_ID).eq('is_active', true).order('full_name'),
-      supabase.from('employee_wages').select('*').eq('store_id', STORE_ID),
-      supabase.from('payroll_periods').select('*').eq('store_id', STORE_ID).order('period_start', { ascending: false }),
-      supabase.from('payroll_runs').select('*').eq('store_id', STORE_ID),
-      supabase.from('employee_advances').select('*').eq('store_id', STORE_ID).order('advance_date', { ascending: false }),
+      supabase.from('employees').select('id, full_name, role, hourly_rate, pay_frequency, id_number').eq('store_id', storeId).eq('is_active', true).order('full_name'),
+      supabase.from('employee_wages').select('*').eq('store_id', storeId),
+      supabase.from('payroll_periods').select('*').eq('store_id', storeId).order('period_start', { ascending: false }),
+      supabase.from('payroll_runs').select('*').eq('store_id', storeId),
+      supabase.from('employee_advances').select('*').eq('store_id', storeId).order('advance_date', { ascending: false }),
     ])
     const emps = empRes.data || []
     let wageData = wageRes.data || []
@@ -61,7 +83,7 @@ export default function WagesPage() {
         wageData = [...wageData, {
           id: `virtual-${emp.id}`,
           employee_id: emp.id,
-          store_id: STORE_ID,
+          store_id: storeId,
           hourly_rate: emp.hourly_rate,
           pay_frequency: emp.pay_frequency || 'monthly',
           uif_employee: 0.01,
@@ -84,7 +106,7 @@ export default function WagesPage() {
   async function createPeriod() {
     if (!periodForm.period_start || !periodForm.period_end) return
     setSaving(true)
-    const { data } = await supabase.from('payroll_periods').insert({ store_id: STORE_ID, ...periodForm, status: 'open' }).select().single()
+    const { data } = await supabase.from('payroll_periods').insert({ store_id: storeId, ...periodForm, status: 'open' }).select().single()
     if (data) { setSelectedPeriod(data); setShowNewPeriod(false); setPeriodForm({ period_start: '', period_end: '', pay_frequency: 'monthly' }) }
     await loadAll()
     setSaving(false)
@@ -100,7 +122,7 @@ export default function WagesPage() {
       const { data: att } = await supabase
         .from('attendance')
         .select('hours_worked')
-        .eq('store_id', STORE_ID)
+        .eq('store_id', storeId)
         .eq('employee_id', emp.id)
         .gte('work_date', selectedPeriod.period_start)
         .lte('work_date', selectedPeriod.period_end)
@@ -130,7 +152,7 @@ export default function WagesPage() {
         }).eq('id', existing.id)
       } else {
         await supabase.from('payroll_runs').insert({
-          payroll_period_id: selectedPeriod.id, employee_id: emp.id, store_id: STORE_ID,
+          payroll_period_id: selectedPeriod.id, employee_id: emp.id, store_id: storeId,
           hours_worked: hours, hourly_rate: wage.hourly_rate, gross_pay: gross,
           uif_employee: uif_emp, uif_employer: uif_emr, paye_tax: paye,
           advances_deducted: advTotal, net_pay: net, status: 'draft',
@@ -167,7 +189,7 @@ export default function WagesPage() {
     if (!advanceForm.employee_id || !advanceForm.amount) return
     setSaving(true)
     await supabase.from('employee_advances').insert({
-      store_id: STORE_ID,
+      store_id: storeId,
       employee_id: advanceForm.employee_id,
       amount: parseFloat(advanceForm.amount),
       reason: advanceForm.reason || null,
@@ -187,7 +209,7 @@ export default function WagesPage() {
     const hourlyRate = parseFloat(wageForm.hourly_rate)
     const existing = wages.find(w => w.employee_id === wageForm.employee_id)
     const payload = {
-      store_id: STORE_ID, employee_id: wageForm.employee_id,
+      store_id: storeId, employee_id: wageForm.employee_id,
       hourly_rate: hourlyRate,
       uif_employee: parseFloat(wageForm.uif_employee),
       uif_employer: parseFloat(wageForm.uif_employer),
