@@ -149,18 +149,18 @@ export default function StockPage() {
   useEffect(() => {
     (async () => { const ctx = await getStoreContext(); if (ctx?.storeId) { setStoreId(ctx.storeId); if (ctx.orgId) setOrgId?.(ctx.orgId); } await loadAll(ctx?.storeId); })() }, [])
 
-  async function loadAll() {
+  async function loadAll(sid?: string) {
     setLoading(true)
     try {
     const [catRes, itemRes, countRes, purchRes, wastRes, ordRes, suppRes, issueRes] = await Promise.all([
-      supabase.from('stock_categories').select('*').eq('store_id', storeId).order('sort_order'),
-      supabase.from('stock_items').select('*').eq('store_id', storeId).eq('is_active', true).order('sort_order', { nullsFirst: false }),
-      supabase.from('stock_counts').select('*').eq('store_id', storeId).order('count_date', { ascending: false }).limit(30),
-      supabase.from('stock_purchases').select('*').eq('store_id', storeId).order('purchase_date', { ascending: false }).limit(50),
-      supabase.from('stock_wastage').select('*').eq('store_id', storeId).order('wastage_date', { ascending: false }).limit(50),
-      supabase.from('stock_orders').select('*').eq('store_id', storeId).order('order_date', { ascending: false }).limit(30),
-      supabase.from('stock_suppliers').select('*').eq('store_id', storeId).eq('is_active', true).order('sort_order'),
-      supabase.from('stock_issues').select('*').eq('store_id', storeId).order('issue_date', { ascending: false }).limit(50),
+      supabase.from('stock_categories').select('*').eq('store_id', sid || storeId).order('sort_order'),
+      supabase.from('stock_items').select('*').eq('store_id', sid || storeId).eq('is_active', true).order('sort_order', { nullsFirst: false }),
+      supabase.from('stock_counts').select('*').eq('store_id', sid || storeId).order('count_date', { ascending: false }).limit(30),
+      supabase.from('stock_purchases').select('*').eq('store_id', sid || storeId).order('purchase_date', { ascending: false }).limit(50),
+      supabase.from('stock_wastage').select('*').eq('store_id', sid || storeId).order('wastage_date', { ascending: false }).limit(50),
+      supabase.from('stock_orders').select('*').eq('store_id', sid || storeId).order('order_date', { ascending: false }).limit(30),
+      supabase.from('stock_suppliers').select('*').eq('store_id', sid || storeId).eq('is_active', true).order('sort_order'),
+      supabase.from('stock_issues').select('*').eq('store_id', sid || storeId).order('issue_date', { ascending: false }).limit(50),
     ])
     setCategories(catRes.data || [])
     setItems(itemRes.data || [])
@@ -179,7 +179,7 @@ export default function StockPage() {
     if (!supplierForm.name) return
     setSaving(true)
     const payload = {
-      store_id: storeId, ...supplierForm,
+      store_id: sid || storeId, ...supplierForm,
       payment_terms_days: parseInt(supplierForm.payment_terms_days) || 7,
       is_active: true, sort_order: suppliers.length + 1,
       invoice_columns: invoiceColumns.length > 0 ? invoiceColumns : null,
@@ -210,7 +210,7 @@ export default function StockPage() {
       const { data: existing } = await supabase
         .from('stock_counts')
         .select('*')
-        .eq('store_id', storeId)
+        .eq('store_id', sid || storeId)
         .eq('count_type', type)
         .eq('count_date', today)
         .eq('status', 'in_progress')
@@ -228,7 +228,7 @@ export default function StockPage() {
       // Create new session header
       const { data: session, error: sessionErr } = await supabase
         .from('stock_counts')
-        .insert({ store_id: storeId, count_date: today, count_type: type, status: 'in_progress' })
+        .insert({ store_id: sid || storeId, count_date: today, count_type: type, status: 'in_progress' })
         .select().single()
       if (sessionErr) { alert('Could not start count: ' + sessionErr.message); setSaving(false); return }
       // Filter items based on count type
@@ -280,7 +280,7 @@ export default function StockPage() {
   async function savePurchase() {
     setSaving(true)
     const total = parseFloat(purchaseForm.quantity || '0') * parseFloat(purchaseForm.unit_cost || '0')
-    await supabase.from('stock_purchases').insert({ store_id: storeId, purchase_date: purchaseForm.purchase_date, supplier_name: purchaseForm.supplier_name || null, stock_item_id: purchaseForm.stock_item_id || null, item_name: purchaseForm.item_name || items.find(i => i.id === purchaseForm.stock_item_id)?.description || null, quantity: parseFloat(purchaseForm.quantity || '0'), unit: purchaseForm.unit, unit_cost: parseFloat(purchaseForm.unit_cost || '0'), total_cost: total, invoice_number: purchaseForm.invoice_number || null })
+    await supabase.from('stock_purchases').insert({ store_id: sid || storeId, purchase_date: purchaseForm.purchase_date, supplier_name: purchaseForm.supplier_name || null, stock_item_id: purchaseForm.stock_item_id || null, item_name: purchaseForm.item_name || items.find(i => i.id === purchaseForm.stock_item_id)?.description || null, quantity: parseFloat(purchaseForm.quantity || '0'), unit: purchaseForm.unit, unit_cost: parseFloat(purchaseForm.unit_cost || '0'), total_cost: total, invoice_number: purchaseForm.invoice_number || null })
     setPurchaseForm({ purchase_date: new Date().toISOString().split('T')[0], supplier_name: '', stock_item_id: '', item_name: '', quantity: '', unit: 'each', unit_cost: '', invoice_number: '' })
     setShowAddPurchase(false); await loadAll(); setSaving(false)
   }
@@ -288,7 +288,7 @@ export default function StockPage() {
   async function saveWastage() {
     setSaving(true)
     const total = parseFloat(wastageForm.quantity || '0') * parseFloat(wastageForm.unit_cost || '0')
-    await supabase.from('stock_wastage').insert({ store_id: storeId, wastage_date: wastageForm.wastage_date, stock_item_id: wastageForm.stock_item_id || null, item_name: wastageForm.item_name || items.find(i => i.id === wastageForm.stock_item_id)?.description || null, quantity: parseFloat(wastageForm.quantity || '0'), unit: wastageForm.unit, unit_cost: parseFloat(wastageForm.unit_cost || '0'), total_cost: total, reason: wastageForm.reason })
+    await supabase.from('stock_wastage').insert({ store_id: sid || storeId, wastage_date: wastageForm.wastage_date, stock_item_id: wastageForm.stock_item_id || null, item_name: wastageForm.item_name || items.find(i => i.id === wastageForm.stock_item_id)?.description || null, quantity: parseFloat(wastageForm.quantity || '0'), unit: wastageForm.unit, unit_cost: parseFloat(wastageForm.unit_cost || '0'), total_cost: total, reason: wastageForm.reason })
     if (wastageForm.stock_item_id && parseFloat(wastageForm.quantity || '0') > 0) {
       await supabase.rpc('increment_stock_qty', { item_id: wastageForm.stock_item_id, amount: -parseFloat(wastageForm.quantity) })
     }
@@ -307,7 +307,7 @@ export default function StockPage() {
       return { item_id: a.childId, name: child?.description || child?.name || '', portions: a.portions }
     })
     await supabase.from('stock_issues').insert({
-      store_id: storeId, issue_date: new Date().toISOString(), stock_item_id: issueForm.stock_item_id || null,
+      store_id: sid || storeId, issue_date: new Date().toISOString(), stock_item_id: issueForm.stock_item_id || null,
       item_name: issueForm.item_name || items.find(i => i.id === issueForm.stock_item_id)?.description || null,
       quantity: parseFloat(issueForm.quantity || '0'), unit: issueForm.unit, issued_to: issueForm.issued_to, notes: issueForm.notes || null,
       prepped_breakdown: breakdown.length ? breakdown : null
@@ -398,7 +398,7 @@ export default function StockPage() {
   async function saveOrder() {
     if (!orderForm.supplier_name) return
     setSaving(true)
-    await supabase.from('stock_orders').insert({ store_id: storeId, supplier_name: orderForm.supplier_name, order_date: orderForm.order_date, expected_delivery: orderForm.expected_delivery || null, notes: orderForm.notes || null, status: 'pending', total_value: 0 })
+    await supabase.from('stock_orders').insert({ store_id: sid || storeId, supplier_name: orderForm.supplier_name, order_date: orderForm.order_date, expected_delivery: orderForm.expected_delivery || null, notes: orderForm.notes || null, status: 'pending', total_value: 0 })
     setOrderForm({ supplier_name: '', order_date: new Date().toISOString().split('T')[0], expected_delivery: '', notes: '' })
     setShowAddOrder(false); await loadAll(); setSaving(false)
   }
@@ -415,7 +415,7 @@ export default function StockPage() {
     const qtyAfter = adjustMode === 'set' ? entered : adjustMode === 'add' ? qtyBefore + entered : Math.max(0, qtyBefore - entered)
     const adjustment = qtyAfter - qtyBefore
     await supabase.from('stock_items').update({ current_qty: qtyAfter }).eq('id', adjustItem.id)
-    await supabase.from('stock_adjustments').insert({ store_id: storeId, stock_item_id: adjustItem.id, item_name: adjustItem.description || adjustItem.name, qty_before: qtyBefore, qty_after: qtyAfter, adjustment, unit: adjustItem.unit, reason: adjustReason, notes: adjustNotes })
+    await supabase.from('stock_adjustments').insert({ store_id: sid || storeId, stock_item_id: adjustItem.id, item_name: adjustItem.description || adjustItem.name, qty_before: qtyBefore, qty_after: qtyAfter, adjustment, unit: adjustItem.unit, reason: adjustReason, notes: adjustNotes })
     setAdjustItem(null); setAdjustQty(''); setAdjustReason(''); setAdjustNotes(''); setAdjusting(false)
     await loadAll()
   }
@@ -435,7 +435,7 @@ export default function StockPage() {
       ? (Number(parentItem.cost_price) || Number(parentItem.price) || 0) * parseFloat(itemForm.portion_size || '0')
       : parseFloat(itemForm.cost_price || '0')
     const payload = {
-      store_id: storeId,
+      store_id: sid || storeId,
       name: itemForm.name.trim() || itemForm.description.trim(),
       description: itemForm.name.trim() || itemForm.description.trim(),
       category: itemForm.category_id,
@@ -462,7 +462,7 @@ export default function StockPage() {
 
   async function saveCategory() {
     if (!categoryForm.name) return
-    await supabase.from('stock_categories').insert({ store_id: storeId, name: categoryForm.name, color: categoryForm.color, sort_order: categories.length + 1 })
+    await supabase.from('stock_categories').insert({ store_id: sid || storeId, name: categoryForm.name, color: categoryForm.color, sort_order: categories.length + 1 })
     setCategoryForm({ name: '', color: '#1a5c38' }); setShowAddCategory(false); await loadAll()
   }
 
@@ -470,7 +470,7 @@ export default function StockPage() {
     if (!newCatName.trim()) return
     setSavingCat(true)
     const { data: newCat } = await supabase.from('stock_categories')
-      .insert({ store_id: storeId, name: newCatName.trim(), color: '#1a5c38', sort_order: categories.length + 1 })
+      .insert({ store_id: sid || storeId, name: newCatName.trim(), color: '#1a5c38', sort_order: categories.length + 1 })
       .select().single()
     await loadAll()
     // Auto-select the newly created category in the item form
