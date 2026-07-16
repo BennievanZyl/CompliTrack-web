@@ -143,7 +143,7 @@ export default function WagesPage() {
 
   const unpaidAdvances = advances.filter(a => a.repayment_status === 'outstanding' && a.deduct_from_wages)
 
-  if (!storeId) {
+  if (!storeId && !loading) {
     return (
       <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f8faf8', fontFamily: 'system-ui, sans-serif' }}>
         <div style={{ textAlign: 'center', maxWidth: 400, padding: 32 }}>
