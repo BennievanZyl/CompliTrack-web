@@ -1,9 +1,9 @@
 'use client'
 import React, { useState, useEffect, useCallback, useRef } from 'react'
-import { getStoreContext } from '@/lib/store-context'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 
+const STORE_ID = '05328298-fc27-4c9f-b091-bb7f6598b601'
 const PRIMARY = '#1a5c38'
 const DARK = '#0a1f12'
 const VAT = 0.15
@@ -87,7 +87,6 @@ function ComplianceTrend({sessions}:{sessions:{date:string;pct:number}[]}){
 }
 
 export default function AnalyticsPage(){
-  const [storeId, setStoreId] = useState('')
   const router=useRouter()
   const [month,setMonth]=useState(thisMonth())
   const [view,setView]=useState<'period'|'compare'>('period')
@@ -96,32 +95,31 @@ export default function AnalyticsPage(){
   const [data,setData]=useState<any>(null)
   const [compareData,setCompareData]=useState<any>(null)
 
-  async function fetchAnalytics(start:string,end:string,sid?:string){
-    const effectiveSid = sid || storeId
+  async function fetchAnalytics(start:string,end:string){
     const lmDate=new Date(start);lmDate.setMonth(lmDate.getMonth()-1)
     const lmStart=lmDate.toISOString().slice(0,7)+'-01'
     const lmEnd=new Date(lmDate.getFullYear(),lmDate.getMonth()+1,0).toISOString().slice(0,10)
 
     const[invIdsRes,lmInvIdsRes]=await Promise.all([
-      supabase.from('invoices').select('id').eq('store_id', effectiveSid).in('status',['received','paid']).gte('invoice_date',start).lte('invoice_date',end),
-      supabase.from('invoices').select('id').eq('store_id', effectiveSid).in('status',['received','paid']).gte('invoice_date',lmStart).lte('invoice_date',lmEnd),
+      supabase.from('invoices').select('id').eq('store_id',STORE_ID).in('status',['received','paid']).gte('invoice_date',start).lte('invoice_date',end),
+      supabase.from('invoices').select('id').eq('store_id',STORE_ID).in('status',['received','paid']).gte('invoice_date',lmStart).lte('invoice_date',lmEnd),
     ])
     const invIds=(invIdsRes.data||[]).map((r:any)=>r.id)
     const lmInvIds=(lmInvIdsRes.data||[]).map((r:any)=>r.id)
 
     const[cashUpsRes,expRes,invLinesRes,wagesRes,purchRes,wastRes,countsRes,lmExpRes,lmInvLinesRes,lmWagesRes,sessionsRes]=await Promise.all([
-      supabase.from('cash_ups').select('cash_up_date,cash_up_total').eq('store_id', effectiveSid).neq('status','draft').gte('cash_up_date',start).lte('cash_up_date',end).order('cash_up_date'),
-      supabase.from('expenses').select('amount,category_key,category_name').eq('store_id', effectiveSid).gte('expense_date',start).lte('expense_date',end),
+      supabase.from('cash_ups').select('cash_up_date,cash_up_total').eq('store_id',STORE_ID).neq('status','draft').gte('cash_up_date',start).lte('cash_up_date',end).order('cash_up_date'),
+      supabase.from('expenses').select('amount,category_key,category_name').eq('store_id',STORE_ID).gte('expense_date',start).lte('expense_date',end),
       invIds.length?supabase.from('invoice_lines').select('amount,vat_amount,category_key').in('invoice_id',invIds):Promise.resolve({data:[]}),
-      supabase.from('wage_payments').select('net_pay,gross_pay,uif_employer').eq('store_id', effectiveSid).gte('paid_date',start).lte('paid_date',end),
-      supabase.from('stock_purchases').select('total_cost').eq('store_id', effectiveSid).gte('purchase_date',start).lte('purchase_date',end),
-      supabase.from('stock_wastage').select('total_cost').eq('store_id', effectiveSid).gte('wastage_date',start).lte('wastage_date',end),
-      supabase.from('stock_counts').select('id,count_date').eq('store_id', effectiveSid).eq('status','completed').order('count_date',{ascending:false}).limit(20),
-      supabase.from('expenses').select('amount,category_key').eq('store_id', effectiveSid).gte('expense_date',lmStart).lte('expense_date',lmEnd),
+      supabase.from('wage_payments').select('net_pay,gross_pay,uif_employer').eq('store_id',STORE_ID).gte('paid_date',start).lte('paid_date',end),
+      supabase.from('stock_purchases').select('total_cost').eq('store_id',STORE_ID).gte('purchase_date',start).lte('purchase_date',end),
+      supabase.from('stock_wastage').select('total_cost').eq('store_id',STORE_ID).gte('wastage_date',start).lte('wastage_date',end),
+      supabase.from('stock_counts').select('id,count_date').eq('store_id',STORE_ID).eq('status','completed').order('count_date',{ascending:false}).limit(20),
+      supabase.from('expenses').select('amount,category_key').eq('store_id',STORE_ID).gte('expense_date',lmStart).lte('expense_date',lmEnd),
       lmInvIds.length?supabase.from('invoice_lines').select('amount,vat_amount,category_key').in('invoice_id',lmInvIds):Promise.resolve({data:[]}),
-      supabase.from('wage_payments').select('gross_pay').eq('store_id', effectiveSid).gte('paid_date',lmStart).lte('paid_date',lmEnd),
+      supabase.from('wage_payments').select('gross_pay').eq('store_id',STORE_ID).gte('paid_date',lmStart).lte('paid_date',lmEnd),
       // Compliance: fetch last 14 daily sessions regardless of selected period (rolling window)
-      supabase.from('daily_sessions').select('session_date,id').eq('store_id', effectiveSid).eq('session_type','daily').order('session_date',{ascending:false}).limit(14),
+      supabase.from('daily_sessions').select('session_date,id').eq('store_id',STORE_ID).eq('session_type','daily').order('session_date',{ascending:false}).limit(14),
     ])
 
     const dailyCashUps:Record<string,number>={}
@@ -223,25 +221,16 @@ export default function AnalyticsPage(){
     }
   }
 
-  const load=useCallback(async(sid?:string)=>{
-    const effectiveSid = sid || storeId
-    if (!effectiveSid) return
+  const load=useCallback(async()=>{
     setLoading(true)
     const[s,e]=monthRange(month)
-    const d=await fetchAnalytics(s,e,effectiveSid)
+    const d=await fetchAnalytics(s,e)
     setData(d)
-    if(view==='compare'){const[cs,ce]=monthRange(compareMonth);setCompareData(await fetchAnalytics(cs,ce,effectiveSid))}
+    if(view==='compare'){const[cs,ce]=monthRange(compareMonth);setCompareData(await fetchAnalytics(cs,ce))}
     setLoading(false)
-  },[month,view,compareMonth,storeId])
+  },[month,view,compareMonth])
 
-  useEffect(()=>{
-    (async () => {
-      const ctx = await getStoreContext()
-      const sid = ctx?.storeId || ''
-      if (sid) setStoreId(sid)
-      load(sid)
-    })()
-  },[])
+  useEffect(()=>{load()},[load])
 
   const card:React.CSSProperties={background:'#fff',borderRadius:16,border:'1px solid #eef2ee',padding:20,boxShadow:'0 2px 8px rgba(0,0,0,0.04)'}
 
