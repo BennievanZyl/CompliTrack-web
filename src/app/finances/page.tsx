@@ -177,7 +177,9 @@ export default function FinancesPage() {
     await load()
   }
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (sid?: string) => {
+    const effectiveSid = sid || storeId
+    if (!effectiveSid) return
     setLoading(true)
     const monthStart = `${month}-01`
     const [mYear, mMonth] = month.split('-').map(Number)
@@ -185,24 +187,24 @@ export default function FinancesPage() {
     const [cuRes, invRes, catRes, suppRes, qRes, stockRes] = await Promise.all([
       supabase.from('cash_ups')
         .select('id,cash_up_date,cash_up_total,total_cash,eft_total,payouts,variance,customer_count,average_spend,status,notes')
-        .eq('store_id', sid || storeId)
+        .eq('store_id', effectiveSid)
         .gte('cash_up_date', monthStart).lte('cash_up_date', monthEnd)
         .not('status', 'eq', 'draft')
         .order('cash_up_date', { ascending: false }),
       supabase.from('invoices')
         .select('*, invoice_lines(*)')
-        .eq('store_id', sid || storeId)
+        .eq('store_id', effectiveSid)
         .gte('invoice_date', monthStart).lte('invoice_date', monthEnd)
         .order('invoice_date', { ascending: false }),
       supabase.from('expense_categories').select('id, name, key, colour, sort_order').eq('organisation_id', orgId).eq('is_active', true).order('sort_order'),
-      supabase.from('stock_suppliers').select('id, name, payment_terms_days, invoice_columns, invoice_vat_included, delivers_stock').eq('store_id', sid || storeId).eq('is_active', true).order('sort_order'),
+      supabase.from('stock_suppliers').select('id, name, payment_terms_days, invoice_columns, invoice_vat_included, delivers_stock').eq('store_id', effectiveSid).eq('is_active', true).order('sort_order'),
       supabase.from('expenses')
-        .select('*').eq('store_id', sid || storeId)
+        .select('*').eq('store_id', effectiveSid)
         .gte('expense_date', monthStart).lte('expense_date', monthEnd)
         .order('expense_date', { ascending: false }),
       supabase.from('stock_items')
         .select('id, description, unit, supplier')
-        .eq('store_id', sid || storeId).eq('is_active', true).order('description'),
+        .eq('store_id', effectiveSid).eq('is_active', true).order('description'),
     ])
     setCashUps(cuRes.data || [])
     setInvoices(invRes.data || [])
@@ -212,10 +214,17 @@ export default function FinancesPage() {
     setQuickExp(qRes.data || [])
     setAllStockItems(stockRes?.data || [])
     setLoading(false)
-  }, [month])
+  }, [month, storeId, orgId])
 
   useEffect(() => {
-    (async () => { const ctx = await getStoreContext(); const sid = ctx?.storeId || ''; if (sid) setStoreId(sid); if (ctx?.orgId) { try { setOrgId(ctx.orgId) } catch(e){} } await load(sid); })() }, [load])
+    (async () => {
+      const ctx = await getStoreContext()
+      const sid = ctx?.storeId || ''
+      if (sid) { setStoreId(sid) }
+      if (ctx?.orgId) { try { setOrgId(ctx.orgId) } catch(e){} }
+      if (sid) await load(sid)
+    })()
+  }, [])
 
   function fcPeriodRange(): [string, string] {
     if (fcMode === 'week') {
