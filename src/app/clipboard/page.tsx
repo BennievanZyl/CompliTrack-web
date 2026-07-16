@@ -27,6 +27,7 @@ function daysUntil(d: string | null) {
 }
 
 export default function ClipboardPage() {
+  const [storeId, setStoreId] = useState(STORE_ID_DEFAULT)
   const router = useRouter()
   const [unpaid, setUnpaid] = useState<Invoice[]>([])
   const [unreceived, setUnreceived] = useState<Invoice[]>([])
@@ -49,7 +50,8 @@ export default function ClipboardPage() {
     setLoading(false)
   }, [])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    getStoreContext().then(ctx => { if(ctx?.storeId) setStoreId(ctx.storeId) }) load() }, [load])
 
   async function markPaid(id: string) {
     await supabase.from('invoices').update({ status: 'paid' }).eq('id', id)
