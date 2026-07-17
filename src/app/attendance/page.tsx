@@ -262,13 +262,23 @@ export default function AttendancePage() {
   }
   async function saveHourlyRate(employeeId: string) {
     const rate = parseFloat(rateInput) || 0;
+    // Update employees table (used by payroll calculations)
     await supabase.from('employees').update({ hourly_rate: rate }).eq('id', employeeId);
+    // Also sync to employee_wages so Wages & Payroll page stays in sync
+    const { data: existingWage } = await supabase.from('employee_wages')
+      .select('id').eq('employee_id', employeeId).maybeSingle();
+    if (existingWage) {
+      await supabase.from('employee_wages').update({ hourly_rate: rate }).eq('id', existingWage.id);
+    } else {
+      await supabase.from('employee_wages').insert({ employee_id: employeeId, store_id: STORE_ID, hourly_rate: rate });
+    }
     setEditingRate(null);
     await loadEmployees();
   }
 
   async function saveNightRate(employeeId: string, value: string) {
-    await supabase.from('employees').update({ night_allowance_rate: parseFloat(value) || 0 }).eq('id', employeeId);
+    const rate = parseFloat(value) || 0;
+    await supabase.from('employees').update({ night_allowance_rate: rate }).eq('id', employeeId);
     await loadEmployees();
   }
 
