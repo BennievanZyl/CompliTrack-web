@@ -36,14 +36,14 @@ export default function WagesPage() {
   const [saving, setSaving] = useState(false)
   const [periodForm, setPeriodForm] = useState({ period_start: '', period_end: '', pay_frequency: 'monthly' })
   const [advanceForm, setAdvanceForm] = useState({ employee_id: '', amount: '', reason: '', advance_date: new Date().toISOString().split('T')[0] })
-  const [wageForm, setWageForm] = useState({ employee_id: '', hourly_rate: '', uif_employee: '0.01', uif_employer: '0.01', tax_rate: '0', pay_frequency: 'monthly', bank_name: '', bank_account: '', bank_branch: '', id_number: '' })
+  const [wageForm, setWageForm] = useState({ employee_id: '', hourly_rate: '', night_allowance_rate: '', uif_employee: '0.01', uif_employer: '0.01', tax_rate: '0', pay_frequency: 'monthly', bank_name: '', bank_account: '', bank_branch: '', id_number: '' })
 
   useEffect(() => { loadAll() }, [])
 
   async function loadAll() {
     setLoading(true)
     const [empRes, wageRes, periodRes, runRes, advRes] = await Promise.all([
-      supabase.from('employees').select('id, full_name, role').eq('store_id', STORE_ID).eq('is_active', true).order('full_name'),
+      supabase.from('employees').select('id, full_name, role, hourly_rate, night_allowance_rate, pay_frequency, id_number').eq('store_id', STORE_ID).eq('is_active', true).order('full_name'),
       supabase.from('employee_wages').select('*').eq('store_id', STORE_ID),
       supabase.from('payroll_periods').select('*').eq('store_id', STORE_ID).order('period_start', { ascending: false }),
       supabase.from('payroll_runs').select('*').eq('store_id', STORE_ID),
@@ -161,10 +161,12 @@ export default function WagesPage() {
   async function saveWage() {
     if (!wageForm.employee_id || !wageForm.hourly_rate) return
     setSaving(true)
+    const hourlyRate = parseFloat(wageForm.hourly_rate)
+    const nightRate = parseFloat(wageForm.night_allowance_rate) || 0
     const existing = wages.find(w => w.employee_id === wageForm.employee_id)
     const payload = {
       store_id: STORE_ID, employee_id: wageForm.employee_id,
-      hourly_rate: parseFloat(wageForm.hourly_rate),
+      hourly_rate: hourlyRate,
       uif_employee: parseFloat(wageForm.uif_employee),
       uif_employer: parseFloat(wageForm.uif_employer),
       tax_rate: parseFloat(wageForm.tax_rate),
@@ -176,8 +178,17 @@ export default function WagesPage() {
     }
     if (existing) await supabase.from('employee_wages').update(payload).eq('id', existing.id)
     else await supabase.from('employee_wages').insert(payload)
+
+    // Sync hourly_rate AND night_allowance_rate to employees table
+    // so Time & Attendance payroll register always has the correct rates
+    await supabase.from('employees').update({
+      hourly_rate: hourlyRate,
+      night_allowance_rate: nightRate || null,
+      pay_frequency: wageForm.pay_frequency,
+    }).eq('id', wageForm.employee_id)
+
     setShowWageModal(false)
-    setWageForm({ employee_id: '', hourly_rate: '', uif_employee: '0.01', uif_employer: '0.01', tax_rate: '0', pay_frequency: 'monthly', bank_name: '', bank_account: '', bank_branch: '', id_number: '' })
+    setWageForm({ employee_id: '', hourly_rate: '', night_allowance_rate: '', uif_employee: '0.01', uif_employer: '0.01', tax_rate: '0', pay_frequency: 'monthly', bank_name: '', bank_account: '', bank_branch: '', id_number: '' })
     await loadAll()
     setSaving(false)
   }
@@ -434,7 +445,7 @@ export default function WagesPage() {
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
                     <tr style={{ background: '#f9fafb' }}>
-                      {['Employee', 'Role', 'Hourly Rate', 'UIF %', 'PAYE %', 'Pay Freq', ''].map(h => (
+                      {['Employee', 'Role', 'Hourly Rate', 'Night Rate', 'UIF %', 'PAYE %', 'Pay Freq', ''].map(h => (
                         <th key={h} style={{ padding: '12px 20px', textAlign: 'left', fontSize: '11px', fontWeight: '700', color: '#9ca3af', textTransform: 'uppercase' as const, letterSpacing: '0.5px' }}>{h}</th>
                       ))}
                     </tr>
@@ -447,12 +458,13 @@ export default function WagesPage() {
                           <td style={{ padding: '14px 20px', fontWeight: '700', fontSize: '14px', color: '#111' }}>{emp.full_name}</td>
                           <td style={{ padding: '14px 20px', fontSize: '13px', color: '#6b7280' }}>{emp.role}</td>
                           <td style={{ padding: '14px 20px', fontWeight: '800', fontSize: '14px', color: '#1a5c38' }}>{wage ? `R ${wage.hourly_rate.toFixed(2)}/h` : <span style={{ color: '#d1d5db' }}>Not set</span>}</td>
+                          <td style={{ padding: '14px 16px', fontSize: '14px', color: '#374151' }}>{(emp as any).night_allowance_rate ? `R ${parseFloat((emp as any).night_allowance_rate).toFixed(2)}/h` : <span style={{ color: '#d1d5db' }}>—</span>}</td>
                           <td style={{ padding: '14px 20px', fontSize: '13px', color: '#374151' }}>{wage ? `${(wage.uif_employee * 100).toFixed(1)}%` : '—'}</td>
                           <td style={{ padding: '14px 20px', fontSize: '13px', color: '#374151' }}>{wage ? `${(wage.tax_rate * 100).toFixed(1)}%` : '—'}</td>
                           <td style={{ padding: '14px 20px', fontSize: '13px', color: '#374151' }}>{wage?.pay_frequency || '—'}</td>
                           <td style={{ padding: '14px 20px' }}>
                             <button onClick={() => {
-                              setWageForm({ employee_id: emp.id, hourly_rate: wage?.hourly_rate?.toString() || '', uif_employee: wage?.uif_employee?.toString() || '0.01', uif_employer: wage?.uif_employer?.toString() || '0.01', tax_rate: wage?.tax_rate?.toString() || '0', pay_frequency: wage?.pay_frequency || 'monthly', bank_name: wage?.bank_name || '', bank_account: wage?.bank_account || '', bank_branch: wage?.bank_branch || '', id_number: wage?.id_number || '' })
+                              setWageForm({ employee_id: emp.id, hourly_rate: wage?.hourly_rate?.toString() || '', night_allowance_rate: (emp as any).night_allowance_rate?.toString() || '', uif_employee: wage?.uif_employee?.toString() || '0.01', uif_employer: wage?.uif_employer?.toString() || '0.01', tax_rate: wage?.tax_rate?.toString() || '0', pay_frequency: wage?.pay_frequency || 'monthly', bank_name: wage?.bank_name || '', bank_account: wage?.bank_account || '', bank_branch: wage?.bank_branch || '', id_number: wage?.id_number || '' })
                               setShowWageModal(true)
                             }} style={{ fontSize: '12px', color: '#1d4ed8', background: '#eff6ff', border: 'none', borderRadius: '8px', padding: '5px 10px', cursor: 'pointer', fontWeight: '600' }}>Edit</button>
                           </td>
@@ -529,6 +541,7 @@ export default function WagesPage() {
               <div><label style={LABEL_STYLE}>Employee *</label><select value={wageForm.employee_id} onChange={e => setWageForm(f => ({ ...f, employee_id: e.target.value }))} style={INPUT_STYLE}><option value="">Select employee</option>{employees.map(e => <option key={e.id} value={e.id}>{e.full_name}</option>)}</select></div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                 <div><label style={LABEL_STYLE}>Hourly Rate (R) *</label><input type="number" step="0.01" value={wageForm.hourly_rate} onChange={e => setWageForm(f => ({ ...f, hourly_rate: e.target.value }))} placeholder="e.g. 25.00" style={INPUT_STYLE} /></div>
+                <div><label style={LABEL_STYLE}>Night Allowance Rate (R/hr)</label><input type="number" step="0.01" value={wageForm.night_allowance_rate} onChange={e => setWageForm(f => ({ ...f, night_allowance_rate: e.target.value }))} placeholder="e.g. 5.00 extra per night hour" style={INPUT_STYLE} /><div style={{ fontSize: '11px', color: '#9ca3af', marginTop: 4 }}>Extra rate added per hour worked during night hours (on top of hourly rate)</div></div>
                 <div><label style={LABEL_STYLE}>Pay Frequency</label><select value={wageForm.pay_frequency} onChange={e => setWageForm(f => ({ ...f, pay_frequency: e.target.value }))} style={INPUT_STYLE}><option value="weekly">Weekly</option><option value="biweekly">Bi-weekly</option><option value="monthly">Monthly</option></select></div>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
