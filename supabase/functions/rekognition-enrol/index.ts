@@ -83,7 +83,7 @@ serve(async (req) => {
       Image: { Bytes: imageBytes },
       ExternalImageId: employee_id,
       MaxFaces: 1,
-      QualityFilter: "AUTO",
+      QualityFilter: "NONE",
     });
 
     if (!result.FaceRecords?.length) {
