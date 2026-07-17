@@ -91,6 +91,13 @@ export default function AttendancePage() {
   async function loadPayrollData() {
     const [py, pm] = payrollMonth.split('-').map(Number);
     const monthEnd = `${payrollMonth}-${String(new Date(py, pm, 0).getDate()).padStart(2, '0')}`;
+
+    // Always reload employees fresh to get latest hourly_rate and night_allowance_rate from wages settings
+    const empRes = await supabase.from('employees')
+      .select('id, full_name, role, is_active, hourly_rate, night_allowance_rate, pay_frequency, phone, id_number')
+      .eq('store_id', STORE_ID).eq('is_active', true).order('full_name');
+    if (empRes.data) setEmployees(empRes.data);
+
     const [attRes, leaveRes, advRes, holRes, setRes, payRes] = await Promise.all([
       supabase.from('attendance').select('*').eq('store_id', STORE_ID)
         .gte('work_date', payrollMonth + '-01').lte('work_date', monthEnd),
