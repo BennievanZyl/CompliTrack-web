@@ -281,6 +281,16 @@ export default function FinancesPage() {
     setDeviceScanStatus('waiting')
     setScanError('')
 
+    // Capture supplier template NOW — scanSupplierRef.current is already set
+    // when the user clicks "Scan Invoice" (before choosing device vs file).
+    const _supplierName = scanSupplierRef.current || ''
+    const _matchedSup = suppliers.find(s => s.name === _supplierName)
+    const _deviceTemplate = _matchedSup?.invoice_columns?.length ? {
+      name: _matchedSup.name,
+      columns: _matchedSup.invoice_columns,
+      vatIncluded: _matchedSup.invoice_vat_included !== false,
+    } : undefined
+
     // Mark any old pending scans for this store as done so they don't re-trigger
     supabase.from('pending_invoice_scans')
       .update({ status: 'done' })
@@ -335,7 +345,7 @@ export default function FinancesPage() {
           const response = await fetch('/api/scan-invoice', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ base64: b64, mediaType: 'image/jpeg' })
+            body: JSON.stringify({ base64: b64, mediaType: 'image/jpeg', supplierTemplate: _deviceTemplate })
           })
           const data = await response.json()
           if (!response.ok) throw new Error(data.error || 'Scan failed')
@@ -488,10 +498,16 @@ export default function FinancesPage() {
     const sup = suppliers.find(s => s.name === invForm.supplier)
     if (!sup?.invoice_columns?.length) return DEFAULT_COLS
     const cols: ColDef[] = []
+    const seenMapsTo = new Set<string>()
     for (const c of sup.invoice_columns) {
       if (!c.maps_to || !MAPS_TO_FIELD[c.maps_to]) continue
+      // Deduplicate by maps_to value — allows both unit_price_excl and total_excl
+      // to appear even though they share the same internal field ('unit_price').
+      // Without this, "Exclusive Value" (total_excl) was silently dropped whenever
+      // "Unit Price (excl)" (unit_price_excl) appeared earlier in the list.
+      if (seenMapsTo.has(c.maps_to)) continue
+      seenMapsTo.add(c.maps_to)
       const def = MAPS_TO_FIELD[c.maps_to]
-      if (cols.some(existing => existing.field === def.field)) continue
       cols.push({ header: c.name || c.maps_to, ...def })
     }
     return cols.length >= 2 ? cols : DEFAULT_COLS
