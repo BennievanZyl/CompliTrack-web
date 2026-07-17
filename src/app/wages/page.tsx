@@ -20,7 +20,7 @@ function formatHours(val: number) { return `${Math.floor(val)}h ${Math.round((va
 
 export default function WagesPage() {
   const router = useRouter()
-  const [tab, setTab] = useState<'payroll' | 'advances' | 'slips' | 'settings'>('payroll')
+  const [tab, setTab] = useState<'payroll' | 'advances' | 'settings'>('payroll')
   const [employees, setEmployees] = useState<Employee[]>([])
   const [wages, setWages] = useState<EmployeeWage[]>([])
   const [periods, setPeriods] = useState<PayrollPeriod[]>([])
@@ -220,15 +220,15 @@ export default function WagesPage() {
       <div style={{ background: 'linear-gradient(135deg, #0a1f12 0%, #1a5c38 100%)', padding: '40px 40px 100px' }}>
         <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
           <h1 style={{ fontSize: '32px', fontWeight: '800', color: 'white', margin: '0 0 6px', letterSpacing: '-0.5px' }}>Wages & Payroll 💰</h1>
-          <p style={{ fontSize: '15px', color: 'rgba(255,255,255,0.6)', margin: 0 }}>Calculate hours from attendance, manage advances and generate wage slips</p>
+          <p style={{ fontSize: '15px', color: 'rgba(255,255,255,0.6)', margin: 0 }}>Manage employee wages, advances and payroll settings</p>
         </div>
       </div>
 
       <main style={{ maxWidth: '1200px', margin: '-60px auto 0', padding: '0 40px 60px', position: 'relative', zIndex: 1 }}>
         <div style={{ background: 'white', borderRadius: '16px', padding: '6px', display: 'inline-flex', gap: '4px', marginBottom: '24px', boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}>
-          {(['payroll', 'advances', 'slips', 'settings'] as const).map(t => (
+          {(['payroll', 'advances', 'settings'] as const).map(t => (
             <button key={t} onClick={() => setTab(t)} style={TAB_STYLE(tab === t)}>
-              {t === 'payroll' ? '📊 Payroll' : t === 'advances' ? '💵 Advances' : t === 'slips' ? '🧾 Wage Slips' : '⚙️ Settings'}
+              {t === 'payroll' ? '📊 Payroll' : t === 'advances' ? '💵 Advances' : '⚙️ Settings'}
             </button>
           ))}
         </div>
@@ -392,44 +392,6 @@ export default function WagesPage() {
           )}
 
           {/* SLIPS TAB */}
-          {tab === 'slips' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-              <div style={{ fontSize: '18px', fontWeight: '800', color: '#111' }}>Wage Slips</div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '16px' }}>
-                {periods.filter(p => p.status !== 'open').map(period => {
-                  const pRuns = runs.filter(r => r.payroll_period_id === period.id)
-                  return (
-                    <div key={period.id} style={{ background: 'white', borderRadius: '20px', border: '1.5px solid #eef2ee', padding: '20px 24px', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px' }}>
-                        <div>
-                          <div style={{ fontWeight: '800', fontSize: '15px', color: '#111' }}>{new Date(period.period_start).toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' })}</div>
-                          <div style={{ fontSize: '12px', color: '#9ca3af', marginTop: '2px' }}>{new Date(period.period_start).toLocaleDateString('en-ZA')} – {new Date(period.period_end).toLocaleDateString('en-ZA')}</div>
-                        </div>
-                        <span style={{ fontSize: '11px', fontWeight: '700', padding: '3px 10px', borderRadius: '100px', background: sc(period.status).bg, color: sc(period.status).color }}>{period.status}</span>
-                      </div>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                        {pRuns.map(run => {
-                          const emp = employees.find(e => e.id === run.employee_id)
-                          return (
-                            <div key={run.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', background: '#f9fafb', borderRadius: '10px' }}>
-                              <div>
-                                <div style={{ fontWeight: '600', fontSize: '13px', color: '#111' }}>{emp?.full_name}</div>
-                                <div style={{ fontSize: '12px', color: '#9ca3af' }}>{formatHours(run.hours_worked)} • Net: {formatCurrency(run.net_pay)}</div>
-                              </div>
-                              <button onClick={() => setShowSlip(run)} style={{ fontSize: '12px', color: '#1d4ed8', background: '#eff6ff', border: 'none', borderRadius: '8px', padding: '5px 12px', cursor: 'pointer', fontWeight: '700' }}>View Slip</button>
-                            </div>
-                          )
-                        })}
-                      </div>
-                    </div>
-                  )
-                })}
-                {periods.filter(p => p.status !== 'open').length === 0 && (
-                  <div style={{ gridColumn: 'span 2', background: 'white', borderRadius: '20px', border: '1.5px solid #eef2ee', padding: '48px', textAlign: 'center', color: '#9ca3af' }}>No approved payroll periods yet</div>
-                )}
-              </div>
-            </div>
-          )}
 
           {/* SETTINGS TAB */}
           {tab === 'settings' && (
