@@ -476,7 +476,7 @@ export default function FinancesPage() {
   function removeLine(i: number) { setInvLines(l => l.filter((_, idx) => idx !== i)) }
 
   // Maps a supplier template maps_to value to the internal InvoiceLine field and input type.
-  type ColDef = { header: string; field: keyof InvoiceLine; type: 'text' | 'number'; placeholder: string }
+  type ColDef = { header: string; field: keyof InvoiceLine; type: 'text' | 'number' | 'readonly'; placeholder: string; compute?: (line: InvoiceLine) => number }
   const MAPS_TO_FIELD: Record<string, Omit<ColDef, 'header'>> = {
     'description':     { field: 'description', type: 'text',   placeholder: 'Item description' },
     'qty':             { field: 'qty',          type: 'number', placeholder: '1' },
@@ -485,7 +485,7 @@ export default function FinancesPage() {
     'unit_price_incl': { field: 'amount',       type: 'number', placeholder: '0.00' },
     'vat_amount':      { field: 'vat_amount',   type: 'number', placeholder: '0.00' },
     'total_incl':      { field: 'amount',       type: 'number', placeholder: '0.00' },
-    'total_excl':      { field: 'unit_price',   type: 'number', placeholder: '0.00' },
+    'total_excl':      { field: 'unit_price',   type: 'readonly', placeholder: '', compute: (l) => Number(l.qty) * Number(l.unit_price) },
   }
   const DEFAULT_COLS: ColDef[] = [
     { header: 'Description',       field: 'description', type: 'text',   placeholder: 'Item description' },
@@ -1181,6 +1181,15 @@ export default function FinancesPage() {
                                     {i === 0 && <button type="button" onClick={() => setShowQuickCat(true)} style={{ fontSize: '11px', color: '#1a5c38', background: 'none', border: 'none', cursor: 'pointer', padding: '2px 0', fontWeight: '600' }}>+ New Category</button>}
                                   </div>
                                   {activeCols.map(col => {
+                                    // Read-only computed columns (e.g. Exclusive Value = qty × unit_price)
+                                    if (col.type === 'readonly') {
+                                      const val = col.compute ? col.compute(line) : 0
+                                      return (
+                                        <div key={col.header} style={{ ...inp, padding: '8px 10px', background: '#f9fafb', color: '#374151', fontWeight: 700, display: 'flex', alignItems: 'center' }}>
+                                          {val > 0 ? val.toFixed(2) : '—'}
+                                        </div>
+                                      )
+                                    }
                                     // UoM column gets a dropdown for consistency
                                     if (col.field === 'uom') return (
                                       <select
