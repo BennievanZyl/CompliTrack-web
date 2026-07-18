@@ -79,10 +79,11 @@ const emptyInvoice = () => ({
   supplier: '', invoice_number: '', invoice_date: today(),
   due_date: '', status: 'draft', payment_method: 'bank_transfer', notes: ''
 })
+const emptyQLine = () => ({ category_key: 'other', description: '', amount: '' })
 const emptyQuick = () => ({
-  expense_date: today(), category_key: 'other', description: '',
-  amount: '', vat_amount: '', supplier: '', invoice_number: '',
-  payment_method: 'cash', notes: ''
+  expense_date: today(), supplier: '', invoice_number: '',
+  payment_method: 'cash', notes: '',
+  lines: [emptyQLine()]
 })
 
 export default function FinancesPage() {
@@ -134,9 +135,12 @@ export default function FinancesPage() {
   const [error, setError] = useState('')
   const [allStockItems, setAllStockItems] = useState<{id:string;description:string;unit:string;supplier:string|null}[]>([])
 
-  // Category quick-add state
+  // Category manager state
   const [showQuickCat, setShowQuickCat] = useState(false)
   const [quickCatForm, setQuickCatForm] = useState({ name: '', colour: '#10b981' })
+  const [showCatManager, setShowCatManager] = useState(false)
+  const [editingCat, setEditingCat] = useState<any>(null)
+  const [catEditForm, setCatEditForm] = useState({ name: '', colour: '#10b981' })
   const [savingCat, setSavingCat] = useState(false)
 
   // Invoice form state
@@ -838,25 +842,34 @@ export default function FinancesPage() {
   // ── Quick expense CRUD ──
   async function saveQuick() {
     setSaving(true); setError('')
-    const cat = categories.find(c => c.key === qForm.category_key)
-    const payload = {
-      store_id: STORE_ID, expense_date: qForm.expense_date,
-      category_key: qForm.category_key, category_name: cat?.name || '',
-      description: qForm.description, amount: parseFloat(String(qForm.amount)) || 0,
-      vat_amount: parseFloat(String(qForm.vat_amount)) || 0,
-      supplier: qForm.supplier, invoice_number: qForm.invoice_number,
-      payment_method: qForm.payment_method, notes: qForm.notes,
-    }
-    let err = null
+    const validLines = (qForm.lines || []).filter((l: any) => l.description?.trim() && parseFloat(l.amount) > 0)
+    if (validLines.length === 0) { setError('Add at least one line with description and amount.'); setSaving(false); return }
+
     if (editQ) {
-      const res = await supabase.from('expenses').update(payload).eq('id', editQ.id)
-      err = res.error
+      // Single-line edit (legacy)
+      const cat = categories.find(c => c.key === validLines[0].category_key)
+      const res = await supabase.from('expenses').update({
+        store_id: STORE_ID, expense_date: qForm.expense_date,
+        category_key: validLines[0].category_key, category_name: cat?.name || '',
+        description: validLines[0].description, amount: parseFloat(validLines[0].amount) || 0,
+        supplier: qForm.supplier, payment_method: qForm.payment_method, notes: qForm.notes,
+      }).eq('id', editQ.id)
+      if (res.error) { setError(res.error.message); setSaving(false); return }
     } else {
-      const res = await supabase.from('expenses').insert(payload)
-      err = res.error
+      // Multi-line insert — one row per line
+      const rows = validLines.map((l: any) => {
+        const cat = categories.find(c => c.key === l.category_key)
+        return {
+          store_id: STORE_ID, expense_date: qForm.expense_date,
+          category_key: l.category_key, category_name: cat?.name || '',
+          description: l.description.trim(), amount: parseFloat(l.amount) || 0,
+          supplier: qForm.supplier, payment_method: qForm.payment_method, notes: qForm.notes,
+        }
+      })
+      const res = await supabase.from('expenses').insert(rows)
+      if (res.error) { setError(res.error.message); setSaving(false); return }
     }
     setSaving(false)
-    if (err) { setError(err.message); return }
     setShowQForm(false); setEditQ(null); load()
   }
 
@@ -1423,61 +1436,134 @@ export default function FinancesPage() {
           {/* ── QUICK EXPENSES ── */}
           {tab === 3 && (
             <div>
+              {/* Header + actions */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                 <div>
                   <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Quick Expenses</h2>
                   <p style={{ margin: '4px 0 0', fontSize: 13, color: '#6b7280' }}>Small cash items without a formal invoice — petrol, airtime, staff meals, etc.</p>
                 </div>
-                <button style={btn()} onClick={() => { setEditQ(null); setQForm(emptyQuick()); setShowQForm(true) }}>+ Add Expense</button>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button style={btn('#6b7280')} onClick={() => setShowCatManager(true)}>⚙ Categories</button>
+                  <button style={btn()} onClick={() => { setEditQ(null); setQForm(emptyQuick()); setShowQForm(true) }}>+ Add Expense</button>
+                </div>
               </div>
 
+              {/* Category Manager Modal */}
+              {showCatManager && (
+                <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <div style={{ background: '#fff', borderRadius: 16, padding: 28, width: 520, maxHeight: '80vh', overflow: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                      <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Expense Categories</h3>
+                      <button onClick={() => setShowCatManager(false)} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#6b7280' }}>✕</button>
+                    </div>
+                    {/* Add new */}
+                    <div style={{ background: '#f9fafb', borderRadius: 10, padding: 16, marginBottom: 20 }}>
+                      <p style={{ margin: '0 0 10px', fontWeight: 600, fontSize: 14 }}>Add new category</p>
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                        <input type="text" placeholder="Category name" value={quickCatForm.name}
+                          onChange={e => setQuickCatForm(f => ({ ...f, name: e.target.value }))}
+                          style={{ ...inp, flex: 1 }} />
+                        <input type="color" value={quickCatForm.colour}
+                          onChange={e => setQuickCatForm(f => ({ ...f, colour: e.target.value }))}
+                          style={{ width: 44, height: 38, borderRadius: 8, border: '1px solid #e5e7eb', cursor: 'pointer', padding: 2 }} />
+                        <button style={btn()} onClick={async () => { await saveQuickCategory(); load(); }}>Add</button>
+                      </div>
+                    </div>
+                    {/* Existing categories */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      {sortedCategories.map(cat => (
+                        <div key={cat.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: '#f9fafb', borderRadius: 10, border: '1px solid #e5e7eb' }}>
+                          {editingCat?.id === cat.id ? (
+                            <>
+                              <input type="text" value={catEditForm.name} onChange={e => setCatEditForm(f => ({ ...f, name: e.target.value }))}
+                                style={{ ...inp, flex: 1, fontSize: 13 }} />
+                              <input type="color" value={catEditForm.colour} onChange={e => setCatEditForm(f => ({ ...f, colour: e.target.value }))}
+                                style={{ width: 36, height: 32, borderRadius: 6, border: 'none', cursor: 'pointer', padding: 2 }} />
+                              <button style={btn(undefined, true)} onClick={() => updateCategoryInDB(cat)}>Save</button>
+                              <button style={btn('#6b7280', true)} onClick={() => setEditingCat(null)}>Cancel</button>
+                            </>
+                          ) : (
+                            <>
+                              <span style={{ width: 12, height: 12, borderRadius: '50%', background: cat.colour, display: 'inline-block', flexShrink: 0 }} />
+                              <span style={{ flex: 1, fontWeight: 600, fontSize: 14 }}>{cat.name}</span>
+                              <span style={{ fontSize: 11, color: '#9ca3af', fontFamily: 'monospace' }}>{cat.key}</span>
+                              <button style={btn('#1a5c38', true)} onClick={() => { setEditingCat(cat); setCatEditForm({ name: cat.name, colour: cat.colour }) }}>Edit</button>
+                              <button style={btn('#dc2626', true)} onClick={() => { if (confirm('Archive this category?')) archiveCategoryInDB(cat.id) }}>Archive</button>
+                            </>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Multi-line quick expense form */}
               {showQForm && (
                 <div style={{ ...card, border: '2px solid #1a5c38', marginBottom: 24, marginTop: 16 }}>
                   <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 700 }}>{editQ ? 'Edit' : 'New'} Quick Expense</h3>
                   {error && <div style={{ background: '#fef2f2', color: '#dc2626', padding: '8px 12px', borderRadius: 8, marginBottom: 12, fontSize: 13 }}>{error}</div>}
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+
+                  {/* Header fields */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 16 }}>
                     <div>
                       <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Date *</label>
-                      <input type="date" value={qForm.expense_date} onChange={e => setQForm(f => ({ ...f, expense_date: e.target.value }))} style={inp} />
-                    </div>
-                    <div>
-                      <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Category *</label>
-                      <select value={qForm.category_key} onChange={e => setQForm(f => ({ ...f, category_key: e.target.value }))} style={inp}>
-                        {sortedCategories.map(c => <option key={c.key} value={c.key}>{c.name}</option>)}
-                      </select>
-                    </div>
-                    <div>
-                      <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Amount (R) *</label>
-                      <input type="number" step="0.01" placeholder="0.00" value={qForm.amount} onChange={e => setQForm(f => ({ ...f, amount: e.target.value }))} style={inp} />
-                    </div>
-                    <div style={{ gridColumn: 'span 2' }}>
-                      <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Description *</label>
-                      <input type="text" placeholder="e.g. Petrol for delivery" value={qForm.description} onChange={e => setQForm(f => ({ ...f, description: e.target.value }))} style={inp} />
+                      <input type="date" value={qForm.expense_date} onChange={e => setQForm((f: any) => ({ ...f, expense_date: e.target.value }))} style={inp} />
                     </div>
                     <div>
                       <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Payment Method</label>
-                      <select value={qForm.payment_method} onChange={e => setQForm(f => ({ ...f, payment_method: e.target.value }))} style={inp}>
-                        {PAYMENT_METHODS.map(m => <option key={m} value={m}>{m.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</option>)}
+                      <select value={qForm.payment_method} onChange={e => setQForm((f: any) => ({ ...f, payment_method: e.target.value }))} style={inp}>
+                        {PAYMENT_METHODS.map(m => <option key={m} value={m}>{m.replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase())}</option>)}
                       </select>
                     </div>
                     <div>
                       <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Supplier (optional)</label>
-                      <select value={qForm.supplier} onChange={e => setQForm(f => ({ ...f, supplier: e.target.value }))} style={inp}>
+                      <select value={qForm.supplier} onChange={e => setQForm((f: any) => ({ ...f, supplier: e.target.value }))} style={inp}>
                         <option value="">— Select supplier —</option>
-                        {suppliers.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
-                        <option value="other">Other (not listed)</option>
+                        {suppliers.map((s: any) => <option key={s.id} value={s.name}>{s.name}</option>)}
+                        <option value="other">Other</option>
                       </select>
-                      {qForm.supplier === 'other' && (
-                        <input type="text" placeholder="Type supplier name" onChange={e => setQForm(f => ({ ...f, supplier: e.target.value === 'other' ? '' : e.target.value }))} style={{ ...inp, marginTop: 6 }} />
-                      )}
-                    </div>
-                    <div>
-                      <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Notes</label>
-                      <input type="text" placeholder="Optional notes" value={qForm.notes} onChange={e => setQForm(f => ({ ...f, notes: e.target.value }))} style={inp} />
                     </div>
                   </div>
-                  <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
-                    <button style={btn()} onClick={saveQuick} disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
+
+                  {/* Line items */}
+                  <div style={{ marginBottom: 8 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '180px 1fr 120px 36px', gap: 8, marginBottom: 6 }}>
+                      {['Category', 'Description', 'Amount (R)', ''].map(h => (
+                        <div key={h} style={{ fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{h}</div>
+                      ))}
+                    </div>
+                    {(qForm.lines || []).map((line: any, idx: number) => (
+                      <div key={idx} style={{ display: 'grid', gridTemplateColumns: '180px 1fr 120px 36px', gap: 8, marginBottom: 6 }}>
+                        <select value={line.category_key} onChange={e => setQForm((f: any) => {
+                          const lines = [...f.lines]; lines[idx] = { ...lines[idx], category_key: e.target.value }; return { ...f, lines }
+                        })} style={{ ...inp, fontSize: 13 }}>
+                          {sortedCategories.map((c: any) => <option key={c.key} value={c.key}>{c.name}</option>)}
+                        </select>
+                        <input type="text" placeholder="Description" value={line.description} onChange={e => setQForm((f: any) => {
+                          const lines = [...f.lines]; lines[idx] = { ...lines[idx], description: e.target.value }; return { ...f, lines }
+                        })} style={{ ...inp, fontSize: 13 }} />
+                        <input type="number" step="0.01" placeholder="0.00" value={line.amount} onChange={e => setQForm((f: any) => {
+                          const lines = [...f.lines]; lines[idx] = { ...lines[idx], amount: e.target.value }; return { ...f, lines }
+                        })} style={{ ...inp, fontSize: 13 }} />
+                        <button onClick={() => setQForm((f: any) => ({ ...f, lines: f.lines.filter((_: any, i: number) => i !== idx) }))}
+                          style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 6, color: '#dc2626', cursor: 'pointer', fontWeight: 700 }}
+                          disabled={(qForm.lines || []).length <= 1}>✕</button>
+                      </div>
+                    ))}
+                    <button onClick={() => setQForm((f: any) => ({ ...f, lines: [...f.lines, emptyQLine()] }))}
+                      style={{ background: 'none', border: '1px dashed #d1d5db', borderRadius: 8, padding: '7px 16px', cursor: 'pointer', color: '#1a5c38', fontWeight: 600, fontSize: 13, marginTop: 4 }}>
+                      + Add line
+                    </button>
+                  </div>
+
+                  {/* Total */}
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '10px 0', borderTop: '1px solid #e5e7eb', marginTop: 8, fontSize: 15, fontWeight: 700 }}>
+                    Total: R {(qForm.lines || []).reduce((s: number, l: any) => s + (parseFloat(l.amount) || 0), 0).toFixed(2)}
+                  </div>
+
+                  <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
+                    <button style={btn()} onClick={saveQuick} disabled={saving}>{saving ? 'Saving…' : `Save ${(qForm.lines || []).filter((l: any) => l.description && l.amount).length} line(s)`}</button>
                     <button style={btn('#6b7280')} onClick={() => { setShowQForm(false); setEditQ(null) }}>Cancel</button>
                   </div>
                 </div>
