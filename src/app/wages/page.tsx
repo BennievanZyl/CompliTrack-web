@@ -1,10 +1,10 @@
 'use client'
+import { useStoreContext } from '@/lib/store-context'
 
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 
-const STORE_ID = '05328298-fc27-4c9f-b091-bb7f6598b601'
 type Employee = { id: string; full_name: string; role: string }
 type EmployeeWage = { id: string; employee_id: string; hourly_rate: number; uif_employee: number; uif_employer: number; tax_rate: number; pay_frequency: string; bank_name?: string; bank_account?: string; bank_branch?: string; id_number?: string }
 type PayrollPeriod = { id: string; period_start: string; period_end: string; pay_frequency: string; status: string }
@@ -19,6 +19,7 @@ function formatCurrency(val: number) { return `R ${val.toFixed(2)}` }
 function formatHours(val: number) { return `${Math.floor(val)}h ${Math.round((val % 1) * 60)}m` }
 
 export default function WagesPage() {
+  const { storeId: STORE_ID, ready: ctxReady } = useStoreContext()
   const router = useRouter()
   const [tab, setTab] = useState<'payroll' | 'advances' | 'settings'>('payroll')
   const [employees, setEmployees] = useState<Employee[]>([])
@@ -38,7 +39,7 @@ export default function WagesPage() {
   const [advanceForm, setAdvanceForm] = useState({ employee_id: '', amount: '', reason: '', advance_date: new Date().toISOString().split('T')[0] })
   const [wageForm, setWageForm] = useState({ employee_id: '', hourly_rate: '', night_allowance_rate: '', uif_employee: '0.01', uif_employer: '0.01', tax_rate: '0', pay_frequency: 'monthly', bank_name: '', bank_account: '', bank_branch: '', id_number: '' })
 
-  useEffect(() => { loadAll() }, [])
+  useEffect(() => { if (ctxReady && STORE_ID) loadAll() }, [ctxReady, STORE_ID])
 
   async function loadAll() {
     setLoading(true)
