@@ -215,7 +215,7 @@ export default function FinancesPage() {
     setQuickExp(qRes.data || [])
     setAllStockItems(stockRes?.data || [])
     setLoading(false)
-  }, [month, STORE_ID])
+  }, [month, STORE_ID, ORG_ID])
 
   useEffect(() => { load() }, [load])
 
