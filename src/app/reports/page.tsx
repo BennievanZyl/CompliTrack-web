@@ -1,9 +1,9 @@
 'use client'
-import { useStoreContext } from '@/lib/store-context'
 import React, { useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 
+const STORE_ID = '05328298-fc27-4c9f-b091-bb7f6598b601'
 const PRIMARY = '#1a5c38'
 const DARK = '#0a1f12'
 
@@ -87,8 +87,6 @@ function tableHTML(rows: Record<string, any>[], totals?: Record<string, any>) {
 
 // ── Main Component ─────────────────────────────────────────────────────────────
 export default function ReportsPage() {
-  const { storeId: STORE_ID, orgId: ORG_ID, ready: ctxReady } = useStoreContext()
-
   const router = useRouter()
   const [startDate, setStartDate] = useState(lastMonthStart())
   const [endDate, setEndDate] = useState(lastMonthEnd())
