@@ -266,6 +266,7 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
 
   async function loadCashUp(dateOverride?: string) {
     setLoading(true);
+    try {
     const targetDate = dateOverride || cashUpDate;
     const { data: existingCashUp } = await supabase.from('cash_ups').select('*').eq('store_id', storeId).eq('cash_up_date', targetDate).maybeSingle();
     if (existingCashUp) {
