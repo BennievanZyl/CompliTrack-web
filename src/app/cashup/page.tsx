@@ -1,4 +1,5 @@
 'use client';
+import { getStoreContext } from '@/lib/store-context'
 
 import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -1061,19 +1062,18 @@ function CashUpContent() {
   useEffect(() => { detectContext(); }, []);
 
   async function detectContext() {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) { setReady(true); return; }
-    const { data: profile } = await supabase.from('profiles').select('role, store_id').eq('id', user.id).single();
-    setRole(profile?.role || null);
     if (storeParam) {
-      // Franchise admin opened a specific store via ?store=xxx
+      // Franchise admin opened a specific store via ?store=xxx URL param
       const { data: store } = await supabase.from('stores').select('id, name').eq('id', storeParam).single();
       if (store) { setStoreId(store.id); setStoreName(store.name); }
-    } else if (profile?.store_id) {
-      // Normal user — use their own store
-      setStoreId(profile.store_id);
-      const { data: store } = await supabase.from('stores').select('name').eq('id', profile.store_id).single();
-      if (store) setStoreName(store.name);
+    } else {
+      // Use the same getStoreContext() that works for all other pages
+      const ctx = await getStoreContext();
+      if (ctx) {
+        setStoreId(ctx.storeId);
+        setStoreName(ctx.storeName);
+        setRole(ctx.role);
+      }
     }
     setReady(true);
   }
