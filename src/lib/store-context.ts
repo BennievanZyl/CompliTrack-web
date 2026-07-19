@@ -3,9 +3,9 @@ import { useState, useEffect } from 'react'
 
 export interface StoreContext {
   storeId: string
+  orgId: string   // kept for tables that still use organisation_id (expense_categories etc.)
   storeName: string
   role: string
-  /** All stores this user has access to (for store switcher) */
   stores: { id: string; name: string }[]
 }
 
@@ -23,25 +23,23 @@ export async function getStoreContext(): Promise<StoreContext | null> {
 
       const { data: profile } = await supabase
         .from('profiles')
-        .select('store_id, role')
+        .select('store_id, organisation_id, role')
         .eq('id', user.id)
         .single()
 
       if (!profile?.store_id) return null
 
-      // Load current store name
       const { data: store } = await supabase
         .from('stores')
         .select('id, name')
         .eq('id', profile.store_id)
         .single()
 
-      // Load all stores this user can access
-      // For now: just the one store; multi-store switcher can be added here later
       const stores = store ? [{ id: store.id, name: store.name }] : []
 
       _cache = {
         storeId: profile.store_id,
+        orgId: profile.organisation_id ?? '',
         storeName: store?.name ?? '',
         role: profile.role ?? '',
         stores,
@@ -57,16 +55,11 @@ export async function getStoreContext(): Promise<StoreContext | null> {
   return _promise
 }
 
-/** Call on sign-out so next login gets fresh context */
 export function clearStoreContext() {
   _cache = null
   _promise = null
 }
 
-/**
- * React hook — returns store context for the logged-in user.
- * Use STORE_ID in all queries. No org_id needed.
- */
 export function useStoreContext() {
   const [ctx, setCtx] = useState<StoreContext | null>(null)
   const [ready, setReady] = useState(false)
@@ -80,6 +73,7 @@ export function useStoreContext() {
 
   return {
     storeId: ctx?.storeId ?? '',
+    orgId: ctx?.orgId ?? '',
     storeName: ctx?.storeName ?? '',
     role: ctx?.role ?? '',
     stores: ctx?.stores ?? [],
