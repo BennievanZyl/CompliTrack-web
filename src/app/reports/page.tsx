@@ -325,6 +325,10 @@ export default function ReportsPage() {
           <option value="csv">CSV</option>
           <option value="pdf">PDF</option>
         </select>
+        <button onClick={() => run(reportKey + 'pdf-view', onPDF)} disabled={loading !== null}
+          style={{ padding: '8px 12px', background: loading !== null ? '#e5e7eb' : '#f9fafb', color: loading !== null ? '#9ca3af' : PRIMARY, border: `1px solid ${loading !== null ? '#e5e7eb' : '#d1fae5'}`, borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: loading !== null ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap' as const, flexShrink: 0 }}>
+          {loading === reportKey + 'pdf-view' ? '⏳' : '👁'} View
+        </button>
         <button onClick={generate} disabled={loading !== null}
           style={{ padding: '8px 14px', background: loading !== null ? '#e5e7eb' : PRIMARY, color: loading !== null ? '#9ca3af' : '#fff', border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: loading !== null ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap' as const, flexShrink: 0 }}>
           {isActive ? '⏳' : '⬇'} Download
