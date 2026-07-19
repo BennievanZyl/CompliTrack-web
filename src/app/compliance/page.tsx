@@ -1,10 +1,10 @@
 'use client';
+import { useStoreContext } from '@/lib/store-context'
 
 import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 
-const STORE_ID = '05328298-fc27-4c9f-b091-bb7f6598b601';
 const PRIMARY = '#1a5c38';
 const DARK = '#0a1f12';
 const POLL_INTERVAL = 30000;
@@ -89,6 +89,7 @@ function sortChecklist(items: ChecklistItem[]): ChecklistItem[] {
 }
 
 export default function CompliancePage() {
+  const { storeId: STORE_ID, ready: ctxReady } = useStoreContext()
   const router = useRouter();
   const [session, setSession] = useState<Session | null>(null);
   const [checklist, setChecklist] = useState<ChecklistItem[]>([]);
@@ -107,7 +108,7 @@ export default function CompliancePage() {
   const [currentUser, setCurrentUser] = useState<{ id: string; role: string } | null>(null);
   const sessionRef = useRef<Session | null>(null);
 
-  useEffect(() => { checkAuthAndLoad(); }, []);
+  useEffect(() => { if (ctxReady && STORE_ID) checkAuthAndLoad(); }, [ctxReady, STORE_ID]);
   useEffect(() => { sessionRef.current = session; }, [session]);
 
   useEffect(() => {
