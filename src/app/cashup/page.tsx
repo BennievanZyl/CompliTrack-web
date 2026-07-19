@@ -1084,8 +1084,6 @@ function CashUpContent() {
 }
 
 export default function CashUpPage() {
-  const { storeId: STORE_ID, orgId: ORG_ID, ready: ctxReady } = useStoreContext()
-
   return (
     <Suspense fallback={<div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f8faf8' }}><div style={{ color: '#666' }}>Loading...</div></div>}>
       <CashUpContent />
