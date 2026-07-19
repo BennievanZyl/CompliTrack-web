@@ -107,9 +107,9 @@ export default function ReportsPage() {
   // ── FINANCIAL REPORTS ──────────────────────────────────────────────────────
   async function salesReport(fmt_: 'csv' | 'excel' | 'pdf') {
     const { data } = await supabase.from('cash_ups').select('cash_up_date,cash_up_total,a_total,bank_total,eft_total,payouts,float_total,variance,status,signed_by_name,notes').eq('store_id', STORE_ID).gte('cash_up_date', startDate).lte('cash_up_date', endDate).order('cash_up_date')
-    const rows = (data || []).map(r => ({ Date: r.cash_up_date, 'Sales (incl VAT)': Number(r.cash_up_total || 0).toFixed(2), 'Sales (ex-VAT)': (Number(r.cash_up_total || 0) / 1.15).toFixed(2), 'VAT (15%)': (Number(r.cash_up_total || 0) * 0.15 / 1.15).toFixed(2), 'Payment Method': r.payment_method || '', Cashier: r.cashier_name || '', Status: r.status || '', Notes: r.notes || '' }))
+    const rows = (data || []).map(r => ({ Date: r.cash_up_date, 'Sales (incl VAT)': Number(r.cash_up_total || 0).toFixed(2), 'Sales (ex-VAT)': (Number(r.cash_up_total || 0) / 1.15).toFixed(2), 'VAT (15%)': (Number(r.cash_up_total || 0) * 0.15 / 1.15).toFixed(2), 'A Total': Number(r.a_total || 0).toFixed(2), 'Bank': Number(r.bank_total || 0).toFixed(2), 'EFT': Number(r.eft_total || 0).toFixed(2), Variance: Number(r.variance || 0).toFixed(2), 'Signed By': r.signed_by_name || '', Status: r.status || '', Notes: r.notes || '' }))
     const total = (data || []).reduce((s, r) => s + Number(r.cash_up_total || 0), 0)
-    const totals = { Date: 'TOTAL', 'Sales (incl VAT)': total.toFixed(2), 'Sales (ex-VAT)': (total / 1.15).toFixed(2), 'VAT (15%)': (total * 0.15 / 1.15).toFixed(2), 'Payment Method': '', Cashier: '', Status: '', Notes: '' }
+    const totals = { Date: 'TOTAL', 'Sales (incl VAT)': total.toFixed(2), 'Sales (ex-VAT)': (total / 1.15).toFixed(2), 'VAT (15%)': (total * 0.15 / 1.15).toFixed(2), 'A Total': '', 'Bank': '', 'EFT': '', Variance: '', 'Signed By': '', Status: '', Notes: '' }
     if (fmt_ === 'csv') downloadCSV(rows, `Sales_Report_${startDate}`)
     else if (fmt_ === 'excel') downloadExcel([{ name: 'Sales', rows }], `Sales_Report_${startDate}`)
     else printPDF('Cash-Up Sales Report', tableHTML(rows, totals), dateLabel)
