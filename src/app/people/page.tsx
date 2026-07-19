@@ -191,6 +191,8 @@ export default function PeoplePage() {
   const [warningFile, setWarningFile] = useState<File | null>(null);
   const [advanceForm, setAdvanceForm] = useState({ amount: '', reason: '', advance_date: new Date().toISOString().split('T')[0], repayment_status: 'outstanding', deduct_from_wages: false, notes: '' });
   const [attendanceForm, setAttendanceForm] = useState({ work_date: new Date().toISOString().split('T')[0], clock_in: '', clock_out: '', is_late: false, notes: '' });
+  const [editingAttendance, setEditingAttendance] = useState<Attendance | null>(null);
+  const [editAttendForm, setEditAttendForm] = useState({ clock_in: '', clock_out: '', is_late: false, notes: '' });
 
   const inp = { width: '100%', padding: '10px 14px', borderRadius: 10, border: '1.5px solid #eef2ee', fontSize: 14, outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box' as const };
   const lbl = { display: 'block' as const, fontSize: 13, fontWeight: 600 as const, color: '#555', marginBottom: 6 };
@@ -295,6 +297,30 @@ export default function PeoplePage() {
   }
 
   async function saveAttendance() {
+    // Edit existing record
+    if (editingAttendance) {
+      setSaving(true);
+      try {
+        const workDate = editingAttendance.work_date;
+        const clockIn = editAttendForm.clock_in ? `${workDate}T${editAttendForm.clock_in}:00` : null;
+        const clockOut = editAttendForm.clock_out ? `${workDate}T${editAttendForm.clock_out}:00` : null;
+        const hours = clockIn && clockOut
+          ? (new Date(clockOut).getTime() - new Date(clockIn).getTime()) / 3600000
+          : 0;
+        await supabase.from('attendance').update({
+          clock_in: clockIn,
+          clock_out: clockOut,
+          hours_worked: Math.max(0, hours),
+          is_late: editAttendForm.is_late,
+          notes: editAttendForm.notes || null,
+        }).eq('id', editingAttendance.id);
+        await loadEmployeeProfile(selectedEmployee);
+        setEditingAttendance(null);
+      } catch (e: any) { setSaveError(e.message); }
+      finally { setSaving(false); }
+      return;
+    }
+
     if (!selectedEmployee || !attendanceForm.work_date) return;
     setSaving(true); setSaveError(null);
     try {
@@ -424,6 +450,54 @@ export default function PeoplePage() {
 
       {showAttendanceModal && (
         <ModalWrap onClose={() => { setShowAttendanceModal(false); setSaveError(null); }}>
+          {editingAttendance && (
+            <div style={{ position: 'fixed' as const, inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={() => setEditingAttendance(null)}>
+              <div style={{ background: '#fff', borderRadius: 20, padding: 28, width: 420, boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }} onClick={e => e.stopPropagation()}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                  <div>
+                    <div style={{ fontWeight: 800, fontSize: 17, color: '#111' }}>
+                      {!editingAttendance.clock_out ? '⚠ Fix Attendance — Missing Clock-Out' : '✏ Edit Attendance'}
+                    </div>
+                    <div style={{ fontSize: 13, color: '#888', marginTop: 4 }}>
+                      {new Date(editingAttendance.work_date).toLocaleDateString('en-ZA', { weekday: 'long', day: 'numeric', month: 'long' })}
+                    </div>
+                  </div>
+                  <button onClick={() => setEditingAttendance(null)} style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: '#888' }}>✕</button>
+                </div>
+                {!editingAttendance.clock_out && (
+                  <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 10, padding: 12, marginBottom: 16, fontSize: 13, color: '#dc2626', fontWeight: 600, lineHeight: 1.5 }}>
+                    No clock-out recorded for this session. Enter the correct time below.
+                  </div>
+                )}
+                {saveError && <div style={{ background: '#fef2f2', color: '#dc2626', padding: '8px 12px', borderRadius: 8, marginBottom: 12, fontSize: 13 }}>{saveError}</div>}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                  <div>
+                    <label style={lbl}>Clock In</label>
+                    <input type="time" value={editAttendForm.clock_in} onChange={e => setEditAttendForm(p => ({ ...p, clock_in: e.target.value }))} style={inp} />
+                  </div>
+                  <div>
+                    <label style={{ ...lbl, color: !editingAttendance.clock_out ? '#dc2626' : undefined }}>
+                      {!editingAttendance.clock_out ? 'Clock Out ← enter here' : 'Clock Out'}
+                    </label>
+                    <input type="time" value={editAttendForm.clock_out} onChange={e => setEditAttendForm(p => ({ ...p, clock_out: e.target.value }))} style={{ ...inp, borderColor: !editingAttendance.clock_out ? '#dc2626' : undefined }} autoFocus={!editingAttendance.clock_out} />
+                  </div>
+                </div>
+                {editAttendForm.clock_in && editAttendForm.clock_out && (() => {
+                  const h = (new Date(`2000-01-01T${editAttendForm.clock_out}`).getTime() - new Date(`2000-01-01T${editAttendForm.clock_in}`).getTime()) / 3600000;
+                  return h > 0 ? <div style={{ fontSize: 13, color: '#1a5c38', fontWeight: 600, marginTop: 8 }}>Hours worked: {h.toFixed(2)}h</div> : null;
+                })()}
+                <Toggle value={editAttendForm.is_late} onChange={() => setEditAttendForm(p => ({ ...p, is_late: !p.is_late }))} label="Mark as Late" color="#f59e0b" />
+                <div style={{ marginTop: 12 }}>
+                  <label style={lbl}>Notes</label>
+                  <textarea value={editAttendForm.notes} onChange={e => setEditAttendForm(p => ({ ...p, notes: e.target.value }))} rows={2} placeholder="e.g. forgot to clock out" style={{ ...inp, resize: 'vertical' as const }} />
+                </div>
+                <button onClick={saveAttendance} disabled={saving} style={{ width: '100%', marginTop: 20, padding: '12px', background: '#1a5c38', color: '#fff', border: 'none', borderRadius: 12, fontWeight: 700, cursor: 'pointer', fontSize: 15 }}>
+                  {saving ? 'Saving...' : 'Save Changes'}
+                </button>
+              </div>
+            </div>
+          )}
+
           <ModalHeader title="Log Attendance" onClose={() => { setShowAttendanceModal(false); setSaveError(null); }} />
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <div><label style={lbl}>Date *</label><input type="date" value={attendanceForm.work_date} onChange={e => setAttendanceForm(p => ({ ...p, work_date: e.target.value }))} style={inp} /></div>
@@ -666,16 +740,27 @@ export default function PeoplePage() {
                     {attendance.length === 0 && <div style={{ textAlign: 'center' as const, padding: 40, color: '#aaa' }}>No attendance records yet</div>}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                       {attendance.map(a => (
-                        <div key={a.id} style={{ background: a.is_late ? '#fff8e1' : '#f8faf8', borderRadius: 12, padding: '12px 16px', border: `1px solid ${a.is_late ? '#fde68a' : '#eef2ee'}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                          <div>
-                            <div style={{ fontWeight: 600, color: '#333', fontSize: 14 }}>{new Date(a.work_date).toLocaleDateString('en-ZA', { weekday: 'short', day: 'numeric', month: 'short' })}</div>
+                        <div key={a.id} style={{ background: !a.clock_out ? '#fff5f5' : a.is_late ? '#fff8e1' : '#f8faf8', borderRadius: 12, padding: '12px 16px', border: `1px solid ${!a.clock_out ? '#fecaca' : a.is_late ? '#fde68a' : '#eef2ee'}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontWeight: 600, color: '#333', fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
+                              {new Date(a.work_date).toLocaleDateString('en-ZA', { weekday: 'short', day: 'numeric', month: 'short' })}
+                              {!a.clock_out && <span style={{ fontSize: 10, fontWeight: 700, color: '#dc2626', background: '#fef2f2', padding: '2px 6px', borderRadius: 4 }}>⚠ OPEN</span>}
+                            </div>
                             <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>
-                              {a.clock_in ? new Date(a.clock_in).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : '—'}{' → '}{a.clock_out ? new Date(a.clock_out).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : '—'}
+                              {a.clock_in ? new Date(a.clock_in).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : '—'}{' → '}{a.clock_out ? new Date(a.clock_out).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : 'not clocked out'}
                             </div>
                           </div>
-                          <div style={{ textAlign: 'right' as const }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                             {a.hours_worked ? <div style={{ fontWeight: 700, color: PRIMARY, fontSize: 15 }}>{formatHM(a.hours_worked)}</div> : null}
                             {a.is_late && <span style={{ fontSize: 10, fontWeight: 700, color: '#f59e0b' }}>LATE</span>}
+                            <button
+                              onClick={() => {
+                                const toTime = (dt: string | null) => dt ? new Date(dt).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit', hour12: false }) : '';
+                                setEditAttendForm({ clock_in: toTime(a.clock_in), clock_out: toTime(a.clock_out), is_late: a.is_late, notes: a.notes || '' });
+                                setEditingAttendance(a);
+                              }}
+                              style={{ fontSize: 12, fontWeight: 700, color: !a.clock_out ? '#dc2626' : '#1a5c38', background: !a.clock_out ? '#fef2f2' : '#eef2ee', border: `1px solid ${!a.clock_out ? '#fecaca' : '#d1fae5'}`, borderRadius: 8, padding: '4px 10px', cursor: 'pointer' }}
+                            >{!a.clock_out ? '⚠ Fix' : '✏ Edit'}</button>
                           </div>
                         </div>
                       ))}
