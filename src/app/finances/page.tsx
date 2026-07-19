@@ -1,10 +1,9 @@
-'use client' // rebuild 08:09:06 // 19:21:58 // 19:21:52 // build 2026-06-29T19:12
+'use client'
+import { useStoreContext } from '@/lib/store-context'
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 
-const STORE_ID = '05328298-fc27-4c9f-b091-bb7f6598b601'
-const ORG_ID = 'e903386b-133a-4bad-b054-ef7ef616a3ff'
 const VAT_RATE = 0.15
 
 const TABS = ['Summary', 'Cash-Ups / Sales', 'Supplier Bills', 'Quick Expenses', 'Food Cost', 'History']
@@ -87,6 +86,7 @@ const emptyQuick = () => ({
 })
 
 export default function FinancesPage() {
+  const { storeId: STORE_ID, orgId: ORG_ID, ready: ctxReady } = useStoreContext()
   const router = useRouter()
   const [tab, setTab] = useState(0)
   const [historyInvoices, setHistoryInvoices] = useState<Invoice[]>([])
@@ -180,6 +180,7 @@ export default function FinancesPage() {
   }
 
   const load = useCallback(async () => {
+    if (!STORE_ID) return
     setLoading(true)
     const monthStart = `${month}-01`
     const [mYear, mMonth] = month.split('-').map(Number)
@@ -214,7 +215,7 @@ export default function FinancesPage() {
     setQuickExp(qRes.data || [])
     setAllStockItems(stockRes?.data || [])
     setLoading(false)
-  }, [month])
+  }, [month, STORE_ID])
 
   useEffect(() => { load() }, [load])
 
@@ -278,7 +279,7 @@ export default function FinancesPage() {
     setFcLoaded(true)
   }
 
-  useEffect(() => { if (tab === 4) loadFoodCost() }, [tab, fcMode, fcWeekStart, month])
+  useEffect(() => { if (tab === 4 && STORE_ID) loadFoodCost() }, [tab, fcMode, fcWeekStart, month, STORE_ID])
 
   function startDeviceScan() {
     setShowScanChoice(false)
@@ -429,7 +430,7 @@ export default function FinancesPage() {
     setHistoryLoaded(true)
   }
 
-  useEffect(() => { if (tab === 5 && !historyLoaded) loadHistory() }, [tab, historyLoaded])
+  useEffect(() => { if (tab === 5 && !historyLoaded && STORE_ID) loadHistory() }, [tab, historyLoaded, STORE_ID])
 
   const filteredHistory = historyInvoices.filter(inv => {
     if (historySupplier !== 'All' && inv.supplier !== historySupplier) return false
