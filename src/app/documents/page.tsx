@@ -44,7 +44,7 @@ export default function DocumentsPage() {
     issued_date: '', issued_by: '', notes: '', file: null as File | null,
   })
 
-  useEffect(() => { loadDocuments() }, [])
+  useEffect(() => { if (ctxReady && STORE_ID) loadDocuments() }, [ctxReady, STORE_ID])
 
   async function loadDocuments() {
     setLoading(true)
