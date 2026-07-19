@@ -5,6 +5,8 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { Suspense } from 'react';
 
+const DEFAULT_STORE_ID = '05328298-fc27-4c9f-b091-bb7f6598b601';
+const DEFAULT_ORG_ID = 'e903386b-133a-4bad-b054-ef7ef616a3ff';
 const DEFAULT_STORE_NAME = 'Mochachos Hartswater';
 const PRIMARY = '#1a5c38';
 const DARK = '#0a1f12';
@@ -1054,8 +1056,8 @@ function CashUpContent() {
   const searchParams = useSearchParams();
   const storeParam = searchParams.get('store');
   const [role, setRole] = useState<string | null>(null);
-  const [storeId, setStoreId] = useState(STORE_ID);
-  const [orgId, setOrgId] = useState(ORG_ID);
+  const [storeId, setStoreId] = useState(DEFAULT_STORE_ID);
+  const [orgId, setOrgId] = useState(DEFAULT_ORG_ID);
   const [storeName, setStoreName] = useState(DEFAULT_STORE_NAME);
   const [ready, setReady] = useState(false);
 
