@@ -292,7 +292,7 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
       const prevDate = new Date(targetDate); prevDate.setDate(prevDate.getDate() - 1);
       // Use most recent prior cashup (not just yesterday) — handles weekends/missing days
       const prevDateStr = prevDate.toISOString().split('T')[0];
-      const { data: prevCashUps } = await supabase.from('cash_ups').select('float_total, cash_up_date').eq('store_id', storeId).lt('cash_up_date', selectedDate).order('cash_up_date', { ascending: false }).limit(1);
+      const { data: prevCashUps } = await supabase.from('cash_ups').select('float_total, cash_up_date').eq('store_id', storeId).lt('cash_up_date', targetDate).order('cash_up_date', { ascending: false }).limit(1);
       const prevCashUp = prevCashUps?.[0];
       if (prevCashUp?.float_total) setRecon(p => ({ ...p, previous_float: prevCashUp.float_total.toString() }));
     }
