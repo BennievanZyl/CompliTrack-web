@@ -100,7 +100,7 @@ export default function SettingsPage() {
     const [storeRes, templRes, catRes, permsRes] = await Promise.all([
       supabase.from('stores').select('*').eq('id', STORE_ID).single(),
       supabase.from('checklist_templates').select('*').eq('store_id', STORE_ID).order('section').order('sort_order'),
-      supabase.from('expense_categories').select('*').eq('organisation_id', ORG_ID).order('sort_order'),
+      supabase.from('expense_categories').select('*').eq('organisation_id', 'e903386b-133a-4bad-b054-ef7ef616a3ff').order('sort_order'),
       supabase.from('store_role_permissions').select('*').eq('store_id', STORE_ID),
     ])
     if (storeRes.data) { setStore(storeRes.data); setForm(storeRes.data) }
@@ -172,7 +172,7 @@ export default function SettingsPage() {
       await supabase.from('expense_categories').update({ name: catForm.name, colour: catForm.colour }).eq('id', editCat.id)
       setEditCat(null)
     } else {
-      await supabase.from('expense_categories').insert({ organisation_id: ORG_ID, name: catForm.name, key, colour: catForm.colour, is_active: true, sort_order: maxOrder + 1 })
+      await supabase.from('expense_categories').insert({ organisation_id: 'e903386b-133a-4bad-b054-ef7ef616a3ff', name: catForm.name, key, colour: catForm.colour, is_active: true, sort_order: maxOrder + 1 })
     }
     setCatForm({ name: '', colour: '#10b981' })
     setShowCatForm(false)
