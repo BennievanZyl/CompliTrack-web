@@ -106,7 +106,7 @@ export default function ReportsPage() {
 
   // ── FINANCIAL REPORTS ──────────────────────────────────────────────────────
   async function salesReport(fmt_: 'csv' | 'excel' | 'pdf') {
-    const { data } = await supabase.from('cash_ups').select('cash_up_date,cash_up_total,payment_method,status,cashier_name,notes').eq('store_id', STORE_ID).neq('status', 'draft').gte('cash_up_date', startDate).lte('cash_up_date', endDate).order('cash_up_date')
+    const { data } = await supabase.from('cash_ups').select('cash_up_date,cash_up_total,payment_method,status,cashier_name,notes').eq('store_id', STORE_ID).gte('cash_up_date', startDate).lte('cash_up_date', endDate).order('cash_up_date')
     const rows = (data || []).map(r => ({ Date: r.cash_up_date, 'Sales (incl VAT)': Number(r.cash_up_total || 0).toFixed(2), 'Sales (ex-VAT)': (Number(r.cash_up_total || 0) / 1.15).toFixed(2), 'VAT (15%)': (Number(r.cash_up_total || 0) * 0.15 / 1.15).toFixed(2), 'Payment Method': r.payment_method || '', Cashier: r.cashier_name || '', Status: r.status || '', Notes: r.notes || '' }))
     const total = (data || []).reduce((s, r) => s + Number(r.cash_up_total || 0), 0)
     const totals = { Date: 'TOTAL', 'Sales (incl VAT)': total.toFixed(2), 'Sales (ex-VAT)': (total / 1.15).toFixed(2), 'VAT (15%)': (total * 0.15 / 1.15).toFixed(2), 'Payment Method': '', Cashier: '', Status: '', Notes: '' }
@@ -279,7 +279,7 @@ export default function ReportsPage() {
   // ── COMBINED ACCOUNTANT PACK ───────────────────────────────────────────────
   async function accountantPack() {
     const [salesRes, expRes, invRes, payrollRes, purchRes, wastRes] = await Promise.all([
-      supabase.from('cash_ups').select('cash_up_date,cash_up_total').eq('store_id', STORE_ID).neq('status', 'draft').gte('cash_up_date', startDate).lte('cash_up_date', endDate).order('cash_up_date'),
+      supabase.from('cash_ups').select('cash_up_date,cash_up_total').eq('store_id', STORE_ID).gte('cash_up_date', startDate).lte('cash_up_date', endDate).order('cash_up_date'),
       supabase.from('expenses').select('expense_date,category_name,description,amount,vat_amount,supplier,invoice_number').eq('store_id', STORE_ID).gte('expense_date', startDate).lte('expense_date', endDate).order('expense_date'),
       supabase.from('invoices').select('invoice_date,supplier,invoice_number,total_amount,total_vat,status').eq('store_id', STORE_ID).in('status', ['received', 'paid']).gte('invoice_date', startDate).lte('invoice_date', endDate).order('invoice_date'),
       supabase.from('wage_payments').select('paid_date,period,gross_pay,net_pay,uif_employee,uif_employer,employee_id').eq('store_id', STORE_ID).gte('paid_date', startDate).lte('paid_date', endDate).order('paid_date'),
