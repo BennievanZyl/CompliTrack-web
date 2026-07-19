@@ -397,6 +397,9 @@ export default function WagesPage() {
                               <span style={{ fontSize: '11px', fontWeight: '700', padding: '3px 10px', borderRadius: '100px', background: adv.repayment_status === 'paid' ? '#dcfce7' : '#fef3c7', color: adv.repayment_status === 'paid' ? '#166634' : '#92400e' }}>
                                 {adv.repayment_status === 'paid' ? 'Deducted' : 'Outstanding'}
                               </span>
+                              {adv.repayment_status === 'paid' && (
+                                <button onClick={async () => { if (!confirm('Revert to Outstanding?')) return; await supabase.from('employee_advances').update({ repayment_status: 'outstanding', payroll_period_id: null }).eq('id', adv.id); await loadAll() }} style={{ fontSize: '11px', fontWeight: '700', color: '#d97706', background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: '6px', padding: '2px 8px', cursor: 'pointer', marginLeft: '6px' }}>↩ Revert</button>
+                              )}
                             </td>
                           </tr>
                         )
