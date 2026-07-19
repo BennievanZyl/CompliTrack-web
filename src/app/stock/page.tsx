@@ -1,10 +1,10 @@
 'use client'
+import { useStoreContext } from '@/lib/store-context'
 
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 
-const STORE_ID = '05328298-fc27-4c9f-b091-bb7f6598b601'
 
 type StockCategory = { id: string; name: string; color: string; sort_order: number }
 type StockItem = { id: string; category: string | null; name: string; description: string; unit: string; cost_price: number; price: number; par_level: number; current_qty: number; is_active: boolean; sort_order: number; supplier: string | null; on_daily_sheet: boolean; is_catch_weight: boolean; kg_price: number; avg_weight_kg: number; parent_item_id: string | null; portion_size: number | null }
@@ -92,6 +92,8 @@ function Modal({ show, onClose, title, children, maxWidth = '480px' }: { show: b
 }
 
 export default function StockPage() {
+  const { storeId: STORE_ID, orgId: ORG_ID, ready: ctxReady } = useStoreContext()
+
   const router = useRouter()
   const [tab, setTab] = useState('counts')
   const [categories, setCategories] = useState<StockCategory[]>([])
