@@ -1,10 +1,10 @@
 'use client'
+import { useStoreContext } from '@/lib/store-context'
 
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 
-const STORE_ID = '05328298-fc27-4c9f-b091-bb7f6598b601'
 
 type Store = {
   id: string; name: string; city: string; phone: string | null; email: string | null
@@ -51,6 +51,7 @@ function expiryBadge(dateStr: string | null) {
 }
 
 export default function SettingsPage() {
+  const { storeId: STORE_ID, orgId: ORG_ID, ready: ctxReady } = useStoreContext()
   const router = useRouter()
   const [tab, setTab] = useState('profile')
   const [store, setStore] = useState<Store | null>(null)
@@ -91,14 +92,14 @@ export default function SettingsPage() {
 
   const SECTIONS = [...new Set(templates.map(t => t.section)), 'Opening', 'During Service', 'Closing', 'Cleaning', 'Safety'].filter((v, i, a) => a.indexOf(v) === i)
 
-  useEffect(() => { loadAll(); supabase.auth.getUser().then(({ data }) => setUserEmail(data.user?.email || '')) }, [])
+  useEffect(() => { if (ctxReady && STORE_ID) { loadAll(); supabase.auth.getUser().then(({ data }) => setUserEmail(data.user?.email || '')) } }, [ctxReady, STORE_ID])
 
   async function loadAll() {
     setLoading(true)
     const [storeRes, templRes, catRes, permsRes] = await Promise.all([
       supabase.from('stores').select('*').eq('id', STORE_ID).single(),
       supabase.from('checklist_templates').select('*').eq('store_id', STORE_ID).order('section').order('sort_order'),
-      supabase.from('expense_categories').select('*').eq('organisation_id', 'e903386b-133a-4bad-b054-ef7ef616a3ff').order('sort_order'),
+      supabase.from('expense_categories').select('*').eq('organisation_id', ORG_ID).order('sort_order'),
       supabase.from('store_role_permissions').select('*').eq('store_id', STORE_ID),
     ])
     if (storeRes.data) { setStore(storeRes.data); setForm(storeRes.data) }
@@ -170,7 +171,7 @@ export default function SettingsPage() {
       await supabase.from('expense_categories').update({ name: catForm.name, colour: catForm.colour }).eq('id', editCat.id)
       setEditCat(null)
     } else {
-      await supabase.from('expense_categories').insert({ organisation_id: 'e903386b-133a-4bad-b054-ef7ef616a3ff', name: catForm.name, key, colour: catForm.colour, is_active: true, sort_order: maxOrder + 1 })
+      await supabase.from('expense_categories').insert({ organisation_id: ORG_ID, name: catForm.name, key, colour: catForm.colour, is_active: true, sort_order: maxOrder + 1 })
     }
     setCatForm({ name: '', colour: '#10b981' })
     setShowCatForm(false)
