@@ -58,6 +58,7 @@ const PAYOUT_CATEGORIES = [
   'Cleaning Supplies',
   'Refund to Customer',
   'Delivery / Transport',
+  'EFT Payment',
   'Utilities',
   'Other',
 ];
@@ -289,7 +290,10 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
       setCashUp(null);
       // Load previous day float as starting float
       const prevDate = new Date(targetDate); prevDate.setDate(prevDate.getDate() - 1);
-      const { data: prevCashUp } = await supabase.from('cash_ups').select('float_total').eq('store_id', storeId).eq('cash_up_date', prevDate.toISOString().split('T')[0]).maybeSingle();
+      // Use most recent prior cashup (not just yesterday) — handles weekends/missing days
+      const prevDateStr = prevDate.toISOString().split('T')[0];
+      const { data: prevCashUps } = await supabase.from('cash_ups').select('float_total, cash_up_date').eq('store_id', storeId).lt('cash_up_date', selectedDate).order('cash_up_date', { ascending: false }).limit(1);
+      const prevCashUp = prevCashUps?.[0];
       if (prevCashUp?.float_total) setRecon(p => ({ ...p, previous_float: prevCashUp.float_total.toString() }));
     }
     const { data: hist } = await supabase.from('cash_ups').select('*').eq('store_id', storeId).order('cash_up_date', { ascending: false }).limit(14);
