@@ -120,9 +120,10 @@ export default function AnalyticsPage(){
       supabase.from('wage_payments').select('gross_pay').eq('store_id',STORE_ID).gte('paid_date',lmStart).lte('paid_date',lmEnd),
       // Compliance: fetch last 14 daily sessions regardless of selected period (rolling window)
       supabase.from('daily_sessions').select('session_date,id').eq('store_id',STORE_ID).eq('session_type','daily').order('session_date',{ascending:false}).limit(14),
-      // Estimated wages: employee hourly rates + attendance hours for period
+      // Estimated wages: employee hourly rates for this store only
       supabase.from('employees').select('id,hourly_rate').eq('store_id',STORE_ID).eq('is_active',true),
-      supabase.from('attendance').select('employee_id,hours_worked').gte('work_date',start).lte('work_date',end),
+      // placeholder — attendance fetched after we have employee IDs (prevents cross-store data leak)
+      Promise.resolve({data:[]}),
     ])
 
     const dailyCashUps:Record<string,number>={}
@@ -137,8 +138,19 @@ export default function AnalyticsPage(){
     const uifEmployer=(wagesRes.data||[]).reduce((s:number,r:any)=>s+Number(r.uif_employer||0),0)
     // Estimated wages from current hours × hourly rate (used when payroll not yet marked paid)
     const empRateMap:Record<string,number>={}
-    for(const e of empRatesRes.data||[])empRateMap[e.id]=Number(e.hourly_rate||0)
-    const estimatedWages=(attendHoursRes.data||[]).reduce((s:number,a:any)=>s+(Number(a.hours_worked||0)*(empRateMap[a.employee_id]||0)),0)
+    const empIds:string[]=[]
+    for(const e of empRatesRes.data||[]){empRateMap[e.id]=Number(e.hourly_rate||0);empIds.push(e.id)}
+    // Fetch attendance only for this store's employees (scoped query — no full-table scan)
+    let estimatedWages=0
+    if(empIds.length>0&&wagesGross===0){
+      const{data:attendData}=await supabase
+        .from('attendance')
+        .select('employee_id,hours_worked')
+        .in('employee_id',empIds)
+        .gte('work_date',start)
+        .lte('work_date',end)
+      estimatedWages=(attendData||[]).reduce((s:number,a:any)=>s+(Number(a.hours_worked||0)*(empRateMap[a.employee_id]||0)),0)
+    }
     // Use actual paid wages if available; otherwise fall back to live estimate
     const displayWages=wagesGross>0?wagesGross:estimatedWages
     const isWageEstimate=wagesGross===0&&estimatedWages>0
