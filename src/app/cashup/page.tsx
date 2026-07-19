@@ -271,6 +271,12 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
       populateForm(existingCashUp);
       await loadPayouts(existingCashUp.id);
       if (existingCashUp.num_tills) setNumTills(existingCashUp.num_tills);
+      // If today's cashup was started without a previous float, backfill it now
+      if (!existingCashUp.previous_float || existingCashUp.previous_float === 0) {
+        const { data: prevData } = await supabase.from('cash_ups').select('float_total').eq('store_id', storeId).lt('cash_up_date', targetDate).order('cash_up_date', { ascending: false }).limit(1);
+        const prevFloat = prevData?.[0]?.float_total;
+        if (prevFloat) setRecon(p => ({ ...p, previous_float: prevFloat.toString() }));
+      }
       // Restore till denominations: use saved till_data if available, else fall back to legacy r200/r100 columns
       if (existingCashUp.till_data?.length) {
         setTillDenoms(existingCashUp.till_data);
@@ -292,7 +298,6 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
       const prevDateStr = prevDate.toISOString().split('T')[0];
       const { data: prevCashUps } = await supabase.from('cash_ups').select('float_total, cash_up_date').eq('store_id', storeId).lt('cash_up_date', targetDate).order('cash_up_date', { ascending: false }).limit(1);
       const prevCashUp = prevCashUps?.[0];
-      console.log('[cashup] prevFloat query storeId:', storeId, 'targetDate:', targetDate, 'result:', prevCashUp);
       // Use != null so float_total of 0 still sets the field (previously 0 was falsy and got skipped)
       if (prevCashUp && prevCashUp.float_total != null) {
         setRecon(p => ({ ...p, previous_float: prevCashUp.float_total.toString() }));
