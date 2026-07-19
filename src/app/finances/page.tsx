@@ -3,6 +3,8 @@ import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 
+const STORE_ID = '05328298-fc27-4c9f-b091-bb7f6598b601'
+const ORG_ID = 'e903386b-133a-4bad-b054-ef7ef616a3ff'
 const VAT_RATE = 0.15
 
 const TABS = ['Summary', 'Cash-Ups / Sales', 'Supplier Bills', 'Quick Expenses', 'Food Cost', 'History']
@@ -85,8 +87,6 @@ const emptyQuick = () => ({
 })
 
 export default function FinancesPage() {
-  const { storeId: STORE_ID, orgId: ORG_ID, ready: ctxReady } = useStoreContext()
-
   const router = useRouter()
   const [tab, setTab] = useState(0)
   const [historyInvoices, setHistoryInvoices] = useState<Invoice[]>([])
