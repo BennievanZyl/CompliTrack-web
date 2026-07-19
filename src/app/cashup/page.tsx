@@ -243,6 +243,7 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
   const [perf, setPerf] = useState({ customer_count: '' });
   const [notes, setNotes] = useState('');
   const [signedByName, setSignedByName] = useState('');
+  const [cashierName, setCashierName] = useState('');
 
   useEffect(() => { checkAuthAndLoad(); }, []);
 
@@ -411,7 +412,7 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
     }
     setSaving(true);
     try {
-      const payload = { ...buildPayload('signed_off'), signed_by_name: signedByName.trim(), signed_off_at: new Date().toISOString() };
+      const payload = { ...buildPayload('signed_off'), signed_by_name: signedByName.trim(), cashier_name: cashierName.trim() || signedByName.trim(), signed_off_at: new Date().toISOString() };
       if (cashUp?.id) { await supabase.from('cash_ups').update(payload).eq('id', cashUp.id); }
       else { const { data } = await supabase.from('cash_ups').insert(payload).select().single(); if (data) setCashUp(data); }
       await loadCashUp();
