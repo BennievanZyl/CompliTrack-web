@@ -1,10 +1,10 @@
 'use client'
-import { useStoreContext } from '@/lib/store-context'
 
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 
+const STORE_ID = '05328298-fc27-4c9f-b091-bb7f6598b601'
 
 type Store = {
   id: string; name: string; city: string; phone: string | null; email: string | null
@@ -51,8 +51,6 @@ function expiryBadge(dateStr: string | null) {
 }
 
 export default function SettingsPage() {
-  const { storeId: STORE_ID, orgId: ORG_ID, ready: ctxReady } = useStoreContext()
-
   const router = useRouter()
   const [tab, setTab] = useState('profile')
   const [store, setStore] = useState<Store | null>(null)
