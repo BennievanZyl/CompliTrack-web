@@ -4,6 +4,8 @@ import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 
+const STORE_ID = '05328298-fc27-4c9f-b091-bb7f6598b601';
+const ORG_ID = 'e903386b-133a-4bad-b054-ef7ef616a3ff';
 const PRIMARY = '#1a5c38';
 const DARK = '#0a1f12';
 
@@ -158,8 +160,6 @@ function Toggle({ value, onChange, label, color = PRIMARY }: { value: boolean; o
 
 // ─── MAIN PAGE ────────────────────────────────────────────────────────────────
 export default function PeoplePage() {
-  const { storeId: STORE_ID, orgId: ORG_ID, ready: ctxReady } = useStoreContext()
-
   const router = useRouter();
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
