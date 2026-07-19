@@ -97,6 +97,7 @@ export default function AnalyticsPage(){
   const [compareData,setCompareData]=useState<any>(null)
 
   async function fetchAnalytics(start:string,end:string){
+    if(!STORE_ID) return null
     const lmDate=new Date(start);lmDate.setMonth(lmDate.getMonth()-1)
     const lmStart=lmDate.toISOString().slice(0,7)+'-01'
     const lmEnd=new Date(lmDate.getFullYear(),lmDate.getMonth()+1,0).toISOString().slice(0,10)
