@@ -300,26 +300,30 @@ export default function ReportsPage() {
   const card: React.CSSProperties = { background: '#fff', borderRadius: 16, border: '1px solid #eef2ee', padding: 20, boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }
 
   function ReportCard({ icon, title, description, reportKey, onCSV, onExcel, onPDF }: { icon: string; title: string; description: string; reportKey: string; onCSV: () => Promise<void>; onExcel: () => Promise<void>; onPDF: () => Promise<void> }) {
-    const isLoading = (k: string) => loading === reportKey + k
-    const btn = (label: string, color: string, fn: () => void, k: string) => (
-      <button onClick={fn} disabled={loading !== null} style={{ padding: '7px 14px', background: loading !== null ? '#e5e7eb' : color, color: loading !== null ? '#9ca3af' : '#fff', border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: loading !== null ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}>
-        {isLoading(k) ? '⏳' : null}{label}
-      </button>
-    )
+    const [fmt, setFmt] = React.useState('excel')
+    const isActive = loading === reportKey + fmt
+    const generate = () => {
+      if (fmt === 'csv') run(reportKey + 'csv', onCSV)
+      else if (fmt === 'excel') run(reportKey + 'excel', onExcel)
+      else run(reportKey + 'pdf', onPDF)
+    }
     return (
-      <div style={{ ...card, display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-          <span style={{ fontSize: 28 }}>{icon}</span>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontWeight: 700, fontSize: 14, color: '#111', marginBottom: 3 }}>{title}</div>
-            <div style={{ fontSize: 12, color: '#9ca3af', lineHeight: 1.4 }}>{description}</div>
-          </div>
+      <div style={{ ...card, display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px' }}>
+        <span style={{ fontSize: 24, flexShrink: 0 }}>{icon}</span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 700, fontSize: 13, color: '#111', marginBottom: 2 }}>{title}</div>
+          <div style={{ fontSize: 11, color: '#9ca3af', lineHeight: 1.4 }}>{description}</div>
         </div>
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' as const }}>
-          {btn('CSV', '#16a34a', () => run(reportKey + 'csv', onCSV), 'csv')}
-          {btn('Excel', '#2563eb', () => run(reportKey + 'excel', onExcel), 'excel')}
-          {btn('PDF', '#dc2626', () => run(reportKey + 'pdf', onPDF), 'pdf')}
-        </div>
+        <select value={fmt} onChange={e => setFmt(e.target.value)} disabled={loading !== null}
+          style={{ fontSize: 12, border: '1px solid #e5e7eb', borderRadius: 6, padding: '5px 8px', cursor: 'pointer', background: '#f9fafb', flexShrink: 0 }}>
+          <option value="excel">Excel</option>
+          <option value="csv">CSV</option>
+          <option value="pdf">PDF</option>
+        </select>
+        <button onClick={generate} disabled={loading !== null}
+          style={{ padding: '8px 14px', background: loading !== null ? '#e5e7eb' : PRIMARY, color: loading !== null ? '#9ca3af' : '#fff', border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: loading !== null ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap' as const, flexShrink: 0 }}>
+          {isActive ? '⏳' : '⬇'} Download
+        </button>
       </div>
     )
   }
@@ -341,13 +345,28 @@ export default function ReportsPage() {
           <div style={{ color: '#fff', fontWeight: 800, fontSize: 22 }}>📋 Reports</div>
           <div style={{ color: 'rgba(255,255,255,0.65)', fontSize: 13 }}>Financial · Labour · Stock · Compliance · HR — download as CSV, Excel or PDF</div>
         </div>
-        {/* Global date range */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(255,255,255,0.1)', borderRadius: 10, padding: '8px 14px' }}>
-          <span style={{ color: 'rgba(255,255,255,0.7)', fontSize: 12, fontWeight: 600 }}>FROM</span>
-          <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: 13, cursor: 'pointer', outline: 'none' }} />
-          <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: 12 }}>—</span>
-          <span style={{ color: 'rgba(255,255,255,0.7)', fontSize: 12, fontWeight: 600 }}>TO</span>
-          <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: 13, cursor: 'pointer', outline: 'none' }} />
+        {/* Date picker — single or range */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-end' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(255,255,255,0.1)', borderRadius: 10, padding: '8px 14px' }}>
+            {singleDate ? (
+              <>
+                <span style={{ color: 'rgba(255,255,255,0.7)', fontSize: 12, fontWeight: 600 }}>DATE</span>
+                <input type="date" value={startDate} onChange={e => handleStartDate(e.target.value)} style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: 13, cursor: 'pointer', outline: 'none' }} />
+              </>
+            ) : (
+              <>
+                <span style={{ color: 'rgba(255,255,255,0.7)', fontSize: 12, fontWeight: 600 }}>FROM</span>
+                <input type="date" value={startDate} onChange={e => handleStartDate(e.target.value)} style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: 13, cursor: 'pointer', outline: 'none' }} />
+                <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: 12 }}>—</span>
+                <span style={{ color: 'rgba(255,255,255,0.7)', fontSize: 12, fontWeight: 600 }}>TO</span>
+                <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: 13, cursor: 'pointer', outline: 'none' }} />
+              </>
+            )}
+          </div>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', color: 'rgba(255,255,255,0.65)', fontSize: 11 }}>
+            <input type="checkbox" checked={singleDate} onChange={e => handleSingleDate(e.target.checked)} style={{ cursor: 'pointer' }} />
+            Single date
+          </label>
         </div>
       </div>
 
@@ -365,7 +384,7 @@ export default function ReportsPage() {
 
         {/* FINANCIAL */}
         <SectionHeader title="Financial Reports" icon="💰" />
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(320px,1fr))', gap: 14, marginBottom: 28 }}>
+        <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 8, marginBottom: 28 }}>
           <ReportCard icon="🏦" title="Cash-Up Sales Report" description="Daily sales totals with incl/excl VAT split, payment methods, cashier names." reportKey="sales" onCSV={() => salesReport('csv')} onExcel={() => salesReport('excel')} onPDF={() => salesReport('pdf')} />
           <ReportCard icon="📄" title="Expenses Report" description="Quick expenses + supplier invoices combined, grouped by date with VAT detail." reportKey="expenses" onCSV={() => expensesReport('csv')} onExcel={() => expensesReport('excel')} onPDF={() => expensesReport('pdf')} />
           <ReportCard icon="🧾" title="Supplier Invoice Report" description="All received/paid supplier bills with invoice numbers, amounts and VAT." reportKey="invoices" onCSV={() => invoiceReport('csv')} onExcel={() => invoiceReport('excel')} onPDF={() => invoiceReport('pdf')} />
@@ -374,7 +393,7 @@ export default function ReportsPage() {
 
         {/* LABOUR */}
         <SectionHeader title="Labour & Payroll" icon="👥" />
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(320px,1fr))', gap: 14, marginBottom: 28 }}>
+        <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 8, marginBottom: 28 }}>
           <ReportCard icon="💵" title="Monthly Payroll Report" description="Gross pay, UIF deductions, net pay per employee. Suitable for labour broker." reportKey="payroll" onCSV={() => payrollReport('csv')} onExcel={() => payrollReport('excel')} onPDF={() => payrollReport('pdf')} />
           <ReportCard icon="🕐" title="Attendance Register" description="Full clock-in/clock-out register with hours worked and late flags per employee." reportKey="attendance" onCSV={() => attendanceReport('csv')} onExcel={() => attendanceReport('excel')} onPDF={() => attendanceReport('pdf')} />
           <ReportCard icon="🏛️" title="UIF Schedule (SARS)" description="Employee + employer UIF contributions per employee — formatted for SARS submission." reportKey="uif" onCSV={() => uifReport('csv')} onExcel={() => uifReport('excel')} onPDF={() => uifReport('pdf')} />
@@ -383,7 +402,7 @@ export default function ReportsPage() {
 
         {/* STOCK */}
         <SectionHeader title="Stock Reports" icon="📦" />
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(320px,1fr))', gap: 14, marginBottom: 28 }}>
+        <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 8, marginBottom: 28 }}>
           <ReportCard icon="📊" title="Stock Valuation" description="Current on-hand quantities × cost price for all active stock items. Point-in-time." reportKey="stockval" onCSV={() => stockValuationReport('csv')} onExcel={() => stockValuationReport('excel')} onPDF={() => stockValuationReport('pdf')} />
           <ReportCard icon="🚚" title="Purchases / GRV Report" description="All goods received with quantities, unit costs and supplier per line." reportKey="purchases" onCSV={() => purchasesReport('csv')} onExcel={() => purchasesReport('excel')} onPDF={() => purchasesReport('pdf')} />
           <ReportCard icon="🗑️" title="Wastage Report" description="All stock written off with quantities, costs and reasons recorded." reportKey="wastage" onCSV={() => wastageReport('csv')} onExcel={() => wastageReport('excel')} onPDF={() => wastageReport('pdf')} />
@@ -392,14 +411,14 @@ export default function ReportsPage() {
 
         {/* COMPLIANCE */}
         <SectionHeader title="Compliance Reports" icon="✅" />
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(320px,1fr))', gap: 14, marginBottom: 28 }}>
+        <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 8, marginBottom: 28 }}>
           <ReportCard icon="📋" title="Compliance Session History" description="Daily compliance scores, pass/fail status and session duration for every session." reportKey="compliance" onCSV={() => complianceReport('csv')} onExcel={() => complianceReport('excel')} onPDF={() => complianceReport('pdf')} />
           <ReportCard icon="🌡️" title="Temperature Log" description="Full equipment temperature records with compliance flags and violations highlighted." reportKey="temp" onCSV={() => temperatureReport('csv')} onExcel={() => temperatureReport('excel')} onPDF={() => temperatureReport('pdf')} />
         </div>
 
         {/* HR */}
         <SectionHeader title="HR Reports" icon="👤" />
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(320px,1fr))', gap: 14, marginBottom: 28 }}>
+        <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 8, marginBottom: 28 }}>
           <ReportCard icon="👥" title="Employee List" description="Full employee register with ID numbers, roles, contact details and pay rates." reportKey="employees" onCSV={() => employeeListReport('csv')} onExcel={() => employeeListReport('excel')} onPDF={() => employeeListReport('pdf')} />
         </div>
 
