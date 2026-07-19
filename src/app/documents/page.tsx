@@ -1,10 +1,10 @@
 'use client'
+import { useStoreContext } from '@/lib/store-context'
 
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 
-const STORE_ID = '05328298-fc27-4c9f-b091-bb7f6598b601'
 
 const CATEGORIES = [
   { key: 'fire_safety',  label: 'Fire Safety',        icon: '🔥', color: '#fef2f2', border: '#fecaca', headerBg: '#fee2e2', headerColor: '#991b1b', required: ['Fire extinguisher certificate', 'Fire evacuation plan'] },
@@ -28,6 +28,8 @@ function getExpiryStatus(expiryDate: string | null) {
 }
 
 export default function DocumentsPage() {
+  const { storeId: STORE_ID, orgId: ORG_ID, ready: ctxReady } = useStoreContext()
+
   const router = useRouter()
   const [documents, setDocuments]         = useState<any[]>([])
   const [loading, setLoading]             = useState(true)
