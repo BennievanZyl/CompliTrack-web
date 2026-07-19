@@ -228,7 +228,7 @@ export default function AnalyticsPage(){
     // Pie slices for expense breakdown
     const pieSlices=[
       {label:'Food Cost',value:foodCostAmount,color:'#ef4444'},
-      {label:data.isWageEstimate?'Wages (est.)':'Wages',value:data.displayWages,color:'#8b5cf6',est:data.isWageEstimate},
+      {label:isWageEstimate?'Wages (est.)':'Wages',value:displayWages,color:'#8b5cf6',est:isWageEstimate},
       ...Object.entries(expByCat).map(([,c])=>({label:c.name,value:c.total,color:c.color})),
     ].filter(s=>s.value>0)
 
