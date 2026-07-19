@@ -1,11 +1,10 @@
 'use client';
+import { useStoreContext } from '@/lib/store-context'
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 
-const STORE_ID = '05328298-fc27-4c9f-b091-bb7f6598b601';
-const ORG_ID = 'e903386b-133a-4bad-b054-ef7ef616a3ff';
 const PRIMARY = '#1a5c38';
 const DARK = '#0a1f12';
 const EMPLOYER_NAME = 'Mochachos Hartswater (Pty) Ltd';
@@ -49,6 +48,7 @@ function ModalWrap({ children, onClose }: { children: React.ReactNode; onClose: 
 }
 
 export default function AttendancePage() {
+  const { storeId: STORE_ID, orgId: ORG_ID, ready: ctxReady } = useStoreContext()
   const router = useRouter();
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [todayRecords, setTodayRecords] = useState<AttendanceRecord[]>([]);
@@ -135,7 +135,7 @@ export default function AttendancePage() {
     setPayrollLoaded(true);
   }
 
-  useEffect(() => { if (activeTab === 'payroll') loadPayrollData(); }, [activeTab, payrollMonth]);
+  useEffect(() => { if (activeTab === 'payroll' && STORE_ID) loadPayrollData(); }, [activeTab, payrollMonth, STORE_ID]);
 
   const holidaySet = new Set(holidays.map(h => h.holiday_date));
   function dayMultiplier(dateStr: string) {
@@ -639,7 +639,7 @@ export default function AttendancePage() {
   const [manualSaving, setManualSaving] = useState(false);
   const today = new Date().toISOString().split('T')[0];
 
-  useEffect(() => { checkAuthAndLoad(); }, []);
+  useEffect(() => { if (ctxReady && STORE_ID) checkAuthAndLoad(); }, [ctxReady, STORE_ID]);
 
   async function checkAuthAndLoad() {
     const { data: { user } } = await supabase.auth.getUser();
@@ -673,7 +673,7 @@ export default function AttendancePage() {
     setHistoryLoading(false);
   }
 
-  useEffect(() => { if (activeTab === 'history') loadHistory(); }, [activeTab, selectedEmployee]);
+  useEffect(() => { if (activeTab === 'history' && STORE_ID) loadHistory(); }, [activeTab, selectedEmployee, STORE_ID]);
 
   async function clockIn(employeeId: string) {
     setSaving(employeeId);
