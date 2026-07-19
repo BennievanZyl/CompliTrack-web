@@ -114,13 +114,8 @@ export default function WagesPage() {
         })
       }
 
-      // Mark advances as paid and link to this payroll period
-      for (const adv of empAdvances) {
-        await supabase.from('employee_advances').update({
-          repayment_status: 'paid',
-          payroll_period_id: selectedPeriod.id,
-        }).eq('id', adv.id)
-      }
+      // NOTE: advances are NOT marked paid here — only when "Mark as Paid" is clicked
+      // This allows re-calculation without incorrectly settling advances
     }
     await loadAll()
     setCalculating(false)
@@ -135,8 +130,25 @@ export default function WagesPage() {
 
   async function markPaid() {
     if (!selectedPeriod) return
+    // Step 1: mark period and runs as paid
     await supabase.from('payroll_periods').update({ status: 'paid', paid_at: new Date().toISOString() }).eq('id', selectedPeriod.id)
     await supabase.from('payroll_runs').update({ status: 'paid' }).eq('payroll_period_id', selectedPeriod.id)
+
+    // Step 2: NOW mark deducted advances as paid (only on actual payment, not on calculate)
+    const runsForPeriod = runs.filter(r => r.payroll_period_id === selectedPeriod.id && r.advances_deducted > 0)
+    for (const run of runsForPeriod) {
+      const empAdvances = advances.filter(a =>
+        a.employee_id === run.employee_id &&
+        a.repayment_status === 'outstanding' &&
+        a.deduct_from_wages === true
+      )
+      for (const adv of empAdvances) {
+        await supabase.from('employee_advances').update({
+          repayment_status: 'paid',
+          payroll_period_id: selectedPeriod.id,
+        }).eq('id', adv.id)
+      }
+    }
     await loadAll()
   }
 
@@ -351,6 +363,11 @@ export default function WagesPage() {
               )}
 
               <div style={{ background: 'white', borderRadius: '20px', border: '1.5px solid #eef2ee', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
+                {advances.filter(a => a.repayment_status === 'paid').length > 0 && (
+                  <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 10, padding: 12, marginBottom: 16, fontSize: 13, color: '#92400e' }}>
+                    <strong>⚠ Incorrectly settled advances?</strong> If advances were marked paid by a calculate run (not by actual payment), use the Revert button below to reset them to Outstanding.
+                  </div>
+                )}
                 {advances.length === 0 ? (
                   <div style={{ padding: '48px', textAlign: 'center', color: '#9ca3af' }}>No advances logged yet</div>
                 ) : (
