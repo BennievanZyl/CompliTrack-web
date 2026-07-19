@@ -246,13 +246,14 @@ export default function AnalyticsPage(){
   }
 
   const load=useCallback(async()=>{
+    if(!STORE_ID) return
     setLoading(true)
     const[s,e]=monthRange(month)
     const d=await fetchAnalytics(s,e)
     setData(d)
     if(view==='compare'){const[cs,ce]=monthRange(compareMonth);setCompareData(await fetchAnalytics(cs,ce))}
     setLoading(false)
-  },[month,view,compareMonth])
+  },[month,view,compareMonth,STORE_ID])
 
   useEffect(()=>{load()},[load])
 
