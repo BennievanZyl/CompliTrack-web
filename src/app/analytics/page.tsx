@@ -1,9 +1,9 @@
 'use client'
+import { useStoreContext } from '@/lib/store-context'
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 
-const STORE_ID = '05328298-fc27-4c9f-b091-bb7f6598b601'
 const PRIMARY = '#1a5c38'
 const DARK = '#0a1f12'
 const VAT = 0.15
@@ -87,6 +87,7 @@ function ComplianceTrend({sessions}:{sessions:{date:string;pct:number}[]}){
 }
 
 export default function AnalyticsPage(){
+  const { storeId: STORE_ID, ready: ctxReady } = useStoreContext()
   const router=useRouter()
   const [month,setMonth]=useState(thisMonth())
   const [view,setView]=useState<'period'|'compare'>('period')
