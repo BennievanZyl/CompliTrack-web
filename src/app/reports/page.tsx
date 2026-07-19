@@ -92,10 +92,15 @@ export default function ReportsPage() {
   const [startDate, setStartDate] = useState(lastMonthStart())
   const [endDate, setEndDate] = useState(lastMonthEnd())
   const [loading, setLoading] = useState<string | null>(null)
+  const [singleDate, setSingleDate] = useState(false)
+  const handleStartDate = (val: string) => { setStartDate(val); if (singleDate) setEndDate(val) }
+  const handleSingleDate = (on: boolean) => { setSingleDate(on); if (on) setEndDate(startDate) }
+  const guard = () => { if (!STORE_ID) { alert('Store not ready — try again in a moment.'); return false } return true }
 
   const dateLabel = `${startDate} to ${endDate}`
 
   async function run(key: string, fn: () => Promise<void>) {
+    if (!guard()) return
     setLoading(key); try { await fn() } catch (e: any) { alert('Error: ' + e.message) } finally { setLoading(null) }
   }
 
