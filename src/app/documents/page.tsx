@@ -13,6 +13,8 @@ const CATEGORIES = [
   { key: 'licenses',     label: 'Licenses & Permits',  icon: '📋', color: '#faf5ff', border: '#e9d5ff', headerBg: '#ede9fe', headerColor: '#6d28d9', required: ['Business license', 'Food handling permit'] },
   { key: 'insurance',    label: 'Insurance',           icon: '🛡️', color: '#f0fdf4', border: '#bbf7d0', headerBg: '#dcfce7', headerColor: '#166534', required: ['Public liability insurance'] },
   { key: 'staff',        label: 'Staff Certificates',  icon: '👤', color: '#fffbeb', border: '#fde68a', headerBg: '#fef3c7', headerColor: '#92400e', required: ['Food safety certificates', 'First aid certificates'] },
+  { key: 'uif',          label: 'UIF',                 icon: '🏦', color: '#f0f9ff', border: '#bae6fd', headerBg: '#e0f2fe', headerColor: '#075985', required: ['UIF registration certificate', 'UIF payment record'] },
+  { key: 'workers_comp', label: 'Workers Compensation', icon: '🦺', color: '#fdf4ff', border: '#e9d5ff', headerBg: '#f3e8ff', headerColor: '#7e22ce', required: ['Good standing certificate', 'Proof of payment'] },
 ]
 
 function getExpiryStatus(expiryDate: string | null) {
