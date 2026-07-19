@@ -292,7 +292,11 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
       const prevDateStr = prevDate.toISOString().split('T')[0];
       const { data: prevCashUps } = await supabase.from('cash_ups').select('float_total, cash_up_date').eq('store_id', storeId).lt('cash_up_date', targetDate).order('cash_up_date', { ascending: false }).limit(1);
       const prevCashUp = prevCashUps?.[0];
-      if (prevCashUp?.float_total) setRecon(p => ({ ...p, previous_float: prevCashUp.float_total.toString() }));
+      console.log('[cashup] prevFloat query storeId:', storeId, 'targetDate:', targetDate, 'result:', prevCashUp);
+      // Use != null so float_total of 0 still sets the field (previously 0 was falsy and got skipped)
+      if (prevCashUp && prevCashUp.float_total != null) {
+        setRecon(p => ({ ...p, previous_float: prevCashUp.float_total.toString() }));
+      }
     }
     const { data: hist } = await supabase.from('cash_ups').select('*').eq('store_id', storeId).order('cash_up_date', { ascending: false }).limit(14);
     setHistory(hist || []);
