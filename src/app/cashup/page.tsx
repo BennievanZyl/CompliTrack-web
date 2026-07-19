@@ -5,9 +5,6 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { Suspense } from 'react';
 
-const DEFAULT_STORE_ID = '05328298-fc27-4c9f-b091-bb7f6598b601';
-const DEFAULT_ORG_ID = 'e903386b-133a-4bad-b054-ef7ef616a3ff';
-const DEFAULT_STORE_NAME = 'Mochachos Hartswater';
 const PRIMARY = '#1a5c38';
 const DARK = '#0a1f12';
 
@@ -1056,9 +1053,9 @@ function CashUpContent() {
   const searchParams = useSearchParams();
   const storeParam = searchParams.get('store');
   const [role, setRole] = useState<string | null>(null);
-  const [storeId, setStoreId] = useState(DEFAULT_STORE_ID);
-  const [orgId, setOrgId] = useState(DEFAULT_ORG_ID);
-  const [storeName, setStoreName] = useState(DEFAULT_STORE_NAME);
+  const [storeId, setStoreId] = useState('');
+  const [orgId, setOrgId] = useState('');
+  const [storeName, setStoreName] = useState('');
   const [ready, setReady] = useState(false);
 
   useEffect(() => { detectContext(); }, []);
@@ -1066,11 +1063,17 @@ function CashUpContent() {
   async function detectContext() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { setReady(true); return; }
-    const { data: profile } = await supabase.from('profiles').select('role, organisation_id').eq('id', user.id).single();
+    const { data: profile } = await supabase.from('profiles').select('role, store_id').eq('id', user.id).single();
     setRole(profile?.role || null);
     if (storeParam) {
-      const { data: store } = await supabase.from('stores').select('id, name, organisation_id').eq('id', storeParam).single();
-      if (store) { setStoreId(store.id); setStoreName(store.name); setOrgId(store.organisation_id); }
+      // Franchise admin opened a specific store via ?store=xxx
+      const { data: store } = await supabase.from('stores').select('id, name').eq('id', storeParam).single();
+      if (store) { setStoreId(store.id); setStoreName(store.name); }
+    } else if (profile?.store_id) {
+      // Normal user — use their own store
+      setStoreId(profile.store_id);
+      const { data: store } = await supabase.from('stores').select('name').eq('id', profile.store_id).single();
+      if (store) setStoreName(store.name);
     }
     setReady(true);
   }
