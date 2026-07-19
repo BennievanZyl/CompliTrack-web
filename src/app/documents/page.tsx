@@ -73,9 +73,17 @@ export default function DocumentsPage() {
   }
 
   async function handleView(doc: any) {
-    const { data } = await supabase.storage.from('store-documents').createSignedUrl(doc.file_url, 300)
+    // file_url may be a full public URL (old app uploads) or just a path (new uploads)
+    // createSignedUrl needs just the path within the bucket
+    let storagePath = doc.file_url as string
+    if (storagePath.startsWith('http')) {
+      // Extract path after /store-documents/
+      const match = storagePath.match(/\/store-documents\/(.+?)(\?|$)/)
+      storagePath = match ? match[1] : storagePath
+    }
+    const { data } = await supabase.storage.from('store-documents').createSignedUrl(storagePath, 3600)
     if (data?.signedUrl) { setViewerUrl(data.signedUrl); setViewerType(doc.file_type) }
-    else alert('Could not open file.')
+    else alert('Could not open file. The file may not exist in storage yet.')
   }
 
   async function handleDelete(id: string, fileUrl: string) {
