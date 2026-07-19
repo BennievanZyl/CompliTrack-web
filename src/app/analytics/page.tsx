@@ -107,7 +107,7 @@ export default function AnalyticsPage(){
     const invIds=(invIdsRes.data||[]).map((r:any)=>r.id)
     const lmInvIds=(lmInvIdsRes.data||[]).map((r:any)=>r.id)
 
-    const[cashUpsRes,expRes,invLinesRes,wagesRes,purchRes,wastRes,countsRes,lmExpRes,lmInvLinesRes,lmWagesRes,sessionsRes]=await Promise.all([
+    const[cashUpsRes,expRes,invLinesRes,wagesRes,purchRes,wastRes,countsRes,lmExpRes,lmInvLinesRes,lmWagesRes,sessionsRes,empRatesRes,attendHoursRes]=await Promise.all([
       supabase.from('cash_ups').select('cash_up_date,cash_up_total').eq('store_id',STORE_ID).neq('status','draft').gte('cash_up_date',start).lte('cash_up_date',end).order('cash_up_date'),
       supabase.from('expenses').select('amount,category_key,category_name').eq('store_id',STORE_ID).gte('expense_date',start).lte('expense_date',end),
       invIds.length?supabase.from('invoice_lines').select('amount,vat_amount,category_key').in('invoice_id',invIds):Promise.resolve({data:[]}),
@@ -120,6 +120,9 @@ export default function AnalyticsPage(){
       supabase.from('wage_payments').select('gross_pay').eq('store_id',STORE_ID).gte('paid_date',lmStart).lte('paid_date',lmEnd),
       // Compliance: fetch last 14 daily sessions regardless of selected period (rolling window)
       supabase.from('daily_sessions').select('session_date,id').eq('store_id',STORE_ID).eq('session_type','daily').order('session_date',{ascending:false}).limit(14),
+      // Estimated wages: employee hourly rates + attendance hours for period
+      supabase.from('employees').select('id,hourly_rate').eq('store_id',STORE_ID).eq('is_active',true),
+      supabase.from('attendance').select('employee_id,hours_worked').gte('work_date',start).lte('work_date',end),
     ])
 
     const dailyCashUps:Record<string,number>={}
@@ -132,6 +135,13 @@ export default function AnalyticsPage(){
     const wastage=(wastRes.data||[]).reduce((s:number,r:any)=>s+Number(r.total_cost||0),0)
     const wagesGross=(wagesRes.data||[]).reduce((s:number,r:any)=>s+Number(r.gross_pay||0),0)
     const uifEmployer=(wagesRes.data||[]).reduce((s:number,r:any)=>s+Number(r.uif_employer||0),0)
+    // Estimated wages from current hours × hourly rate (used when payroll not yet marked paid)
+    const empRateMap:Record<string,number>={}
+    for(const e of empRatesRes.data||[])empRateMap[e.id]=Number(e.hourly_rate||0)
+    const estimatedWages=(attendHoursRes.data||[]).reduce((s:number,a:any)=>s+(Number(a.hours_worked||0)*(empRateMap[a.employee_id]||0)),0)
+    // Use actual paid wages if available; otherwise fall back to live estimate
+    const displayWages=wagesGross>0?wagesGross:estimatedWages
+    const isWageEstimate=wagesGross===0&&estimatedWages>0
 
     const counts=countsRes.data||[]
     const openingCount=counts.find((c:any)=>c.count_date<start)
@@ -162,7 +172,7 @@ export default function AnalyticsPage(){
       addExp(l.category_key,l.category_key,exVat>0?exVat:Number(l.amount||0))
     }
     const otherExpenses=Object.values(expByCat).reduce((s,c)=>s+c.total,0)
-    const totalOperatingCosts=wagesGross+otherExpenses
+    const totalOperatingCosts=displayWages+otherExpenses
 
     const lmWages=(lmWagesRes.data||[]).reduce((s:number,r:any)=>s+Number(r.gross_pay||0),0)
     let lmOpExp=0
@@ -206,12 +216,12 @@ export default function AnalyticsPage(){
     // Pie slices for expense breakdown
     const pieSlices=[
       {label:'Food Cost',value:foodCostAmount,color:'#ef4444'},
-      {label:'Wages',value:wagesGross,color:'#8b5cf6'},
+      {label:data.isWageEstimate?'Wages (est.)':'Wages',value:data.displayWages,color:'#8b5cf6',est:data.isWageEstimate},
       ...Object.entries(expByCat).map(([,c])=>({label:c.name,value:c.total,color:c.color})),
     ].filter(s=>s.value>0)
 
     return{
-      sales,salesExclVat,dailyCashUps,daysArr,purchases,wastage,wagesGross,uifEmployer,
+      sales,salesExclVat,dailyCashUps,daysArr,purchases,wastage,wagesGross,estimatedWages,displayWages,isWageEstimate,uifEmployer,
       openingValue,closingValue,foodCostAmount,foodCostPct,
       grossProfit,grossMarginPct,expByCat,otherExpenses,pieSlices,
       totalOperatingCosts,dailyBreakeven,monthlyBreakeven,
@@ -395,12 +405,12 @@ export default function AnalyticsPage(){
               {label:'Sales Revenue',value:data.salesExclVat,color:'#16a34a',pct:100,bold:true},
               {label:'Food Cost',value:-data.foodCostAmount,color:'#ef4444',pct:data.foodCostPct},
               {label:'─── Gross Profit',value:data.grossProfit,color:data.grossMarginPct>=55?'#16a34a':'#d97706',pct:data.grossMarginPct,bold:true},
-              {label:'Wages & Salaries',value:-data.wagesGross,color:'#8b5cf6',pct:data.salesExclVat>0?data.wagesGross/data.salesExclVat*100:0},
+              {label:data.isWageEstimate?'Wages & Salaries (est.)':'Wages & Salaries',value:-data.displayWages,color:'#8b5cf6',pct:data.salesExclVat>0?data.displayWages/data.salesExclVat*100:0,est:data.isWageEstimate},
               ...Object.values(data.expByCat).map((c:any)=>({label:c.name,value:-c.total,color:c.color,pct:data.salesExclVat>0?c.total/data.salesExclVat*100:0})),
               {label:'─── Net Profit/Loss',value:data.netProfit,color:data.netProfit>=0?'#16a34a':'#dc2626',pct:data.netMarginPct,bold:true},
             ].map((row:any,i:number)=>(
               <div key={i} style={{display:'flex',justifyContent:'space-between',padding:'7px 0',borderBottom:'1px solid #f8f8f8',alignItems:'center'}}>
-                <span style={{fontSize:13,color:'#374151',fontWeight:row.bold?700:400,flex:1}}>{row.label}</span>
+                <span style={{fontSize:13,color:'#374151',fontWeight:row.bold?700:400,flex:1,display:'flex',alignItems:'center',gap:6}}>{row.label}{row.est&&<span title="Estimated from hours logged × hourly rate. Updates to actual once payroll is marked as paid." style={{fontSize:10,fontWeight:700,background:'#fef3c7',color:'#d97706',borderRadius:4,padding:'1px 5px',cursor:'help',border:'1px solid #fde68a'}}>EST</span>}</span>
                 <span style={{fontSize:13,fontWeight:700,color:row.color,width:110,textAlign:'right'}}>{fmt(Math.abs(row.value))}</span>
                 <span style={{fontSize:11,color:'#9ca3af',width:40,textAlign:'right'}}>{row.pct?.toFixed(1)}%</span>
               </div>
@@ -449,7 +459,7 @@ export default function AnalyticsPage(){
             {label:'Sales (ex-VAT)',curr:data.salesExclVat,prev:compareData.salesExclVat},
             {label:'Food Cost',curr:data.foodCostAmount,prev:compareData.foodCostAmount},
             {label:'Food Cost %',curr:data.foodCostPct,prev:compareData.foodCostPct,isPct:true},
-            {label:'Wages',curr:data.wagesGross,prev:compareData.wagesGross},
+            {label:data.isWageEstimate?'Wages (est.)':'Wages',curr:data.displayWages,prev:compareData.displayWages??compareData.wagesGross},
             {label:'Other Expenses',curr:data.otherExpenses,prev:compareData.otherExpenses},
             {label:'Net Profit/Loss',curr:data.netProfit,prev:compareData.netProfit},
             {label:'Daily Breakeven',curr:data.dailyBreakeven,prev:compareData.dailyBreakeven},
