@@ -386,9 +386,17 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
     setSaving(true);
     try {
       const payload = buildPayload('draft');
-      if (cashUp?.id) { await supabase.from('cash_ups').update(payload).eq('id', cashUp.id); }
-      else { const { data } = await supabase.from('cash_ups').insert(payload).select().single(); if (data) setCashUp(data); }
-      await loadCashUp();
+      if (cashUp?.id) {
+        await supabase.from('cash_ups').update(payload).eq('id', cashUp.id);
+      } else {
+        // New cashup — get the ID back but DON'T call loadCashUp() as it repopulates
+        // the form with DB values (zeros), wiping out what the user typed
+        const { data } = await supabase.from('cash_ups').insert(payload).select().single();
+        if (data) setCashUp(data);
+      }
+      // Note: intentionally NOT calling loadCashUp() here — same reason as addPayout.
+      // loadCashUp re-fetches and calls populateForm() which resets all denomination
+      // inputs to what's in the DB, wiping out anything the user has typed.
     } catch (e) { console.error('Save error:', e); }
     setSaving(false);
   }
