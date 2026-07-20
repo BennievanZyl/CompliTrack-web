@@ -422,9 +422,16 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
     setSaving(true);
     try {
       const payload = { ...buildPayload('signed_off'), signed_by_name: signedByName.trim(), cashier_name: cashierName.trim() || signedByName.trim(), signed_off_at: new Date().toISOString() };
-      if (cashUp?.id) { await supabase.from('cash_ups').update(payload).eq('id', cashUp.id); }
-      else { const { data } = await supabase.from('cash_ups').insert(payload).select().single(); if (data) setCashUp(data); }
-      await loadCashUp();
+      if (cashUp?.id) {
+        await supabase.from('cash_ups').update(payload).eq('id', cashUp.id);
+        // Update local cashUp state to signed_off WITHOUT re-fetching from DB.
+        // loadCashUp() calls populateForm() which resets all denomination inputs — 
+        // this was wiping the form and showing stale variance after sign-off.
+        setCashUp(prev => prev ? { ...prev, status: 'signed_off', signed_by_name: signedByName.trim() } : prev);
+      } else {
+        const { data } = await supabase.from('cash_ups').insert(payload).select().single();
+        if (data) setCashUp(data);
+      }
     } catch (e) { console.error('Sign off error:', e); alert('Sign off failed'); }
     setSaving(false);
   }
