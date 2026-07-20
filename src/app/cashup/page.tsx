@@ -494,7 +494,7 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
       // from the DB and repopulates the form (previous_float, eft_total, etc.), which wipes
       // out anything typed but not yet saved. loadPayouts() above already refreshes the
       // payout list, and totals/variance are derived reactively from local state.
-    } catch (e) { console.error('Payout error:', e); }
+    } catch (e: any) { console.error('Payout error:', e); alert('Could not save payout: ' + (e?.message || e)); }
     setPayoutSaving(false);
   }
 
@@ -1097,6 +1097,7 @@ function CashUpContent() {
       const ctx = await getStoreContext();
       if (ctx) {
         setStoreId(ctx.storeId);
+        setOrgId(ctx.orgId);
         setStoreName(ctx.storeName);
         setRole(ctx.role);
       }
