@@ -719,6 +719,32 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
                   <div style={{ fontSize: 18, fontWeight: 700, color: '#333', marginBottom: 4 }}>Count Your Cash</div>
                   <div style={{ fontSize: 13, color: '#888', marginBottom: 16 }}>Enter quantities for Till Float and To Bank separately</div>
 
+                  {/* Cashier on Duty */}
+                  {!isSignedOff && (
+                    <div style={{ background: '#f0f7f4', borderRadius: 12, padding: '14px 16px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <span style={{ fontSize: 20 }}>👤</span>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: PRIMARY, textTransform: 'uppercase' as const, letterSpacing: '0.5px', marginBottom: 6 }}>Cashier on Duty</div>
+                        {staff.length > 0 ? (
+                          <select value={cashierName} onChange={e => setCashierName(e.target.value)}
+                            style={{ width: '100%', padding: '10px 12px', border: '1.5px solid #d1fae5', borderRadius: 10, fontSize: 14, fontWeight: 600, background: '#fff', cursor: 'pointer' }}>
+                            <option value="">— Select cashier on duty —</option>
+                            {staff.map((s: any) => <option key={s.id} value={s.full_name}>{s.full_name} ({s.role})</option>)}
+                          </select>
+                        ) : (
+                          <input value={cashierName} onChange={e => setCashierName(e.target.value)}
+                            placeholder="Type cashier name"
+                            style={{ width: '100%', padding: '10px 12px', border: '1.5px solid #d1fae5', borderRadius: 10, fontSize: 14, boxSizing: 'border-box' as const }} />
+                        )}
+                      </div>
+                    </div>
+                  )}
+                  {isSignedOff && cashierName && (
+                    <div style={{ background: '#f0f7f4', borderRadius: 10, padding: '10px 14px', marginBottom: 16, fontSize: 13, color: PRIMARY }}>
+                      👤 Cashier on duty: <strong>{cashierName}</strong>
+                    </div>
+                  )}
+
                   {/* Date picker + Till selector */}
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 20, padding: 16, background: '#f8faf8', borderRadius: 12 }}>
                     <div>
