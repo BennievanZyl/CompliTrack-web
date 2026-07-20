@@ -394,18 +394,24 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
     setSaving(true);
     try {
       const payload = buildPayload('draft');
-      // Use upsert on (store_id, cash_up_date) to prevent duplicate inserts
-      // when Next is clicked quickly before the first save completes
       if (cashUp?.id) {
+        // Already have the ID — just update in place
         await supabase.from('cash_ups').update(payload).eq('id', cashUp.id);
       } else {
-        const { data } = await supabase.from('cash_ups')
-          .upsert(payload, { onConflict: 'store_id,cash_up_date' })
-          .select().single();
-        if (data) setCashUp(data);
+        // No local ID yet — check DB first to avoid creating duplicates
+        const { data: existingRows } = await supabase.from('cash_ups')
+          .select('id').eq('store_id', storeId).eq('cash_up_date', payload.cash_up_date)
+          .order('updated_at', { ascending: false }).limit(1);
+        const existingId = (existingRows as any)?.[0]?.id;
+        if (existingId) {
+          await supabase.from('cash_ups').update(payload).eq('id', existingId);
+          setCashUp((prev: any) => prev ? { ...prev, id: existingId } : { id: existingId, ...payload });
+        } else {
+          const { data } = await supabase.from('cash_ups').insert(payload).select().single();
+          if (data) setCashUp(data);
+        }
       }
-      // Note: intentionally NOT calling loadCashUp() here — it repopulates the form
-      // from DB values, wiping out anything the user has typed.
+      // Note: intentionally NOT calling loadCashUp() — it repopulates from DB, wiping typed values.
     } catch (e) { console.error('Save error:', e); }
     setSaving(false);
   }
