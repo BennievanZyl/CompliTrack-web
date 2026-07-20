@@ -36,6 +36,7 @@ const TABS = [
   { key: 'checklist', label: '✅ Checklist Templates' },
   { key: 'categories', label: '🏷️ Expense Categories' },
   { key: 'permissions', label: '🔑 Role Permissions' },
+  { key: 'stock', label: '📦 Stock Control' },
 ]
 
 const INPUT = { width: '100%', border: '1.5px solid #e5e7eb', borderRadius: '10px', padding: '10px 12px', fontSize: '14px', outline: 'none', boxSizing: 'border-box' as const, background: '#fff', fontFamily: 'system-ui' }
@@ -72,11 +73,23 @@ export default function SettingsPage() {
   const [editCat, setEditCat] = useState<ExpenseCategory | null>(null)
   const [catForm, setCatForm] = useState({ name: '', colour: '#10b981' })
 
+  const [stockSettings, setStockSettings] = useState({ allow_negative_stock: false, require_pin_on_issue: false })
+  const [savingStockSettings, setSavingStockSettings] = useState(false)
+  const [stockSettingsSaved, setStockSettingsSaved] = useState(false)
+
   const [pwForm, setPwForm] = useState({ newPassword: '', confirmPassword: '' })
   const [pwSaving, setPwSaving] = useState(false)
   const [pwError, setPwError] = useState('')
   const [pwSuccess, setPwSuccess] = useState(false)
   const [userEmail, setUserEmail] = useState('')
+
+  async function saveStockSettings() {
+    setSavingStockSettings(true)
+    await supabase.from('store_settings').upsert({ store_id: STORE_ID, ...stockSettings, updated_at: new Date().toISOString() }, { onConflict: 'store_id' })
+    setSavingStockSettings(false)
+    setStockSettingsSaved(true)
+    setTimeout(() => setStockSettingsSaved(false), 2000)
+  }
 
   async function changePassword() {
     setPwError(''); setPwSuccess(false)
@@ -99,6 +112,7 @@ export default function SettingsPage() {
     const [storeRes, templRes, catRes, permsRes] = await Promise.all([
       supabase.from('stores').select('*').eq('id', STORE_ID).single(),
       supabase.from('checklist_templates').select('*').eq('store_id', STORE_ID).order('section').order('sort_order'),
+      supabase.from('store_settings').select('*').eq('store_id', STORE_ID).maybeSingle(),
       supabase.from('expense_categories').select('*').eq('organisation_id', ORG_ID).order('sort_order'),
       supabase.from('store_role_permissions').select('*').eq('store_id', STORE_ID),
     ])
