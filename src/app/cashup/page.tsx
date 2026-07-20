@@ -457,10 +457,19 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
     try {
       let cashUpId = cashUp?.id;
       if (!cashUpId) {
-        const payload = buildPayload('draft');
-        const { data } = await supabase.from('cash_ups').insert(payload).select().single();
-        if (data) { setCashUp(data); cashUpId = data.id; }
+        // Check DB first — a cashup may exist from a previous save but cashUp state not yet updated
+        const { data: existingRows } = await supabase.from('cash_ups')
+          .select('id').eq('store_id', storeId).eq('cash_up_date', cashUpDate)
+          .order('updated_at', { ascending: false }).limit(1);
+        cashUpId = (existingRows as any)?.[0]?.id ?? null;
+        if (!cashUpId) {
+          // Truly no cashup yet — create one
+          const payload = buildPayload('draft');
+          const { data } = await supabase.from('cash_ups').insert(payload).select().single();
+          if (data) { setCashUp(data); cashUpId = data.id; }
+        }
       }
+      if (!cashUpId) { console.error('[addPayout] no cashup ID — cannot save payout'); return; }
       const selectedEmployee = employees.find(e => e.id === payoutForm.employee_id);
       let linkedAdvanceId: string | null = null;
       if (payoutForm.category === 'Salary Advance' && selectedEmployee) {
