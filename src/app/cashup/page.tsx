@@ -455,12 +455,16 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
     if (!payoutForm.amount || parseFloat(payoutForm.amount) <= 0) return;
     setPayoutSaving(true);
     try {
+      console.log('[addPayout] start — storeId:', storeId, 'cashUp.id:', cashUp?.id, 'amount:', payoutForm.amount);
       let cashUpId = cashUp?.id;
       if (!cashUpId) {
+        console.log('[addPayout] no cashUp.id — inserting draft cashup');
         const payload = buildPayload('draft');
-        const { data } = await supabase.from('cash_ups').insert(payload).select().single();
+        const { data, error: insertErr } = await supabase.from('cash_ups').insert(payload).select().single();
+        console.log('[addPayout] cashup insert result:', data?.id, 'error:', insertErr?.message);
         if (data) { setCashUp(data); cashUpId = data.id; }
       }
+      console.log('[addPayout] cashUpId resolved to:', cashUpId);
       const selectedEmployee = employees.find(e => e.id === payoutForm.employee_id);
       let linkedAdvanceId: string | null = null;
       if (payoutForm.category === 'Salary Advance' && selectedEmployee) {
@@ -474,7 +478,7 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
         }).select().single();
         linkedAdvanceId = advance?.id || null;
       }
-      await supabase.from('cash_up_payouts').insert({
+      const { error: payoutErr } = await supabase.from('cash_up_payouts').insert({
         cash_up_id: cashUpId, store_id: storeId,
         amount: parseFloat(payoutForm.amount),
         category: payoutForm.category,
@@ -483,7 +487,9 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
         employee_name: selectedEmployee?.full_name || null,
         linked_advance_id: linkedAdvanceId,
       });
+      console.log('[addPayout] payout insert error:', payoutErr?.message);
       if (cashUpId) await loadPayouts(cashUpId);
+      console.log('[addPayout] done — payouts reloaded');
       const updatedPayoutsTotal = payouts.reduce((s, p) => s + p.amount, 0) + parseFloat(payoutForm.amount);
       if (cashUpId) {
         await supabase.from('cash_ups').update({ payouts: updatedPayoutsTotal, a_total: totalCash - prevFloat + eft + updatedPayoutsTotal, variance: (totalCash - prevFloat + eft + updatedPayoutsTotal) - cashUpTotal }).eq('id', cashUpId);
