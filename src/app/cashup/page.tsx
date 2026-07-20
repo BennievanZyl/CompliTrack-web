@@ -266,7 +266,15 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
   async function loadCashUp(dateOverride?: string) {
     setLoading(true);
     const targetDate = dateOverride || cashUpDate;
-    const { data: existingCashUp } = await supabase.from('cash_ups').select('*').eq('store_id', storeId).eq('cash_up_date', targetDate).maybeSingle();
+    // Use order+limit instead of maybeSingle() so duplicate records (from prior bugs)
+    // don't throw and accidentally reset the form. Always picks the most recent record.
+    const { data: cashUpRows } = await supabase.from('cash_ups').select('*').eq('store_id', storeId).eq('cash_up_date', targetDate).order('updated_at', { ascending: false }).limit(1);
+    const existingCashUp = cashUpRows?.[0] ?? null;
+    // Clean up any duplicate records for this date (keep the most recently updated)
+    if ((cashUpRows?.length ?? 0) > 1) {
+      const idsToDelete = cashUpRows!.slice(1).map((r: any) => r.id);
+      await supabase.from('cash_ups').delete().in('id', idsToDelete);
+    }
     if (existingCashUp) {
       setCashUp(existingCashUp);
       populateForm(existingCashUp);
