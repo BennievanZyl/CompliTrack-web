@@ -395,23 +395,12 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
     try {
       const payload = buildPayload('draft');
       if (cashUp?.id) {
-        // Already have the ID — just update in place
         await supabase.from('cash_ups').update(payload).eq('id', cashUp.id);
       } else {
-        // No local ID yet — check DB first to avoid creating duplicates
-        const { data: existingRows } = await supabase.from('cash_ups')
-          .select('id').eq('store_id', storeId).eq('cash_up_date', payload.cash_up_date)
-          .order('updated_at', { ascending: false }).limit(1);
-        const existingId = (existingRows as any)?.[0]?.id;
-        if (existingId) {
-          await supabase.from('cash_ups').update(payload).eq('id', existingId);
-          setCashUp((prev: any) => prev ? { ...prev, id: existingId } : { id: existingId, ...payload });
-        } else {
-          const { data } = await supabase.from('cash_ups').insert(payload).select().single();
-          if (data) setCashUp(data);
-        }
+        const { data } = await supabase.from('cash_ups').insert(payload).select().single();
+        if (data) setCashUp(data);
       }
-      // Note: intentionally NOT calling loadCashUp() — it repopulates from DB, wiping typed values.
+      await loadCashUp();
     } catch (e) { console.error('Save error:', e); }
     setSaving(false);
   }
@@ -438,14 +427,11 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
       const payload = { ...buildPayload('signed_off'), signed_by_name: signedByName.trim(), cashier_name: cashierName.trim() || signedByName.trim(), signed_off_at: new Date().toISOString() };
       if (cashUp?.id) {
         await supabase.from('cash_ups').update(payload).eq('id', cashUp.id);
-        // Update local cashUp state to signed_off WITHOUT re-fetching from DB.
-        // loadCashUp() calls populateForm() which resets all denomination inputs — 
-        // this was wiping the form and showing stale variance after sign-off.
-        setCashUp(prev => prev ? { ...prev, status: 'signed_off', signed_by_name: signedByName.trim() } : prev);
       } else {
         const { data } = await supabase.from('cash_ups').insert(payload).select().single();
         if (data) setCashUp(data);
       }
+      await loadCashUp();
     } catch (e) { console.error('Sign off error:', e); alert('Sign off failed'); }
     setSaving(false);
   }
