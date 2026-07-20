@@ -268,7 +268,7 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
     const targetDate = dateOverride || cashUpDate;
     // Use order+limit instead of maybeSingle() so duplicate records (from prior bugs)
     // don't throw and accidentally reset the form. Always picks the most recent record.
-    const { data: cashUpRows } = await supabase.from('cash_ups').select('*').eq('store_id', storeId).eq('cash_up_date', targetDate).order('updated_at', { ascending: false }).limit(1);
+    const { data: cashUpRows } = await supabase.from('cash_ups').select('*').eq('store_id', storeId).eq('cash_up_date', targetDate).limit(1);
     const existingCashUp = cashUpRows?.[0] ?? null;
     // Clean up any duplicate records for this date (keep the most recently updated)
     if ((cashUpRows?.length ?? 0) > 1) {
@@ -463,6 +463,12 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
         const { data, error: insertErr } = await supabase.from('cash_ups').insert(payload).select().single();
         console.log('[addPayout] cashup insert result:', data?.id, 'error:', insertErr?.message);
         if (data) { setCashUp(data); cashUpId = data.id; }
+        else if (insertErr) {
+          // Unique constraint — record already exists, fetch it
+          const { data: existingRows } = await supabase.from('cash_ups').select('id').eq('store_id', storeId).eq('cash_up_date', payload.cash_up_date).limit(1);
+          cashUpId = (existingRows as any)?.[0]?.id ?? null;
+          console.log('[addPayout] fetched existing cashUpId:', cashUpId);
+        }
       }
       console.log('[addPayout] cashUpId resolved to:', cashUpId);
       const selectedEmployee = employees.find(e => e.id === payoutForm.employee_id);
