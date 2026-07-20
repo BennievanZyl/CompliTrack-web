@@ -725,17 +725,21 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
                       <span style={{ fontSize: 20 }}>👤</span>
                       <div style={{ flex: 1 }}>
                         <div style={{ fontSize: 12, fontWeight: 700, color: PRIMARY, textTransform: 'uppercase' as const, letterSpacing: '0.5px', marginBottom: 6 }}>Cashier on Duty</div>
-                        {staff.length > 0 ? (
-                          <select value={cashierName} onChange={e => setCashierName(e.target.value)}
-                            style={{ width: '100%', padding: '10px 12px', border: '1.5px solid #d1fae5', borderRadius: 10, fontSize: 14, fontWeight: 600, background: '#fff', cursor: 'pointer' }}>
-                            <option value="">— Select cashier on duty —</option>
-                            {staff.map((s: any) => <option key={s.id} value={s.full_name}>{s.full_name} ({s.role})</option>)}
-                          </select>
-                        ) : (
-                          <input value={cashierName} onChange={e => setCashierName(e.target.value)}
-                            placeholder="Type cashier name"
-                            style={{ width: '100%', padding: '10px 12px', border: '1.5px solid #d1fae5', borderRadius: 10, fontSize: 14, boxSizing: 'border-box' as const }} />
-                        )}
+                        {(() => {
+                          const cashiers = employees.filter(e => e.role?.toLowerCase().includes('cashier') || e.role?.toLowerCase().includes('kitchen'));
+                          const list = cashiers.length > 0 ? cashiers : employees;
+                          return list.length > 0 ? (
+                            <select value={cashierName} onChange={e => setCashierName(e.target.value)}
+                              style={{ width: '100%', padding: '10px 12px', border: '1.5px solid #d1fae5', borderRadius: 10, fontSize: 14, fontWeight: 600, background: '#fff', cursor: 'pointer' }}>
+                              <option value="">— Select cashier on duty —</option>
+                              {list.map((s: any) => <option key={s.id} value={s.full_name}>{s.full_name} — {s.role}</option>)}
+                            </select>
+                          ) : (
+                            <input value={cashierName} onChange={e => setCashierName(e.target.value)}
+                              placeholder="Type cashier name"
+                              style={{ width: '100%', padding: '10px 12px', border: '1.5px solid #d1fae5', borderRadius: 10, fontSize: 14, boxSizing: 'border-box' as const }} />
+                          );
+                        })()}
                       </div>
                     </div>
                   )}
