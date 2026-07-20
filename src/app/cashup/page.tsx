@@ -386,17 +386,18 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
     setSaving(true);
     try {
       const payload = buildPayload('draft');
+      // Use upsert on (store_id, cash_up_date) to prevent duplicate inserts
+      // when Next is clicked quickly before the first save completes
       if (cashUp?.id) {
         await supabase.from('cash_ups').update(payload).eq('id', cashUp.id);
       } else {
-        // New cashup — get the ID back but DON'T call loadCashUp() as it repopulates
-        // the form with DB values (zeros), wiping out what the user typed
-        const { data } = await supabase.from('cash_ups').insert(payload).select().single();
+        const { data } = await supabase.from('cash_ups')
+          .upsert(payload, { onConflict: 'store_id,cash_up_date' })
+          .select().single();
         if (data) setCashUp(data);
       }
-      // Note: intentionally NOT calling loadCashUp() here — same reason as addPayout.
-      // loadCashUp re-fetches and calls populateForm() which resets all denomination
-      // inputs to what's in the DB, wiping out anything the user has typed.
+      // Note: intentionally NOT calling loadCashUp() here — it repopulates the form
+      // from DB values, wiping out anything the user has typed.
     } catch (e) { console.error('Save error:', e); }
     setSaving(false);
   }
@@ -785,7 +786,7 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
                     <span style={{ color: '#fff', fontWeight: 800, fontSize: 26 }}>{fmt(totalCash)}</span>
                   </div>
                   {!readOnly && (
-                    <button onClick={() => { saveDraft(); setActiveStep(2); }} disabled={saving} style={{ width: '100%', marginTop: 16, padding: '14px', background: PRIMARY, color: '#fff', border: 'none', borderRadius: 12, fontWeight: 700, cursor: 'pointer', fontSize: 15 }}>
+                    <button onClick={async () => { await saveDraft(); setActiveStep(2); }} disabled={saving} style={{ width: '100%', marginTop: 16, padding: '14px', background: PRIMARY, color: '#fff', border: 'none', borderRadius: 12, fontWeight: 700, cursor: 'pointer', fontSize: 15 }}>
                       {saving ? 'Saving...' : 'Next: Reconciliation →'}
                     </button>
                   )}
@@ -903,7 +904,7 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
                   {!readOnly && (
                     <div style={{ display: 'flex', gap: 10 }}>
                       <button onClick={() => setActiveStep(1)} style={{ flex: 1, padding: '12px', background: '#f0f4f0', color: '#333', border: 'none', borderRadius: 12, fontWeight: 600, cursor: 'pointer', fontSize: 14 }}>← Back</button>
-                      <button onClick={() => { saveDraft(); setActiveStep(3); }} disabled={saving} style={{ flex: 2, padding: '12px', background: PRIMARY, color: '#fff', border: 'none', borderRadius: 12, fontWeight: 700, cursor: 'pointer', fontSize: 14 }}>{saving ? 'Saving...' : 'Next: Performance →'}</button>
+                      <button onClick={async () => { await saveDraft(); setActiveStep(3); }} disabled={saving} style={{ flex: 2, padding: '12px', background: PRIMARY, color: '#fff', border: 'none', borderRadius: 12, fontWeight: 700, cursor: 'pointer', fontSize: 14 }}>{saving ? 'Saving...' : 'Next: Performance →'}</button>
                     </div>
                   )}
                 </div>
@@ -929,7 +930,7 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
                   {!readOnly && (
                     <div style={{ display: 'flex', gap: 10 }}>
                       <button onClick={() => setActiveStep(2)} style={{ flex: 1, padding: '12px', background: '#f0f4f0', color: '#333', border: 'none', borderRadius: 12, fontWeight: 600, cursor: 'pointer', fontSize: 14 }}>← Back</button>
-                      <button onClick={() => { saveDraft(); setActiveStep(4); }} disabled={saving} style={{ flex: 2, padding: '12px', background: PRIMARY, color: '#fff', border: 'none', borderRadius: 12, fontWeight: 700, cursor: 'pointer', fontSize: 14 }}>{saving ? 'Saving...' : 'Next: Notes →'}</button>
+                      <button onClick={async () => { await saveDraft(); setActiveStep(4); }} disabled={saving} style={{ flex: 2, padding: '12px', background: PRIMARY, color: '#fff', border: 'none', borderRadius: 12, fontWeight: 700, cursor: 'pointer', fontSize: 14 }}>{saving ? 'Saving...' : 'Next: Notes →'}</button>
                     </div>
                   )}
                 </div>
@@ -944,7 +945,7 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
                   {!readOnly && (
                     <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
                       <button onClick={() => setActiveStep(3)} style={{ flex: 1, padding: '12px', background: '#f0f4f0', color: '#333', border: 'none', borderRadius: 12, fontWeight: 600, cursor: 'pointer', fontSize: 14 }}>← Back</button>
-                      <button onClick={() => { saveDraft(); setActiveStep(5); }} disabled={saving} style={{ flex: 2, padding: '12px', background: PRIMARY, color: '#fff', border: 'none', borderRadius: 12, fontWeight: 700, cursor: 'pointer', fontSize: 14 }}>{saving ? 'Saving...' : 'Next: Sign Off →'}</button>
+                      <button onClick={async () => { await saveDraft(); setActiveStep(5); }} disabled={saving} style={{ flex: 2, padding: '12px', background: PRIMARY, color: '#fff', border: 'none', borderRadius: 12, fontWeight: 700, cursor: 'pointer', fontSize: 14 }}>{saving ? 'Saving...' : 'Next: Sign Off →'}</button>
                     </div>
                   )}
                 </div>
