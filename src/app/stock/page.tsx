@@ -408,9 +408,12 @@ export default function StockPage() {
   async function saveAdjustment() {
     if (!adjustItem || !adjustQty || !adjustReason) { alert('Please fill in quantity and reason'); return }
     setAdjusting(true)
-    const qtyBefore = Number(adjustItem.current_qty || 0)
+    // Re-fetch current_qty directly from DB — React state may be stale if stock was
+    // recently issued via the RPC (e.g. -5 shows as 0 in state, causing wrong calc)
+    const { data: fresh } = await supabase.from('stock_items').select('current_qty').eq('id', adjustItem.id).single()
+    const qtyBefore = fresh ? Number(fresh.current_qty) : Number(adjustItem.current_qty)
     const entered = parseFloat(adjustQty) || 0
-    const qtyAfter = adjustMode === 'set' ? entered : adjustMode === 'add' ? qtyBefore + entered : Math.max(0, qtyBefore - entered)
+    const qtyAfter = adjustMode === 'set' ? entered : adjustMode === 'add' ? qtyBefore + entered : qtyBefore - entered
     const adjustment = qtyAfter - qtyBefore
     await supabase.from('stock_items').update({ current_qty: qtyAfter }).eq('id', adjustItem.id)
     await supabase.from('stock_adjustments').insert({ store_id: STORE_ID, stock_item_id: adjustItem.id, item_name: adjustItem.description || adjustItem.name, qty_before: qtyBefore, qty_after: qtyAfter, adjustment, unit: adjustItem.unit, reason: adjustReason, notes: adjustNotes })
