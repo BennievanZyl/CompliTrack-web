@@ -726,13 +726,12 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
                       <div style={{ flex: 1 }}>
                         <div style={{ fontSize: 12, fontWeight: 700, color: PRIMARY, textTransform: 'uppercase' as const, letterSpacing: '0.5px', marginBottom: 6 }}>Cashier on Duty</div>
                         {(() => {
-                          const cashiers = employees.filter(e => e.role?.toLowerCase().includes('cashier') || e.role?.toLowerCase().includes('kitchen'));
-                          const list = cashiers.length > 0 ? cashiers : employees;
-                          return list.length > 0 ? (
+                          const cashiers = employees.filter(e => e.role?.toLowerCase() === 'cashier');
+                          return cashiers.length > 0 ? (
                             <select value={cashierName} onChange={e => setCashierName(e.target.value)}
                               style={{ width: '100%', padding: '10px 12px', border: '1.5px solid #d1fae5', borderRadius: 10, fontSize: 14, fontWeight: 600, background: '#fff', cursor: 'pointer' }}>
                               <option value="">— Select cashier on duty —</option>
-                              {list.map((s: any) => <option key={s.id} value={s.full_name}>{s.full_name} — {s.role}</option>)}
+                              {cashiers.map((s: any) => <option key={s.id} value={s.full_name}>{s.full_name}</option>)}
                             </select>
                           ) : (
                             <input value={cashierName} onChange={e => setCashierName(e.target.value)}
@@ -1041,15 +1040,22 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
                     <div>
                       <div style={{ marginBottom: 16 }}>
                         <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#555', marginBottom: 6 }}>Signed by</label>
-                        {staff.length > 0 ? (
-                          <select value={signedByName} onChange={e => setSignedByName(e.target.value)} style={reconInputStyle}>
-                            <option value="">— Select staff member —</option>
-                            {staff.map(s => <option key={s.id} value={s.full_name}>{s.full_name} ({s.role})</option>)}
-                            <option value="__other__">Other (type name)</option>
-                          </select>
-                        ) : (
-                          <input value={signedByName} onChange={e => setSignedByName(e.target.value)} placeholder="Full name of person signing off" style={reconInputStyle} />
-                        )}
+                        {(() => {
+                          const signers = employees.filter(e => {
+                            const r = e.role?.toLowerCase() || '';
+                            return r.includes('manager') || r.includes('franchise') || r.includes('owner') || r.includes('director') || r.includes('supervisor');
+                          });
+                          const list = signers.length > 0 ? signers : employees;
+                          return list.length > 0 ? (
+                            <select value={signedByName} onChange={e => setSignedByName(e.target.value)} style={reconInputStyle}>
+                              <option value="">— Select manager / franchisee —</option>
+                              {list.map((s: any) => <option key={s.id} value={s.full_name}>{s.full_name} — {s.role}</option>)}
+                              <option value="__other__">Other (type name)</option>
+                            </select>
+                          ) : (
+                            <input value={signedByName} onChange={e => setSignedByName(e.target.value)} placeholder="Full name of person signing off" style={reconInputStyle} />
+                          );
+                        })()}
                         {signedByName === '__other__' && <input onChange={e => setSignedByName(e.target.value)} placeholder="Enter full name" style={{ ...reconInputStyle, marginTop: 8 }} />}
                       </div>
                       <button onClick={signOff} disabled={saving || !signedByName.trim() || signedByName === '__other__'} style={{ width: '100%', padding: '16px', background: signedByName.trim() && signedByName !== '__other__' ? PRIMARY : '#eee', color: signedByName.trim() && signedByName !== '__other__' ? '#fff' : '#aaa', border: 'none', borderRadius: 12, fontWeight: 700, cursor: 'pointer', fontSize: 16 }}>
