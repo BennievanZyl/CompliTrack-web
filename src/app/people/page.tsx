@@ -302,7 +302,7 @@ export default function PeoplePage() {
 
   async function savePin() {
     if (!selectedEmployee) return
-    if (pinForm && (pinForm.length !== 4 || !/^\d{4}$/.test(pinForm))) { alert('PIN must be exactly 4 digits'); return }
+    if (pinForm && (pinForm.length !== 4 || !/^[0-9]{4}$/.test(pinForm))) { alert('PIN must be exactly 4 digits (numbers only)'); return }
     setPinSaving(true)
     await supabase.from('employees').update({ clock_pin: pinForm || null }).eq('id', selectedEmployee.id)
     setSelectedEmployee({ ...selectedEmployee, clock_pin: pinForm || null } as any)
@@ -653,9 +653,12 @@ export default function PeoplePage() {
                       </div>
                       {showPinForm && (
                         <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8 }}>
-                          <input type="password" maxLength={4} value={pinForm} autoFocus
-                            onChange={e => setPinForm(e.target.value.replace(/[^0-9]/g, ''))}
-                            placeholder="Enter 4-digit PIN"
+                          <input type="tel" maxLength={4} value={pinForm} autoFocus
+                            autoComplete="off"
+                            inputMode="numeric"
+                            pattern="[0-9]*"
+                            onChange={e => setPinForm(e.target.value.replace(/[^0-9]/g, '').slice(0, 4))}
+                            placeholder="e.g. 1234"
                             style={{ flex: 1, padding: '10px 12px', border: '1.5px solid #0369a1', borderRadius: 8, fontSize: 20, textAlign: 'center', letterSpacing: 10, outline: 'none' }} />
                           <button onClick={savePin} disabled={pinSaving}
                             style={{ padding: '10px 20px', background: '#1a5c38', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 700, cursor: 'pointer' }}>
