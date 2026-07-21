@@ -606,6 +606,18 @@ export default function PeoplePage() {
                     <button onClick={() => toggleActive(selectedEmployee)} style={{ width: '100%', padding: '12px', background: selectedEmployee.is_active ? '#fdecea' : '#e8f5e9', color: selectedEmployee.is_active ? '#ef4444' : PRIMARY, border: `1.5px solid ${selectedEmployee.is_active ? '#ef4444' : PRIMARY}`, borderRadius: 12, fontWeight: 700, cursor: 'pointer', fontSize: 14 }}>
                       {selectedEmployee.is_active ? 'Deactivate Employee' : 'Reactivate Employee'}
                     </button>
+                    {!selectedEmployee.is_active && (
+                      <button onClick={async () => {
+                        if (!confirm(`Permanently delete ${selectedEmployee.full_name}? This cannot be undone.`)) return
+                        const { error } = await supabase.from('employees').delete().eq('id', selectedEmployee.id)
+                        if (error) { alert('Could not delete: ' + error.message); return }
+                        setSelectedEmployee(null)
+                        await loadEmployeeProfile(null as any)
+                        alert(`${selectedEmployee.full_name} has been permanently deleted.`)
+                      }} style={{ width: '100%', marginTop: 8, padding: '12px', background: '#dc2626', color: '#fff', border: 'none', borderRadius: 10, fontWeight: 700, cursor: 'pointer', fontSize: 13 }}>
+                        🗑 Permanently Delete Employee
+                      </button>
+                    )}
 
                     {/* 🔢 Kiosk / Stock PIN */}
                     <div style={{ background: '#f9fafb', borderRadius: 12, padding: 16, marginTop: 12, border: '1px solid #e5e7eb' }}>
