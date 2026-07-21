@@ -89,7 +89,6 @@ function Modal({ show, onClose, title, children, maxWidth = '480px' }: { show: b
       </div>
     </div>
 
-    </div>
   )
 }
 
