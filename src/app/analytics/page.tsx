@@ -166,14 +166,16 @@ export default function AnalyticsPage(){
       return(lines||[]).reduce((s:number,l:any)=>s+Number(l.actual_qty||0)*Number(l.unit_cost||0),0)
     }
     const[openingValue,closingValue]=await Promise.all([countValue(openingCount?.id),countValue(closingCount?.id)])
-    const foodCostAmount=openingValue+purchases-closingValue-wastage
+    // Packaging is part of food cost (takeaway bags, boxes, etc.)
+    const packagingCost=(expRes.data||[]).filter((e:any)=>e.category_key?.toLowerCase().includes('packaging')).reduce((s:number,e:any)=>s+Number(e.amount||0),0)
+    const foodCostAmount=openingValue+purchases+packagingCost-closingValue-wastage
     const foodCostPct=salesExclVat>0?foodCostAmount/salesExclVat*100:0
 
     const expByCat:Record<string,{name:string;total:number;color:string}>= {}
     const COLORS=['#3b82f6','#8b5cf6','#06b6d4','#f59e0b','#84cc16','#ec4899','#14b8a6','#f97316','#a855f7','#0ea5e9']
     let ci=0
     // Keys that represent food/product cost — excluded from operating expenses (already in food cost calc)
-    const isFoodCostKey=(k:string)=>!k||['cost_of_sales','stock_cogs','cogs'].includes(k)||k.toLowerCase().includes('cog')||k.toLowerCase().startsWith('stock_c')
+    const isFoodCostKey=(k:string)=>!k||['cost_of_sales','stock_cogs','cogs'].includes(k)||k.toLowerCase().includes('cog')||k.toLowerCase().startsWith('stock_c')||k.toLowerCase().includes('packaging')
     const addExp=(key:string,name:string,amt:number)=>{
       const k=key||'other'
       if(isFoodCostKey(k))return
@@ -182,8 +184,11 @@ export default function AnalyticsPage(){
     }
     for(const e of expRes.data||[])addExp(e.category_key,e.category_name,Number(e.amount||0))
     for(const l of invLinesRes.data||[]){
+      const k=(l.category_key||'').toLowerCase()
+      // Royalties and marketing fees are non-VAT items — use full amount
+      const isNonVat=k.includes('royalt')||k.includes('marketing')||k.includes('levy')||k.includes('franchise_fee')
       const exVat=Number(l.amount||0)-Number(l.vat_amount||0)
-      addExp(l.category_key,l.category_key,exVat>0?exVat:Number(l.amount||0))
+      addExp(l.category_key,l.category_key,isNonVat?Number(l.amount||0):(exVat>0?exVat:Number(l.amount||0)))
     }
     const otherExpenses=Object.values(expByCat).reduce((s,c)=>s+c.total,0)
     const totalOperatingCosts=displayWages+otherExpenses
@@ -418,7 +423,7 @@ export default function AnalyticsPage(){
             <div style={{fontSize:12,color:'#9ca3af',marginBottom:16}}>All figures ex-VAT · % of ex-VAT sales</div>
             {[
               {label:'Sales Revenue',value:data.salesExclVat,color:'#16a34a',pct:100,bold:true},
-              {label:'Food Cost',value:-data.foodCostAmount,color:'#ef4444',pct:data.foodCostPct},
+              {label:'Food & Packaging Cost',value:-data.foodCostAmount,color:'#ef4444',pct:data.foodCostPct},
               {label:'─── Gross Profit',value:data.grossProfit,color:data.grossMarginPct>=55?'#16a34a':'#d97706',pct:data.grossMarginPct,bold:true},
               {label:data.isWageEstimate?'Wages & Salaries (est.)':'Wages & Salaries',value:-data.displayWages,color:'#8b5cf6',pct:data.salesExclVat>0?data.displayWages/data.salesExclVat*100:0,est:data.isWageEstimate},
               ...Object.values(data.expByCat).map((c:any)=>({label:c.name,value:-c.total,color:c.color,pct:data.salesExclVat>0?c.total/data.salesExclVat*100:0})),
