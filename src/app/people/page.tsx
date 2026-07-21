@@ -169,7 +169,11 @@ export default function PeoplePage() {
   const [showEmployeeModal, setShowEmployeeModal] = useState(false);
   const [editEmployee, setEditEmployee] = useState<Employee | null>(null);
   const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [pinForm, setPinForm] = useState('')
+  const [pinSaving, setPinSaving] = useState(false)
+  const [pinSaved, setPinSaved] = useState(false)
+  const [showPinForm, setShowPinForm] = useState(false);
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
   const [profileTab, setProfileTab] = useState<ProfileTab>('overview');
   const [documents, setDocuments] = useState<EmployeeDocument[]>([]);
@@ -294,6 +298,16 @@ export default function PeoplePage() {
       await loadEmployeeProfile(selectedEmployee); setShowAdvanceModal(false); setAdvanceForm({ amount: '', reason: '', advance_date: new Date().toISOString().split('T')[0], repayment_status: 'outstanding', deduct_from_wages: false, notes: '' });
     } catch (e: unknown) { setSaveError(e instanceof Error ? e.message : 'Failed to save'); }
     setSaving(false);
+  }
+
+  async function savePin() {
+    if (!selectedEmployee) return
+    if (pinForm && (pinForm.length !== 4 || !/^\d{4}$/.test(pinForm))) { alert('PIN must be exactly 4 digits'); return }
+    setPinSaving(true)
+    await supabase.from('employees').update({ clock_pin: pinForm || null }).eq('id', selectedEmployee.id)
+    setSelectedEmployee({ ...selectedEmployee, clock_pin: pinForm || null } as any)
+    setPinSaving(false); setPinSaved(true); setShowPinForm(false); setPinForm('')
+    setTimeout(() => setPinSaved(false), 2000)
   }
 
   async function saveAttendance() {
