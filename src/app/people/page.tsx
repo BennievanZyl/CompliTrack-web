@@ -608,12 +608,23 @@ export default function PeoplePage() {
                     </button>
                     {!selectedEmployee.is_active && (
                       <button onClick={async () => {
-                        if (!confirm(`Permanently delete ${selectedEmployee.full_name}? This cannot be undone.`)) return
-                        const { error } = await supabase.from('employees').delete().eq('id', selectedEmployee.id)
+                        if (!confirm(`Permanently delete ${selectedEmployee.full_name}?\n\nAll linked records (payouts, attendance, advances, wages) will be unlinked but kept for reporting. This cannot be undone.`)) return
+                        const eid = selectedEmployee.id
+                        // Null out employee_id references in all related tables before deleting
+                        await Promise.all([
+                          supabase.from('cash_up_payouts').update({ employee_id: null }).eq('employee_id', eid),
+                          supabase.from('attendance').update({ employee_id: null }).eq('employee_id', eid),
+                          supabase.from('employee_advances').update({ employee_id: null }).eq('employee_id', eid),
+                          supabase.from('wage_payments').update({ employee_id: null }).eq('employee_id', eid),
+                          supabase.from('stock_issues').update({ employee_id: null }).eq('employee_id', eid),
+                          supabase.from('leave_requests').update({ employee_id: null }).eq('employee_id', eid),
+                          supabase.from('uniform_issues').update({ employee_id: null }).eq('employee_id', eid),
+                        ])
+                        const { error } = await supabase.from('employees').delete().eq('id', eid)
                         if (error) { alert('Could not delete: ' + error.message); return }
                         setSelectedEmployee(null)
-                        await loadEmployeeProfile(null as any)
                         alert(`${selectedEmployee.full_name} has been permanently deleted.`)
+                        window.location.reload()
                       }} style={{ width: '100%', marginTop: 8, padding: '12px', background: '#dc2626', color: '#fff', border: 'none', borderRadius: 10, fontWeight: 700, cursor: 'pointer', fontSize: 13 }}>
                         🗑 Permanently Delete Employee
                       </button>
