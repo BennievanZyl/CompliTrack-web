@@ -243,6 +243,7 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
   const [perf, setPerf] = useState({ customer_count: '' });
   const [notes, setNotes] = useState('');
   const [signedByName, setSignedByName] = useState('');
+  const [otherName, setOtherName] = useState('');
   const [cashierName, setCashierName] = useState('');
 
   useEffect(() => { checkAuthAndLoad(); }, []);
@@ -406,7 +407,8 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
   }
 
   async function signOff() {
-    if (!signedByName.trim()) return;
+    const finalSignedBy = signedByName === '__other__' ? otherName.trim() : signedByName.trim();
+    if (!finalSignedBy) return;
     // Safety check: catch the classic "forgot to enter the POS slip total" mistake before
     // it locks in — a missing slip total silently inflates the variance to the full cash
     // total and there was previously no way to fix it without editing the database directly.
@@ -424,7 +426,7 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
     }
     setSaving(true);
     try {
-      const payload = { ...buildPayload('signed_off'), signed_by_name: signedByName.trim(), cashier_name: cashierName.trim() || signedByName.trim(), signed_off_at: new Date().toISOString() };
+      const payload = { ...buildPayload('signed_off'), signed_by_name: finalSignedBy, cashier_name: cashierName.trim() || signedByName.trim(), signed_off_at: new Date().toISOString() };
       if (cashUp?.id) {
         await supabase.from('cash_ups').update(payload).eq('id', cashUp.id);
       } else {
@@ -560,6 +562,7 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
     <div class="meta">
       <div><strong>Date:</strong> ${new Date(c.cash_up_date).toLocaleDateString('en-ZA',{weekday:'long',day:'numeric',month:'long',year:'numeric'})}</div>
       <div><strong>Status:</strong> <span class="badge ${c.status==='signed_off'?'badge-green':'badge-amber'}">${c.status==='signed_off'?'SIGNED OFF':'DRAFT'}</span></div>
+      <div><strong>Cashier on Duty:</strong> ${(c as any).cashier_name||'—'}</div>
       <div><strong>Signed by:</strong> ${c.signed_by_name||'—'}</div>
       <div><strong>Time:</strong> ${c.signed_off_at?new Date(c.signed_off_at).toLocaleTimeString('en-ZA',{hour:'2-digit',minute:'2-digit'}):'—'}</div>
     </div>
@@ -1041,24 +1044,36 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
                       <div style={{ marginBottom: 16 }}>
                         <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#555', marginBottom: 6 }}>Signed by</label>
                         {(() => {
-                          const signers = employees.filter(e => {
+                          // Combine employees (managers) + owner profiles (franchisee/owner from auth)
+                          const empSigners = employees.filter(e => {
                             const r = e.role?.toLowerCase() || '';
                             return r.includes('manager') || r.includes('franchise') || r.includes('owner') || r.includes('director') || r.includes('supervisor');
                           });
-                          const list = signers.length > 0 ? signers : employees;
-                          return list.length > 0 ? (
-                            <select value={signedByName} onChange={e => setSignedByName(e.target.value)} style={reconInputStyle}>
-                              <option value="">— Select manager / franchisee —</option>
-                              {list.map((s: any) => <option key={s.id} value={s.full_name}>{s.full_name} — {s.role}</option>)}
-                              <option value="__other__">Other (type name)</option>
-                            </select>
-                          ) : (
-                            <input value={signedByName} onChange={e => setSignedByName(e.target.value)} placeholder="Full name of person signing off" style={reconInputStyle} />
+                          const allSigners = [
+                            ...ownerProfiles.map(p => ({ ...p, _source: 'profile' })),
+                            ...empSigners.filter(e => !ownerProfiles.some(p => p.full_name === e.full_name)),
+                            ...staff.filter(s => {
+                              const r = s.role?.toLowerCase() || '';
+                              return (r.includes('manager') || r.includes('franchise') || r.includes('owner')) && !empSigners.some(e => e.full_name === s.full_name) && !ownerProfiles.some(p => p.full_name === s.full_name);
+                            }),
+                          ];
+                          return (
+                            <>
+                              <select value={signedByName} onChange={e => { setSignedByName(e.target.value); if (e.target.value !== '__other__') setOtherName(''); }} style={reconInputStyle}>
+                                <option value="">— Select who is signing off —</option>
+                                {allSigners.map((s: any) => <option key={s.id} value={s.full_name}>{s.full_name}{s.role ? ` — ${s.role}` : ''}</option>)}
+                                <option value="__other__">Other (type name below)</option>
+                              </select>
+                              {signedByName === '__other__' && (
+                                <input value={otherName} onChange={e => setOtherName(e.target.value)}
+                                  placeholder="Enter full name of person signing off"
+                                  style={{ ...reconInputStyle, marginTop: 8 }} />
+                              )}
+                            </>
                           );
                         })()}
-                        {signedByName === '__other__' && <input onChange={e => setSignedByName(e.target.value)} placeholder="Enter full name" style={{ ...reconInputStyle, marginTop: 8 }} />}
                       </div>
-                      <button onClick={signOff} disabled={saving || !signedByName.trim() || signedByName === '__other__'} style={{ width: '100%', padding: '16px', background: signedByName.trim() && signedByName !== '__other__' ? PRIMARY : '#eee', color: signedByName.trim() && signedByName !== '__other__' ? '#fff' : '#aaa', border: 'none', borderRadius: 12, fontWeight: 700, cursor: 'pointer', fontSize: 16 }}>
+                      <button onClick={signOff} disabled={saving || (!signedByName.trim()) || (signedByName === '__other__' && !otherName.trim())} style={{ width: '100%', padding: '16px', background: signedByName.trim() && signedByName !== '__other__' ? PRIMARY : '#eee', color: signedByName.trim() && signedByName !== '__other__' ? '#fff' : '#aaa', border: 'none', borderRadius: 12, fontWeight: 700, cursor: 'pointer', fontSize: 16 }}>
                         {saving ? 'Signing off...' : 'Sign Off Cash Up'}
                       </button>
                       <button onClick={() => setActiveStep(4)} style={{ width: '100%', marginTop: 10, padding: '12px', background: '#f0f4f0', color: '#333', border: 'none', borderRadius: 12, fontWeight: 600, cursor: 'pointer', fontSize: 14 }}>← Back</button>
