@@ -1558,7 +1558,6 @@ export default function StockPage() {
           </div>
         </div>
       )}
-    </div>
       {pinModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={() => setPinModal(null)}>
           <div style={{ background: '#fff', borderRadius: 20, padding: 32, width: 340, textAlign: 'center' }} onClick={e => e.stopPropagation()}>
@@ -1570,7 +1569,7 @@ export default function StockPage() {
               {pinModal.mode === 'override' ? 'Stock will go negative. Enter a Manager or Franchisee PIN to override.' : 'Enter your 4-digit PIN to record this issue.'}
             </div>
             <input type="password" maxLength={4} value={pinInput} autoFocus
-              onChange={e => { setPinInput(e.target.value.replace(/\D/g, '')); setPinError('') }}
+              onChange={e => setPinInput(e.target.value.replace(/[^0-9]/g, ''))}
               placeholder="● ● ● ●"
               style={{ width: '100%', textAlign: 'center', fontSize: 28, letterSpacing: 12, padding: '12px', border: `2px solid ${pinError ? '#dc2626' : '#e5e7eb'}`, borderRadius: 12, outline: 'none', boxSizing: 'border-box' as const, marginBottom: 8 }} />
             {pinError && <div style={{ color: '#dc2626', fontSize: 13, marginBottom: 8 }}>{pinError}</div>}
@@ -1586,5 +1585,6 @@ export default function StockPage() {
           </div>
         </div>
       )}
+    </div>
   )
 }
