@@ -218,6 +218,7 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
   const [history, setHistory] = useState<CashUp[]>([]);
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
+  const [ownerProfiles, setOwnerProfiles] = useState<any[]>([]);
 
   const [payouts, setPayouts] = useState<Payout[]>([]);
   const [loading, setLoading] = useState(true);
