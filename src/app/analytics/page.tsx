@@ -109,12 +109,12 @@ export default function AnalyticsPage(){
     const invIds=(invIdsRes.data||[]).map((r:any)=>r.id)
     const lmInvIds=(lmInvIdsRes.data||[]).map((r:any)=>r.id)
 
-    const[cashUpsRes,expRes,invLinesRes,wagesRes,purchRes,wastRes,countsRes,lmExpRes,lmInvLinesRes,lmWagesRes,sessionsRes,empRatesRes,attendHoursRes]=await Promise.all([
+    const[cashUpsRes,expRes,invLinesRes,wagesRes,purchRes,wastRes,countsRes,lmExpRes,lmInvLinesRes,lmWagesRes,sessionsRes,empRatesRes,attendHoursRes,stockCatsRes]=await Promise.all([
       supabase.from('cash_ups').select('cash_up_date,cash_up_total').eq('store_id',STORE_ID).neq('status','draft').gte('cash_up_date',start).lte('cash_up_date',end).order('cash_up_date'),
       supabase.from('expenses').select('amount,category_key,category_name').eq('store_id',STORE_ID).gte('expense_date',start).lte('expense_date',end),
       invIds.length?supabase.from('invoice_lines').select('amount,vat_amount,category_key').in('invoice_id',invIds):Promise.resolve({data:[]}),
       supabase.from('wage_payments').select('net_pay,gross_pay,uif_employer').eq('store_id',STORE_ID).gte('paid_date',start).lte('paid_date',end),
-      supabase.from('stock_purchases').select('total_cost').eq('store_id',STORE_ID).gte('purchase_date',start).lte('purchase_date',end),
+      supabase.from('stock_purchases').select('total_cost,stock_item_id').eq('store_id',STORE_ID).gte('purchase_date',start).lte('purchase_date',end),
       supabase.from('stock_wastage').select('total_cost').eq('store_id',STORE_ID).gte('wastage_date',start).lte('wastage_date',end),
       supabase.from('stock_counts').select('id,count_date').eq('store_id',STORE_ID).eq('status','completed').order('count_date',{ascending:false}).limit(20),
       supabase.from('expenses').select('amount,category_key').eq('store_id',STORE_ID).gte('expense_date',lmStart).lte('expense_date',lmEnd),
@@ -126,6 +126,8 @@ export default function AnalyticsPage(){
       supabase.from('employees').select('id,hourly_rate').eq('store_id',STORE_ID).eq('is_active',true),
       // placeholder — attendance fetched after we have employee IDs (prevents cross-store data leak)
       Promise.resolve({data:[]}),
+      // Stock categories to identify packaging items
+      supabase.from('stock_categories').select('id,name').eq('store_id',STORE_ID),
     ])
 
     const dailyCashUps:Record<string,number>={}
@@ -134,7 +136,18 @@ export default function AnalyticsPage(){
     const salesExclVat=sales/(1+VAT)
     const daysArr=Object.entries(dailyCashUps).map(([date,s])=>({date,sales:s}))
 
-    const purchases=(purchRes.data||[]).reduce((s:number,r:any)=>s+Number(r.total_cost||0),0)
+    // Identify which stock items are packaging (by category name)
+    const packagingCatIds=new Set((stockCatsRes.data||[]).filter((c:any)=>c.name?.toLowerCase().includes('packaging')).map((c:any)=>c.id))
+    // Fetch stock items to know which belong to packaging categories
+    let packagingItemIds=new Set<string>()
+    if(packagingCatIds.size>0){
+      const{data:pkgItems}=await supabase.from('stock_items').select('id,category').eq('store_id',STORE_ID).in('category',[...packagingCatIds])
+      packagingItemIds=new Set((pkgItems||[]).map((i:any)=>i.id))
+    }
+    const allPurchases=(purchRes.data||[])
+    const foodPurchases=allPurchases.filter((r:any)=>!packagingItemIds.has(r.stock_item_id)).reduce((s:number,r:any)=>s+Number(r.total_cost||0),0)
+    const packagingPurchases=allPurchases.filter((r:any)=>packagingItemIds.has(r.stock_item_id)).reduce((s:number,r:any)=>s+Number(r.total_cost||0),0)
+    const purchases=foodPurchases // for food cost calc — packaging tracked separately
     const wastage=(wastRes.data||[]).reduce((s:number,r:any)=>s+Number(r.total_cost||0),0)
     const wagesGross=(wagesRes.data||[]).reduce((s:number,r:any)=>s+Number(r.gross_pay||0),0)
     const uifEmployer=(wagesRes.data||[]).reduce((s:number,r:any)=>s+Number(r.uif_employer||0),0)
@@ -166,16 +179,14 @@ export default function AnalyticsPage(){
       return(lines||[]).reduce((s:number,l:any)=>s+Number(l.actual_qty||0)*Number(l.unit_cost||0),0)
     }
     const[openingValue,closingValue]=await Promise.all([countValue(openingCount?.id),countValue(closingCount?.id)])
-    // Packaging is part of food cost (takeaway bags, boxes, etc.)
-    const packagingCost=(expRes.data||[]).filter((e:any)=>e.category_key?.toLowerCase().includes('packaging')).reduce((s:number,e:any)=>s+Number(e.amount||0),0)
-    const foodCostAmount=openingValue+purchases+packagingCost-closingValue-wastage
+    const foodCostAmount=openingValue+purchases-closingValue-wastage
     const foodCostPct=salesExclVat>0?foodCostAmount/salesExclVat*100:0
 
     const expByCat:Record<string,{name:string;total:number;color:string}>= {}
     const COLORS=['#3b82f6','#8b5cf6','#06b6d4','#f59e0b','#84cc16','#ec4899','#14b8a6','#f97316','#a855f7','#0ea5e9']
     let ci=0
     // Keys that represent food/product cost — excluded from operating expenses (already in food cost calc)
-    const isFoodCostKey=(k:string)=>!k||['cost_of_sales','stock_cogs','cogs'].includes(k)||k.toLowerCase().includes('cog')||k.toLowerCase().startsWith('stock_c')||k.toLowerCase().includes('packaging')
+    const isFoodCostKey=(k:string)=>!k||['cost_of_sales','stock_cogs','cogs'].includes(k)||k.toLowerCase().includes('cog')||k.toLowerCase().startsWith('stock_c')
     const addExp=(key:string,name:string,amt:number)=>{
       const k=key||'other'
       if(isFoodCostKey(k))return
@@ -240,7 +251,7 @@ export default function AnalyticsPage(){
     ].filter(s=>s.value>0)
 
     return{
-      sales,salesExclVat,dailyCashUps,daysArr,purchases,wastage,wagesGross,estimatedWages,displayWages,isWageEstimate,uifEmployer,
+      sales,salesExclVat,dailyCashUps,daysArr,purchases,foodPurchases,packagingPurchases,wastage,wagesGross,estimatedWages,displayWages,isWageEstimate,uifEmployer,
       openingValue,closingValue,foodCostAmount,foodCostPct,
       grossProfit,grossMarginPct,expByCat,otherExpenses,pieSlices,
       totalOperatingCosts,dailyBreakeven,monthlyBreakeven,
@@ -425,6 +436,8 @@ export default function AnalyticsPage(){
               {label:'Sales Revenue',value:data.salesExclVat,color:'#16a34a',pct:100,bold:true},
               {label:'Food & Packaging Cost',value:-data.foodCostAmount,color:'#ef4444',pct:data.foodCostPct},
               {label:'─── Gross Profit',value:data.grossProfit,color:data.grossMarginPct>=55?'#16a34a':'#d97706',pct:data.grossMarginPct,bold:true},
+              {label:'Food & Packaging Cost',value:-(data.foodCostAmount||0),color:'#ef4444',pct:data.salesExclVat>0?(data.foodCostAmount||0)/data.salesExclVat*100:0},
+              ...(data.packagingPurchases>0?[{label:'Packaging',value:-data.packagingPurchases,color:'#f97316',pct:data.salesExclVat>0?data.packagingPurchases/data.salesExclVat*100:0}]:[]),
               {label:data.isWageEstimate?'Wages & Salaries (est.)':'Wages & Salaries',value:-data.displayWages,color:'#8b5cf6',pct:data.salesExclVat>0?data.displayWages/data.salesExclVat*100:0,est:data.isWageEstimate},
               ...Object.values(data.expByCat).map((c:any)=>({label:c.name,value:-c.total,color:c.color,pct:data.salesExclVat>0?c.total/data.salesExclVat*100:0})),
               {label:'─── Net Profit/Loss',value:data.netProfit,color:data.netProfit>=0?'#16a34a':'#dc2626',pct:data.netMarginPct,bold:true},
