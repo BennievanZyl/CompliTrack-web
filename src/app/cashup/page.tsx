@@ -218,6 +218,7 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
   const [history, setHistory] = useState<CashUp[]>([]);
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
+
   const [payouts, setPayouts] = useState<Payout[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -251,7 +252,7 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
   async function checkAuthAndLoad() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { router.push('/login'); return; }
-    await Promise.all([loadCashUp(), loadStaff(), loadEmployees()]);
+    await Promise.all([loadCashUp(), loadStaff(), loadEmployees(), loadOwnerProfiles()]);
   }
 
   async function loadStaff() {
@@ -262,6 +263,12 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
   async function loadEmployees() {
     const { data } = await supabase.from('employees').select('id, full_name, role').eq('store_id', storeId).eq('is_active', true).order('full_name');
     setEmployees(data || []);
+  }
+
+  async function loadOwnerProfiles() {
+    // Load store owner/franchisee from profiles (they log in with email, not in employees table)
+    const { data } = await supabase.from('profiles').select('id, full_name, role').eq('store_id', storeId).in('role', ['owner', 'franchisee', 'manager', 'store_manager', 'franchisor']);
+    setOwnerProfiles(data || []);
   }
 
   async function loadCashUp(dateOverride?: string) {
