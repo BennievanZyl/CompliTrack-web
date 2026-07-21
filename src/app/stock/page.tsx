@@ -88,7 +88,6 @@ function Modal({ show, onClose, title, children, maxWidth = '480px' }: { show: b
         {children}
       </div>
     </div>
-
   )
 }
 
@@ -127,7 +126,6 @@ export default function StockPage() {
   const [pinModal, setPinModal] = useState<{ mode: 'issue' | 'override'; onSuccess: () => void } | null>(null)
   const [pinInput, setPinInput] = useState('')
   const [pinError, setPinError] = useState('')
-
   const [adjustItem, setAdjustItem] = useState<StockItem | null>(null)
   const [adjustQty, setAdjustQty] = useState('')
   const [adjustMode, setAdjustMode] = useState<'set' | 'add' | 'subtract'>('set')
@@ -300,44 +298,31 @@ export default function StockPage() {
     setShowAddWastage(false); await loadAll(); setSaving(false)
   }
 
-  async function verifyPin(pin: string, requireManagerOnly: boolean): Promise<boolean> {
-    // Check against employees with the given PIN
-    const { data } = await supabase.from('employees').select('id, full_name, role, clock_pin').eq('store_id', STORE_ID).eq('clock_pin', pin).eq('is_active', true)
+  async function verifyPin(pin: string, requireManager: boolean): Promise<boolean> {
+    const { data } = await supabase.from('employees').select('role, clock_pin').eq('store_id', STORE_ID).eq('clock_pin', pin).eq('is_active', true)
     if (!data || data.length === 0) return false
-    if (requireManagerOnly) {
-      return data.some((e: any) => {
-        const r = (e.role || '').toLowerCase()
-        return r.includes('manager') || r.includes('franchise') || r.includes('owner') || r.includes('director')
-      })
-    }
+    if (requireManager) return data.some((e: any) => { const r = (e.role||'').toLowerCase(); return r.includes('manager')||r.includes('franchise')||r.includes('owner') })
     return true
   }
 
   async function saveIssue() {
-    if (!issueForm.stock_item_id || !(parseFloat(issueForm.quantity || '0') > 0)) { alert('Select an item and quantity'); return }
-
-    // Check negative stock
-    const issueQty = parseFloat(issueForm.quantity || '0')
-    const currentItem = items.find(i => i.id === issueForm.stock_item_id)
-    const currentQty = currentItem?.current_qty ?? 0
-    const wouldBeNegative = (currentQty - issueQty) < 0
-
-    if (!storeSettings.allow_negative_stock && wouldBeNegative) {
-      // Need manager/franchisee PIN override
+    if (!issueForm.stock_item_id || !(parseFloat(issueForm.quantity||'0')>0)) { alert('Select an item and quantity'); return }
+    const issueQty = parseFloat(issueForm.quantity||'0')
+    const cur = items.find(i => i.id === issueForm.stock_item_id)
+    const wouldBeNeg = ((cur?.current_qty ?? 0) - issueQty) < 0
+    if (!storeSettings.allow_negative_stock && wouldBeNeg) {
       setPinInput(''); setPinError('')
-      setPinModal({ mode: 'override', onSuccess: () => { setPinModal(null); doSaveIssue() } })
-      return
+      setPinModal({ mode: 'override', onSuccess: () => { setPinModal(null); doSaveIssue() } }); return
     }
     if (storeSettings.require_pin_on_issue) {
-      // Need any employee PIN for audit trail
       setPinInput(''); setPinError('')
-      setPinModal({ mode: 'issue', onSuccess: () => { setPinModal(null); doSaveIssue() } })
-      return
+      setPinModal({ mode: 'issue', onSuccess: () => { setPinModal(null); doSaveIssue() } }); return
     }
     doSaveIssue()
   }
 
   async function doSaveIssue() {
+    if (!issueForm.stock_item_id || !(parseFloat(issueForm.quantity || '0') > 0)) { alert('Select an item and quantity'); return }
     setSaving(true)
     const allocations = Object.entries(issueForm.preppedBreakdown)
       .map(([childId, val]) => ({ childId, portions: parseFloat(val || '0') }))
@@ -1572,40 +1557,34 @@ export default function StockPage() {
             </div>
           </div>
         </div>
-      {/* PIN Modal */}
+      )}
+    </div>
       {pinModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: '#fff', borderRadius: 20, padding: 32, width: 340, textAlign: 'center', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }}>
-            {pinModal.mode === 'override' ? (
-              <>
-                <div style={{ fontSize: 36, marginBottom: 8 }}>🔒</div>
-                <div style={{ fontWeight: 800, fontSize: 18, color: '#dc2626', marginBottom: 8 }}>Stock Below Zero</div>
-                <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 20 }}>This issue will take stock into negative. A Manager or Franchisee PIN is required to override.</div>
-              </>
-            ) : (
-              <>
-                <div style={{ fontSize: 36, marginBottom: 8 }}>🔑</div>
-                <div style={{ fontWeight: 800, fontSize: 18, color: '#111', marginBottom: 8 }}>Enter Your PIN</div>
-                <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 20 }}>Enter your 4-digit PIN to confirm this stock issue.</div>
-              </>
-            )}
-            <input type="password" maxLength={4} value={pinInput}
-              onChange={e => setPinInput(e.target.value.replace(/[^0-9]/g, ''))}
-              autoFocus placeholder="● ● ● ●"
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={() => setPinModal(null)}>
+          <div style={{ background: '#fff', borderRadius: 20, padding: 32, width: 340, textAlign: 'center' }} onClick={e => e.stopPropagation()}>
+            <div style={{ fontSize: 36, marginBottom: 8 }}>{pinModal.mode === 'override' ? '🔒' : '🔑'}</div>
+            <div style={{ fontWeight: 800, fontSize: 18, marginBottom: 8, color: pinModal.mode === 'override' ? '#dc2626' : '#111' }}>
+              {pinModal.mode === 'override' ? 'Manager PIN Required' : 'Enter Your PIN'}
+            </div>
+            <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 20 }}>
+              {pinModal.mode === 'override' ? 'Stock will go negative. Enter a Manager or Franchisee PIN to override.' : 'Enter your 4-digit PIN to record this issue.'}
+            </div>
+            <input type="password" maxLength={4} value={pinInput} autoFocus
+              onChange={e => { setPinInput(e.target.value.replace(/\D/g, '')); setPinError('') }}
+              placeholder="● ● ● ●"
               style={{ width: '100%', textAlign: 'center', fontSize: 28, letterSpacing: 12, padding: '12px', border: `2px solid ${pinError ? '#dc2626' : '#e5e7eb'}`, borderRadius: 12, outline: 'none', boxSizing: 'border-box' as const, marginBottom: 8 }} />
             {pinError && <div style={{ color: '#dc2626', fontSize: 13, marginBottom: 8 }}>{pinError}</div>}
             <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
               <button onClick={() => setPinModal(null)} style={{ flex: 1, padding: '12px', background: '#f3f4f6', border: 'none', borderRadius: 10, fontWeight: 700, cursor: 'pointer' }}>Cancel</button>
               <button onClick={async () => {
                 if (pinInput.length !== 4) { setPinError('Enter your 4-digit PIN'); return }
-                const ok = await verifyPin(pinInput, pinModal!.mode === 'override')
-                if (!ok) { setPinError(pinModal!.mode === 'override' ? 'Manager or Franchisee PIN required' : 'Incorrect PIN'); setPinInput(''); return }
-                pinModal!.onSuccess()
+                const ok = await verifyPin(pinInput, pinModal.mode === 'override')
+                if (!ok) { setPinError(pinModal.mode === 'override' ? 'Manager or Franchisee PIN required' : 'Incorrect PIN'); setPinInput(''); return }
+                pinModal.onSuccess()
               }} style={{ flex: 1, padding: '12px', background: '#1a5c38', color: '#fff', border: 'none', borderRadius: 10, fontWeight: 700, cursor: 'pointer' }}>Confirm</button>
             </div>
           </div>
         </div>
       )}
-    </div>
   )
 }
