@@ -1573,8 +1573,6 @@ export default function StockPage() {
           </div>
         </div>
       )}
-    </div>
-
       {/* PIN Modal — appears for both audit trail and negative stock override */}
       {pinModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
