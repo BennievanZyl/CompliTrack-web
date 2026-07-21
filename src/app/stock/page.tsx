@@ -89,53 +89,6 @@ function Modal({ show, onClose, title, children, maxWidth = '480px' }: { show: b
       </div>
     </div>
 
-      {/* PIN Modal — appears for both audit trail and negative stock override */}
-      {pinModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: '#fff', borderRadius: 20, padding: 32, width: 340, textAlign: 'center', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }}>
-            {pinModal.mode === 'override' ? (
-              <>
-                <div style={{ fontSize: 36, marginBottom: 8 }}>🔒</div>
-                <div style={{ fontWeight: 800, fontSize: 18, color: '#dc2626', marginBottom: 8 }}>Stock Below Zero</div>
-                <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 20 }}>
-                  This issue will take stock into negative. A Manager or Franchisee PIN is required to override.
-                </div>
-              </>
-            ) : (
-              <>
-                <div style={{ fontSize: 36, marginBottom: 8 }}>🔑</div>
-                <div style={{ fontWeight: 800, fontSize: 18, color: '#111', marginBottom: 8 }}>Enter Your PIN</div>
-                <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 20 }}>
-                  Enter your 4-digit employee PIN to confirm this stock issue.
-                </div>
-              </>
-            )}
-            <input
-              type="password"
-              maxLength={4}
-              value={pinInput}
-              onChange={e => { setPinInput(e.target.value.replace(/\D/g, '')); setPinError('') }}
-              placeholder="● ● ● ●"
-              autoFocus
-              style={{ width: '100%', textAlign: 'center', fontSize: 28, letterSpacing: 12, padding: '12px', border: `2px solid ${pinError ? '#dc2626' : '#e5e7eb'}`, borderRadius: 12, outline: 'none', boxSizing: 'border-box' as const, marginBottom: 8 }}
-            />
-            {pinError && <div style={{ color: '#dc2626', fontSize: 13, marginBottom: 8 }}>{pinError}</div>}
-            <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
-              <button onClick={() => setPinModal(null)} style={{ flex: 1, padding: '12px', background: '#f3f4f6', border: 'none', borderRadius: 10, fontWeight: 700, cursor: 'pointer', fontSize: 14 }}>
-                Cancel
-              </button>
-              <button onClick={async () => {
-                if (pinInput.length !== 4) { setPinError('Enter your 4-digit PIN'); return }
-                const ok = await verifyPin(pinInput, pinModal.mode === 'override')
-                if (!ok) { setPinError(pinModal.mode === 'override' ? 'Invalid — Manager or Franchisee PIN required' : 'Incorrect PIN'); setPinInput(''); return }
-                pinModal.onSuccess()
-              }} style={{ flex: 1, padding: '12px', background: '#1a5c38', color: '#fff', border: 'none', borderRadius: 10, fontWeight: 700, cursor: 'pointer', fontSize: 14 }}>
-                Confirm
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
