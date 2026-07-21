@@ -737,6 +737,58 @@ export default function SettingsPage() {
           </div>
         </div>
       )}
+
+          {tab === 'stock' && (
+            <div>
+              <div style={SECTION}>Stock Issuance Controls</div>
+              <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 24 }}>Configure how stock issuance is controlled across your store.</p>
+
+              <div style={{ background: '#f9fafb', borderRadius: 14, padding: 20, marginBottom: 16, border: '1.5px solid #e5e7eb' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 700, fontSize: 15, color: '#111', marginBottom: 4 }}>Allow Negative Stock</div>
+                    <div style={{ fontSize: 13, color: '#6b7280', lineHeight: 1.5 }}>If <strong>OFF</strong>, issuing more stock than available requires a Manager or Franchisee PIN override.</div>
+                  </div>
+                  <div onClick={() => setStockSettings(s => ({ ...s, allow_negative_stock: !s.allow_negative_stock }))}
+                    style={{ width: 52, height: 30, borderRadius: 15, background: stockSettings.allow_negative_stock ? '#1a5c38' : '#d1d5db', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: 3, transition: 'background 0.2s', flexShrink: 0, marginLeft: 16 }}>
+                    <div style={{ width: 24, height: 24, borderRadius: 12, background: '#fff', transform: stockSettings.allow_negative_stock ? 'translateX(22px)' : 'translateX(0)', transition: 'transform 0.2s', boxShadow: '0 1px 4px rgba(0,0,0,0.2)' }} />
+                  </div>
+                </div>
+                <div style={{ marginTop: 10, fontSize: 12, fontWeight: 700, color: stockSettings.allow_negative_stock ? '#1a5c38' : '#dc2626', background: stockSettings.allow_negative_stock ? '#dcfce7' : '#fee2e2', display: 'inline-block', padding: '3px 10px', borderRadius: 20 }}>
+                  {stockSettings.allow_negative_stock ? '✓ Negative stock allowed' : '✗ Negative stock blocked — PIN override required'}
+                </div>
+              </div>
+
+              <div style={{ background: '#f9fafb', borderRadius: 14, padding: 20, marginBottom: 24, border: '1.5px solid #e5e7eb' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 700, fontSize: 15, color: '#111', marginBottom: 4 }}>Require Employee PIN on Issue</div>
+                    <div style={{ fontSize: 13, color: '#6b7280', lineHeight: 1.5 }}>If <strong>ON</strong>, every stock issue requires the employee to enter their 4-digit PIN — creating a full audit trail.</div>
+                  </div>
+                  <div onClick={() => setStockSettings(s => ({ ...s, require_pin_on_issue: !s.require_pin_on_issue }))}
+                    style={{ width: 52, height: 30, borderRadius: 15, background: stockSettings.require_pin_on_issue ? '#1a5c38' : '#d1d5db', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: 3, transition: 'background 0.2s', flexShrink: 0, marginLeft: 16 }}>
+                    <div style={{ width: 24, height: 24, borderRadius: 12, background: '#fff', transform: stockSettings.require_pin_on_issue ? 'translateX(22px)' : 'translateX(0)', transition: 'transform 0.2s', boxShadow: '0 1px 4px rgba(0,0,0,0.2)' }} />
+                  </div>
+                </div>
+                <div style={{ marginTop: 10, fontSize: 12, fontWeight: 700, color: stockSettings.require_pin_on_issue ? '#1a5c38' : '#6b7280', background: stockSettings.require_pin_on_issue ? '#dcfce7' : '#f3f4f6', display: 'inline-block', padding: '3px 10px', borderRadius: 20 }}>
+                  {stockSettings.require_pin_on_issue ? '✓ PIN required for every issue' : '○ No PIN required'}
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <button onClick={saveStockSettings} disabled={savingStockSettings}
+                  style={{ padding: '12px 28px', background: '#1a5c38', color: '#fff', border: 'none', borderRadius: 10, fontWeight: 700, fontSize: 14, cursor: 'pointer' }}>
+                  {savingStockSettings ? 'Saving...' : 'Save Stock Settings'}
+                </button>
+                {stockSettingsSaved && <span style={{ color: '#1a5c38', fontWeight: 700 }}>✓ Saved</span>}
+              </div>
+
+              <div style={{ marginTop: 28, padding: 16, background: '#fffbeb', borderRadius: 12, border: '1px solid #fde68a', fontSize: 13, color: '#92400e' }}>
+                <strong>📌 Setting PINs:</strong> Go to <strong>People</strong>, open any Manager or Franchisee, and set their 4-digit PIN in the employee detail. That PIN is used for the negative stock override. All staff PINs are managed there.
+              </div>
+            </div>
+          )}
+
     </div>
   )
 }
