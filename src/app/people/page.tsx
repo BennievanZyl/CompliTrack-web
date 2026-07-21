@@ -606,6 +606,42 @@ export default function PeoplePage() {
                     <button onClick={() => toggleActive(selectedEmployee)} style={{ width: '100%', padding: '12px', background: selectedEmployee.is_active ? '#fdecea' : '#e8f5e9', color: selectedEmployee.is_active ? '#ef4444' : PRIMARY, border: `1.5px solid ${selectedEmployee.is_active ? '#ef4444' : PRIMARY}`, borderRadius: 12, fontWeight: 700, cursor: 'pointer', fontSize: 14 }}>
                       {selectedEmployee.is_active ? 'Deactivate Employee' : 'Reactivate Employee'}
                     </button>
+
+                    {/* 🔢 Kiosk / Stock PIN */}
+                    <div style={{ background: '#f9fafb', borderRadius: 12, padding: 16, marginTop: 12, border: '1px solid #e5e7eb' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                        <div>
+                          <div style={{ fontWeight: 700, fontSize: 14, color: '#111' }}>🔢 Kiosk / Stock PIN</div>
+                          <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>Used for stock issue audit trail and negative stock override</div>
+                          <div style={{ fontSize: 12, marginTop: 4, fontWeight: 700, color: (selectedEmployee as any).clock_pin ? '#1a5c38' : '#9ca3af' }}>
+                            {(selectedEmployee as any).clock_pin ? '✓ PIN is set' : 'No PIN set'}
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', gap: 8 }}>
+                          <button onClick={() => { setShowPinForm(!showPinForm); setPinForm(''); setPinSaved(false) }}
+                            style={{ fontSize: 12, fontWeight: 700, padding: '6px 14px', background: '#e0f2fe', color: '#0369a1', border: 'none', borderRadius: 8, cursor: 'pointer' }}>
+                            {(selectedEmployee as any).clock_pin ? 'Change' : 'Set PIN'}
+                          </button>
+                          {(selectedEmployee as any).clock_pin && (
+                            <button onClick={async () => { if (!confirm('Clear PIN for this employee?')) return; await supabase.from('employees').update({ clock_pin: null }).eq('id', selectedEmployee.id); setSelectedEmployee({ ...selectedEmployee, clock_pin: null } as any) }}
+                              style={{ fontSize: 12, fontWeight: 700, padding: '6px 14px', background: '#fee2e2', color: '#dc2626', border: 'none', borderRadius: 8, cursor: 'pointer' }}>Clear</button>
+                          )}
+                        </div>
+                      </div>
+                      {showPinForm && (
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8 }}>
+                          <input type="password" maxLength={4} value={pinForm} autoFocus
+                            onChange={e => setPinForm(e.target.value.replace(/[^0-9]/g, ''))}
+                            placeholder="Enter 4-digit PIN"
+                            style={{ flex: 1, padding: '10px 12px', border: '1.5px solid #0369a1', borderRadius: 8, fontSize: 20, textAlign: 'center', letterSpacing: 10, outline: 'none' }} />
+                          <button onClick={savePin} disabled={pinSaving}
+                            style={{ padding: '10px 20px', background: '#1a5c38', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 700, cursor: 'pointer' }}>
+                            {pinSaving ? '...' : 'Save'}
+                          </button>
+                        </div>
+                      )}
+                      {pinSaved && <div style={{ fontSize: 12, color: '#1a5c38', fontWeight: 700, marginTop: 6 }}>✓ PIN saved successfully</div>}
+                    </div>
                   </div>
                 )}
 
