@@ -1208,6 +1208,7 @@ export default function StockPage() {
                 <div style={{ ...INPUT, background: '#faf5ff', color: '#7c3aed', fontWeight: 700, display: 'flex', alignItems: 'center' }}>🍽️ Instore</div>
               ) : (
                 <select value={itemForm.supplier} onChange={e => setItemForm(f => ({ ...f, supplier: e.target.value }))} style={INPUT}>
+                  <option value="">— Select Supplier —</option>
                   {suppliers.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
                 </select>
               )}
