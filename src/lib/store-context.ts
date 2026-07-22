@@ -55,18 +55,6 @@ export async function getStoreContext(): Promise<StoreContext | null> {
   return _promise
 }
 
-/** Get profile role without requiring store_id */
-async function getProfileRole(): Promise<string | null> {
-  try {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return null
-    const { data } = await supabase.from('profiles').select('role').eq('id', user.id).single()
-    return data?.role ?? null
-  } catch {
-    return null
-  }
-}
-
 export function clearStoreContext() {
   _cache = null
   _promise = null
@@ -78,18 +66,19 @@ export function clearStoreContext() {
  * Priority:
  *  1. ?store=ID in URL  →  franchisor viewing a specific store
  *  2. Profile has store_id  →  normal store login
- *  3. Franchisor admin with no store_id + no URL param  →  redirect to /franchisor
+ *  3. No store available  →  ready=true with empty storeId (page handles its own empty state)
  */
 export function useStoreContext() {
   const [ctx, setCtx] = useState<StoreContext | null>(null)
   const [ready, setReady] = useState(false)
 
   useEffect(() => {
-    const urlStoreId = typeof window !== 'undefined'
-      ? new URLSearchParams(window.location.search).get('store')
-      : null
+    // Read URL param INSIDE the effect to ensure client-side window is available
+    const params = new URLSearchParams(window.location.search)
+    const urlStoreId = params.get('store')
 
     if (urlStoreId) {
+      // Franchisor viewing a specific store via ?store= URL param
       setCtx({
         storeId: urlStoreId,
         orgId: '',
@@ -101,18 +90,8 @@ export function useStoreContext() {
       return
     }
 
-    getStoreContext().then(async c => {
-      if (!c) {
-        // No store on profile — check if franchisor admin who needs to pick a store
-        const role = await getProfileRole()
-        const isFranchiseAdmin = role === 'franchisor_admin' || role === 'platform_admin'
-        const path = typeof window !== 'undefined' ? window.location.pathname : ''
-        const storePages = ['/finances','/analytics','/cashup','/compliance','/documents','/people','/reports','/settings','/stock','/wages','/attendance']
-        if (isFranchiseAdmin && storePages.some(p => path.startsWith(p))) {
-          window.location.href = '/franchisor'
-          return
-        }
-      }
+    // Normal flow — load from profile
+    getStoreContext().then(c => {
       setCtx(c)
       setReady(true)
     })
