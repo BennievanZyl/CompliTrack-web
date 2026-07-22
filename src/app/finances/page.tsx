@@ -558,15 +558,17 @@ export default function FinancesPage() {
 
   async function openGRV(inv: Invoice) {
     setGrvInvoice(inv)
-    // Load supplier's stock items
+    // Load ALL active stock items for matching — not filtered by supplier
+    // because a stock item may not have the supplier name set even if it comes from that supplier
     const { data: items } = await supabase
       .from('stock_items')
       .select('id, description, unit, supplier, is_catch_weight, cost_price, price')
       .eq('store_id', STORE_ID)
       .eq('is_active', true)
-      .eq('supplier', inv.supplier)
       .order('description')
     setGrvItems(items || [])
+    // For the "unmatched at bottom" section, filter to items linked to this supplier
+    const supplierItems = (items || []).filter(i => (i.supplier || '').toLowerCase() === (inv.supplier || '').toLowerCase())
     // Pre-populate lines from stock items, pulling qty/price straight from this invoice's
     // line items wherever the description matches (the match chips on the invoice form
     // already standardize wording to the stock sheet's exact naming).
