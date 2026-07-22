@@ -182,6 +182,7 @@ export default function FinancesPage() {
   const load = useCallback(async () => {
     if (!STORE_ID) return
     setLoading(true)
+    try {
     const monthStart = `${month}-01`
     const [mYear, mMonth] = month.split('-').map(Number)
     const monthEnd = new Date(mYear, mMonth, 0).toISOString().split('T')[0]
@@ -214,7 +215,8 @@ export default function FinancesPage() {
     setSuppliers(suppRes?.data || [])
     setQuickExp(qRes.data || [])
     setAllStockItems(stockRes?.data || [])
-    setLoading(false)
+    } catch(e) { console.error('[finances] load error', e) }
+    finally { setLoading(false) }
   }, [month, STORE_ID, ORG_ID])
 
   useEffect(() => { load() }, [load])
