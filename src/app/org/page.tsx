@@ -156,7 +156,7 @@ export default function OrgPage() {
         supabase.from('daily_sessions').select('id, status, started_at, duration_seconds').eq('store_id', store.id).eq('session_date', today).eq('session_type', 'daily').maybeSingle(),
         supabase.from('cash_ups').select('cash_up_total').eq('store_id', store.id).neq('status', 'draft').gte('cash_up_date', monthStart).lte('cash_up_date', today),
         supabase.from('expenses').select('amount').eq('store_id', store.id).gte('expense_date', monthStart).lte('expense_date', today),
-        supabase.from('invoices').select('id, total_amount, vat_amount').eq('store_id', store.id).in('status', ['received', 'paid']).gte('invoice_date', monthStart).lte('invoice_date', today),
+        supabase.from('invoices').select('id, total_amount, total_vat').eq('store_id', store.id).in('status', ['received', 'paid']).gte('invoice_date', monthStart).lte('invoice_date', today),
         // stock_purchases used ONLY for food cost % — NOT included in expenses (invoices already capture that spend)
         supabase.from('stock_purchases').select('quantity, unit_cost').eq('store_id', store.id).gte('purchase_date', monthStart).lte('purchase_date', today),
         supabase.from('stock_wastage').select('total_cost').eq('store_id', store.id).gte('wastage_date', monthStart).lte('wastage_date', today),
@@ -165,7 +165,7 @@ export default function OrgPage() {
       const sales_mtd = (salesRes.data || []).reduce((s: number, r: any) => s + Number(r.cash_up_total || 0), 0);
       const sales_excl_vat = sales_mtd / 1.15;
       const quickExp = (expRes.data || []).reduce((s: number, r: any) => s + Number(r.amount || 0), 0);
-      const invExp = (invoicesRes.data || []).reduce((s: number, r: any) => s + (Number(r.total_amount || 0) - Number(r.vat_amount || 0)), 0); // ex-VAT subtotal
+      const invExp = (invoicesRes.data || []).reduce((s: number, r: any) => s + (Number(r.total_amount || 0) - Number(r.total_vat || 0)), 0); // ex-VAT subtotal
       // purchases = qty × unit_cost (no total_cost column on stock_purchases)
       const purchases = (purchRes.data || []).reduce((s: number, r: any) => s + (Number(r.quantity || 0) * Number(r.unit_cost || 0)), 0);
       const wastage = (wastRes.data || []).reduce((s: number, r: any) => s + Number(r.total_cost || 0), 0);
