@@ -9,7 +9,7 @@ const DARK = '#0a1f12';
 
 type Organisation = { id: string; name: string; };
 type Store = { id: string; name: string; city: string; manager_name: string | null; organisation_id: string; is_active: boolean; };
-type StoreStats = { store_id: string; session_id: string | null; status: string | null; total: number; completed: number; uniform_photos: number; temp_violations: number; duration_seconds: number | null; sales_mtd: number; expenses_mtd: number; food_cost_pct: number | null; spice_mtd: number; spice_ratio_pct: number | null; };
+type StoreStats = { store_id: string; session_id: string | null; status: string | null; total: number; completed: number; uniform_photos: number; temp_violations: number; duration_seconds: number | null; sales_mtd: number; expenses_mtd: number; food_cost_pct: number | null; spice_mtd: number; spice_ratio_pct: number | null; spice_breakdown: string; };
 type Profile = { full_name: string; franchisor_id: string; role: string; };
 type HistorySession = { id: string; session_date: string; status: string; store_id: string; duration_seconds: number | null; total: number; completed: number; };
 type ChecklistItem = { id: string; completed: boolean; completed_at: string | null; notes: string | null; photo_url: string | null; checklist_templates: { task_name: string; section: string; } | null; };
@@ -113,16 +113,51 @@ export default function FranchisorPage() {
       // Expenses = supplier invoices + quick expenses only (stock_purchases already inside invoices)
       const expenses_mtd = quickExp + invExp;
       const food_cost_pct = sales_mtd_excl_vat > 0 ? (purchases - wastage) / sales_mtd_excl_vat * 100 : null;
-      // Match "Spice" category by id first, falling back to a name match (categories are sometimes
-      // referenced by legacy name/slug on older stock items rather than by uuid).
+      // Identify spice category items
       const spiceCategoryIds = new Set((spiceCatRes.data || []).filter((c: any) => (c.name || '').toLowerCase().includes('spice')).map((c: any) => c.id));
       const spiceCategoryNames = new Set((spiceCatRes.data || []).filter((c: any) => (c.name || '').toLowerCase().includes('spice')).map((c: any) => (c.name || '').toLowerCase()));
       const spiceItemIds = new Set((spiceItemsRes.data || []).filter((i: any) => spiceCategoryIds.has(i.category) || spiceCategoryNames.has((i.category || '').toLowerCase())).map((i: any) => i.id));
-      // Use quantity × unit_cost — same pattern as food cost (total_cost not in select)
-      const spice_mtd = (purchRes.data || []).filter((r: any) => r.stock_item_id && spiceItemIds.has(r.stock_item_id)).reduce((s: number, r: any) => s + (Number(r.quantity || 0) * Number(r.unit_cost || 0)), 0);
-      const spice_ratio_pct = sales_mtd_excl_vat > 0 ? (spice_mtd / sales_mtd_excl_vat) * 100 : null;
+
+      // Option A — True Consumption: Opening + Purchases − Closing
+      // This removes the effect of ordering cycles — only counts what was actually used.
+      const spice_purchases = (purchRes.data || [])
+        .filter((r: any) => r.stock_item_id && spiceItemIds.has(r.stock_item_id))
+        .reduce((s: number, r: any) => s + (Number(r.quantity || 0) * Number(r.unit_cost || 0)), 0);
+
+      // Fetch opening and closing stock count values for spice items
+      const spiceCountValue = async (countId: string | undefined): Promise<number> => {
+        if (!countId || spiceItemIds.size === 0) return 0;
+        const { data: lines } = await supabase
+          .from('stock_count_lines')
+          .select('actual_qty, unit_cost, stock_item_id')
+          .eq('stock_count_id', countId)
+          .in('stock_item_id', [...spiceItemIds]);
+        return (lines || []).reduce((s: number, l: any) => s + Number(l.actual_qty || 0) * Number(l.unit_cost || 0), 0);
+      };
+
+      // Get completed stock counts for this store around the period
+      const { data: spiceCounts } = await supabase
+        .from('stock_counts')
+        .select('id, count_date')
+        .eq('store_id', store.id)
+        .eq('status', 'completed')
+        .order('count_date', { ascending: false })
+        .limit(10);
+
+      const openingCount = (spiceCounts || []).find((c: any) => c.count_date < monthStart);
+      const closingCount = (spiceCounts || []).find((c: any) => c.count_date <= today);
+      const [spiceOpeningVal, spiceClosingVal] = await Promise.all([
+        spiceCountValue(openingCount?.id),
+        spiceCountValue(closingCount?.id),
+      ]);
+
+      // True spice consumed = Opening stock + Purchases − Closing stock
+      const spice_mtd = spiceOpeningVal + spice_purchases - spiceClosingVal;
+      const spice_ratio_pct = sales_mtd_excl_vat > 0 && spice_mtd > 0 ? (spice_mtd / sales_mtd_excl_vat) * 100 : null;
+      // Sub-label to show the breakdown
+      const spice_breakdown = `R${spice_purchases.toFixed(0)} purchased${spiceOpeningVal > 0 || spiceClosingVal > 0 ? ` · Δstock R${(spiceOpeningVal - spiceClosingVal).toFixed(0)}` : ' (no count — add counts for full accuracy)'}`;
       if (!session) {
-        statsMap[store.id] = { store_id: store.id, session_id: null, status: null, total: 0, completed: 0, uniform_photos: 0, temp_violations: 0, duration_seconds: null, sales_mtd, expenses_mtd, food_cost_pct, spice_mtd, spice_ratio_pct };
+        statsMap[store.id] = { store_id: store.id, session_id: null, status: null, total: 0, completed: 0, uniform_photos: 0, temp_violations: 0, duration_seconds: null, sales_mtd, expenses_mtd, food_cost_pct, spice_mtd, spice_ratio_pct, spice_breakdown };
         return;
       }
       const [totalRes, completedRes, uniformRes, violationRes] = await Promise.all([
@@ -131,7 +166,7 @@ export default function FranchisorPage() {
         supabase.from('uniform_sessions').select('id').eq('session_id', session.id),
         supabase.from('temperature_logs').select('id').eq('session_id', session.id).eq('is_compliant', false),
       ]);
-      statsMap[store.id] = { store_id: store.id, session_id: session.id, status: session.status, total: totalRes.data?.length || 0, completed: completedRes.data?.length || 0, uniform_photos: uniformRes.data?.length || 0, temp_violations: violationRes.data?.length || 0, duration_seconds: session.duration_seconds, sales_mtd, expenses_mtd, food_cost_pct, spice_mtd, spice_ratio_pct };
+      statsMap[store.id] = { store_id: store.id, session_id: session.id, status: session.status, total: totalRes.data?.length || 0, completed: completedRes.data?.length || 0, uniform_photos: uniformRes.data?.length || 0, temp_violations: violationRes.data?.length || 0, duration_seconds: session.duration_seconds, sales_mtd, expenses_mtd, food_cost_pct, spice_mtd, spice_ratio_pct, spice_breakdown };
     }));
     setStats(statsMap);
     const spiceRatios = Object.values(statsMap).map(s => s.spice_ratio_pct).filter((r): r is number => r != null && r > 0);
