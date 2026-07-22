@@ -62,9 +62,12 @@ export function clearStoreContext() {
 
 /**
  * React hook — returns store context.
- * When URL contains ?store=STORE_ID (franchisor viewing a store),
- * that store ID is used directly — no DB lookup needed, RLS is bypassed
- * because all data queries on the page already use the storeId directly.
+ *
+ * Priority order:
+ *  1. ?store=STORE_ID in URL  →  franchisor viewing a specific store
+ *  2. Profile has store_id    →  normal store owner/manager login
+ *  3. Franchisor admin with no store_id and no URL param
+ *     →  redirect to /franchisor portal (they should select a store there)
  */
 export function useStoreContext() {
   const [ctx, setCtx] = useState<StoreContext | null>(null)
@@ -76,9 +79,7 @@ export function useStoreContext() {
       : null
 
     if (urlStoreId) {
-      // Franchisor viewing a specific store via ?store= URL param.
-      // Trust the store ID directly — the franchisor portal already validated
-      // access. All page queries use storeId directly so RLS is applied per-query.
+      // Franchisor is viewing a specific store via ?store= URL param
       setCtx({
         storeId: urlStoreId,
         orgId: '',
@@ -87,12 +88,34 @@ export function useStoreContext() {
         stores: [{ id: urlStoreId, name: '' }],
       })
       setReady(true)
-    } else {
-      getStoreContext().then(c => {
-        setCtx(c)
-        setReady(true)
-      })
+      return
     }
+
+    // Normal flow — load from profile
+    getStoreContext().then(c => {
+      if (!c) {
+        // Profile has no store_id — check if this is a franchisor admin
+        // who navigated directly to a store page without ?store= param
+        supabase.from('profiles').select('role').eq('id', supabase.auth.getUser().then(r => r.data.user?.id ?? '')).maybeSingle().catch(() => null)
+        supabase.auth.getUser().then(({ data: { user } }) => {
+          if (!user) return
+          supabase.from('profiles').select('role').eq('id', user.id).single().then(({ data }) => {
+            if (data?.role === 'franchisor_admin' || data?.role === 'platform_admin') {
+              // Redirect to franchisor portal — they need to select a store first
+              if (typeof window !== 'undefined' &&
+                  !window.location.pathname.startsWith('/franchisor') &&
+                  !window.location.pathname.startsWith('/admin') &&
+                  !window.location.pathname.startsWith('/login') &&
+                  !window.location.pathname.startsWith('/org')) {
+                window.location.href = '/franchisor'
+              }
+            }
+          })
+        })
+      }
+      setCtx(c)
+      setReady(true)
+    })
   }, [])
 
   return {
