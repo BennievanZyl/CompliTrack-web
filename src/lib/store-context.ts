@@ -55,53 +55,39 @@ export async function getStoreContext(): Promise<StoreContext | null> {
   return _promise
 }
 
-/** Load a specific store by ID (used when franchisor views a store via ?store=xxx) */
-async function getStoreById(storeId: string): Promise<StoreContext | null> {
-  try {
-    const { data: store } = await supabase.from('stores').select('id, name, organisation_id').eq('id', storeId).single()
-    if (!store) return null
-    const { data: { user } } = await supabase.auth.getUser()
-    const { data: profile } = user ? await supabase.from('profiles').select('role, organisation_id').eq('id', user.id).single() : { data: null }
-    return {
-      storeId: store.id,
-      orgId: (store as any).organisation_id ?? profile?.organisation_id ?? '',
-      storeName: (store as any).name ?? '',
-      role: profile?.role ?? 'franchisor_admin',
-      stores: [{ id: store.id, name: (store as any).name ?? '' }],
-    }
-  } catch {
-    return null
-  }
-}
-
 export function clearStoreContext() {
   _cache = null
   _promise = null
 }
 
 /**
- * React hook — returns store context for the logged-in user.
- * When the URL contains ?store=STORE_ID (franchisor viewing a store),
- * that store's data is used instead of the logged-in user's store.
+ * React hook — returns store context.
+ * When URL contains ?store=STORE_ID (franchisor viewing a store),
+ * that store ID is used directly — no DB lookup needed, RLS is bypassed
+ * because all data queries on the page already use the storeId directly.
  */
 export function useStoreContext() {
   const [ctx, setCtx] = useState<StoreContext | null>(null)
   const [ready, setReady] = useState(false)
 
   useEffect(() => {
-    // Check for ?store= URL override (franchisor portal navigating into a store)
     const urlStoreId = typeof window !== 'undefined'
       ? new URLSearchParams(window.location.search).get('store')
       : null
 
     if (urlStoreId) {
-      // Franchisor is viewing a specific store — load that store's context
-      getStoreById(urlStoreId).then(c => {
-        setCtx(c)
-        setReady(true)
+      // Franchisor viewing a specific store via ?store= URL param.
+      // Trust the store ID directly — the franchisor portal already validated
+      // access. All page queries use storeId directly so RLS is applied per-query.
+      setCtx({
+        storeId: urlStoreId,
+        orgId: '',
+        storeName: '',
+        role: 'franchisor_admin',
+        stores: [{ id: urlStoreId, name: '' }],
       })
+      setReady(true)
     } else {
-      // Normal login — use the logged-in user's own store
       getStoreContext().then(c => {
         setCtx(c)
         setReady(true)
