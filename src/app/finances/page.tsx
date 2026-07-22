@@ -570,54 +570,57 @@ export default function FinancesPage() {
     // already standardize wording to the stock sheet's exact naming).
     const invLinesForMatch = inv.invoice_lines || []
     const BULK_UNITS = ['kg', 'g', 'l', 'liter', 'litre', 'liters', 'litres']
-    setGrvLines((items || []).map(i => {
-      const norm = (s: string) => s.trim().toLowerCase()
-      const match = invLinesForMatch.find(l => norm(l.description) === norm(i.description || ''))
+    const norm = (s: string) => s.trim().toLowerCase()
+
+    const buildLine = (i: typeof items[0], match: typeof invLinesForMatch[0] | undefined) => {
       const matchQty = match ? Number(match.qty) || 0 : 0
       const matchAmount = match ? Number(match.amount) || 0 : 0
-      // Use unit_price from invoice line if available (excl-VAT unit cost per case),
-      // otherwise fall back to amount/qty then stock item's stored price.
       const matchUnitCost = match?.unit_price && Number(match.unit_price) > 0
         ? Number(match.unit_price)
         : match && matchQty > 0 ? (matchAmount / matchQty) : 0
-
-      // Auto-detect case mode: if the stock item is tracked in a bulk unit (kg/L)
-      // and the invoice line has a case_size, pre-fill the case breakdown fields.
       const stockUnitIsBulk = BULK_UNITS.includes((i.unit || '').toLowerCase())
       const caseSize = match?.case_size ? Number(match.case_size) : null
       const caseSizeMatchesUnit = caseSize && match?.case_uom
         && BULK_UNITS.includes((match.case_uom || '').toLowerCase())
-
       if (match && matchQty > 0 && stockUnitIsBulk && caseSizeMatchesUnit && caseSize) {
-        // Case mode: cases received × kg(L)/case = total qty in stock unit
         const totalQty = matchQty * caseSize
         const costPerUnit = matchUnitCost > 0 ? matchUnitCost / caseSize : 0
         return {
-          stock_item_id: i.id,
-          description: i.description || '',
-          unit: i.unit || 'each',
+          stock_item_id: i.id, description: i.description || '', unit: i.unit || 'each',
           qty_received: totalQty.toFixed(3),
           unit_cost: costPerUnit > 0 ? costPerUnit.toFixed(4) : String(Number(i.cost_price || i.price || 0) || ''),
-          units_per_case: String(caseSize),
-          case_qty: String(matchQty),
+          units_per_case: String(caseSize), case_qty: String(matchQty),
           case_price: matchUnitCost > 0 ? matchUnitCost.toFixed(2) : '',
           is_catch_weight: !!(i as any).is_catch_weight,
         }
       }
-
-      // Default: simple qty / unit cost (units/each items or no case_size info)
       return {
-        stock_item_id: i.id,
-        description: i.description || '',
-        unit: i.unit || 'each',
+        stock_item_id: i.id, description: i.description || '', unit: i.unit || 'each',
         qty_received: match && matchQty > 0 ? String(matchQty) : '',
         unit_cost: match && matchUnitCost > 0 ? matchUnitCost.toFixed(4) : String(Number(i.cost_price || i.price || 0) || ''),
-        units_per_case: '',
-        case_qty: '',
-        case_price: '',
+        units_per_case: '', case_qty: '', case_price: '',
         is_catch_weight: !!(i as any).is_catch_weight,
       }
-    }))
+    }
+
+    // Build GRV in INVOICE LINE ORDER (matching supplier's physical invoice layout)
+    // then append any supplier stock items not on this invoice at the bottom
+    const matchedStockIds = new Set<string>()
+    const invoiceOrderedLines = invLinesForMatch
+      .map(invLine => {
+        const stockItem = (items || []).find(i => norm(i.description || '') === norm(invLine.description || ''))
+        if (!stockItem) return null // invoice line has no stock item set up — skip
+        matchedStockIds.add(stockItem.id)
+        return buildLine(stockItem, invLine)
+      })
+      .filter(Boolean) as ReturnType<typeof buildLine>[]
+
+    // Supplier stock items not on this invoice (available to receive at bottom)
+    const unmatchedLines = (items || [])
+      .filter(i => !matchedStockIds.has(i.id))
+      .map(i => buildLine(i, undefined))
+
+    setGrvLines([...invoiceOrderedLines, ...unmatchedLines])
     setShowGRV(true)
   }
 
