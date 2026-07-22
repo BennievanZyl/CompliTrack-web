@@ -58,14 +58,14 @@ function DashboardContent() {
     const isFranchiseeOwner = profileData.role === 'franchisee_owner'
 
     if (storeParam && (isFranchisor || isFranchiseeOwner)) {
-      // Franchisor or franchisee owner viewing a specific store
+      // Franchisor viewing a specific store — try to load store details
       const { data: storeData } = await supabase
-        .from('stores').select('id, name, city').eq('id', storeParam).single()
-      if (storeData) {
-        setViewingAsStore(storeData)
-        setStores([storeData])
-        setSelectedStore(storeData)
-      }
+        .from('stores').select('id, name, city').eq('id', storeParam).maybeSingle()
+      // If RLS blocks the query, fall back to using storeParam directly
+      const store = storeData || { id: storeParam, name: 'Store', city: '' }
+      setViewingAsStore(store)
+      setStores([store])
+      setSelectedStore(store)
     } else {
       // Normal user — load their own stores
       const { data: storesData } = await supabase
