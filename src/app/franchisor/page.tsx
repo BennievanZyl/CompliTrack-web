@@ -31,6 +31,7 @@ export default function FranchisorPage() {
   const [history, setHistory] = useState<HistorySession[]>([]);
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [selectedMonth, setSelectedMonth] = useState<string>(new Date().toISOString().slice(0, 7)); // YYYY-MM
   const [networkAvgSpiceRatio, setNetworkAvgSpiceRatio] = useState<number | null>(null);
   const [selectedOrg, setSelectedOrg] = useState<string>('all');
   const [search, setSearch] = useState('');
@@ -77,8 +78,16 @@ export default function FranchisorPage() {
   }
 
   async function loadStats(storeList: Store[]) {
-    const today = new Date().toISOString().split('T')[0];
-    const monthStart = today.slice(0, 7) + '-01';
+    const now = new Date();
+    const todayFull = now.toISOString().split('T')[0];
+    // Use selectedMonth if provided, otherwise current month
+    const useMonth = selectedMonth || todayFull.slice(0, 7);
+    const monthStart = useMonth + '-01';
+    // End = last day of the selected month (or today if current month)
+    const isCurrentMonth = useMonth === todayFull.slice(0, 7);
+    const lastDayOfMonth = new Date(parseInt(useMonth.slice(0,4)), parseInt(useMonth.slice(5,7)), 0).getDate();
+    const monthEnd = isCurrentMonth ? todayFull : `${useMonth}-${String(lastDayOfMonth).padStart(2,'0')}`;
+    const today = monthEnd; // alias for all queries
     const statsMap: Record<string, StoreStats> = {};
     await Promise.all(storeList.map(async (store) => {
       const [sessionRes, salesRes, expRes, purchRes, wastRes, invoicesRes, spiceCatRes, spiceItemsRes] = await Promise.all([
@@ -109,7 +118,8 @@ export default function FranchisorPage() {
       const spiceCategoryIds = new Set((spiceCatRes.data || []).filter((c: any) => (c.name || '').toLowerCase().includes('spice')).map((c: any) => c.id));
       const spiceCategoryNames = new Set((spiceCatRes.data || []).filter((c: any) => (c.name || '').toLowerCase().includes('spice')).map((c: any) => (c.name || '').toLowerCase()));
       const spiceItemIds = new Set((spiceItemsRes.data || []).filter((i: any) => spiceCategoryIds.has(i.category) || spiceCategoryNames.has((i.category || '').toLowerCase())).map((i: any) => i.id));
-      const spice_mtd = (purchRes.data || []).filter((r: any) => r.stock_item_id && spiceItemIds.has(r.stock_item_id)).reduce((s: number, r: any) => s + Number(r.total_cost || 0), 0);
+      // Use quantity × unit_cost — same pattern as food cost (total_cost not in select)
+      const spice_mtd = (purchRes.data || []).filter((r: any) => r.stock_item_id && spiceItemIds.has(r.stock_item_id)).reduce((s: number, r: any) => s + (Number(r.quantity || 0) * Number(r.unit_cost || 0)), 0);
       const spice_ratio_pct = sales_mtd_excl_vat > 0 ? (spice_mtd / sales_mtd_excl_vat) * 100 : null;
       if (!session) {
         statsMap[store.id] = { store_id: store.id, session_id: null, status: null, total: 0, completed: 0, uniform_photos: 0, temp_violations: 0, duration_seconds: null, sales_mtd, expenses_mtd, food_cost_pct, spice_mtd, spice_ratio_pct };
