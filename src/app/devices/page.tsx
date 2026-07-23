@@ -41,8 +41,9 @@ export default function DevicesPage() {
         router.push('/dashboard'); return
       }
       setStoreId(profile.store_id)
-      const { data } = await supabase.from('store_devices')
-        .select('*').eq('store_id', profile.store_id).order('linked_at', { ascending: false })
+      // Linked devices = claimed invitations (used_at IS NOT NULL)
+      const { data } = await supabase.from('device_invitations')
+        .select('*').eq('store_id', profile.store_id).not('used_at', 'is', null).order('used_at', { ascending: false })
       setDevices(data || [])
       setLoading(false)
     }
@@ -66,13 +67,13 @@ export default function DevicesPage() {
 
   async function removeDevice(id: string) {
     setRemoving(id)
-    await supabase.from('store_devices').delete().eq('id', id)
+    await supabase.from('device_invitations').update({ used_at: null, device_name: null }).eq('id', id)
     setDevices(d => d.filter(x => x.id !== id))
     setRemoving(null)
   }
 
   async function changeRole(id: string, role: string) {
-    await supabase.from('store_devices').update({ role }).eq('id', id)
+    await supabase.from('device_invitations').update({ role }).eq('id', id)
     setDevices(d => d.map(x => x.id === id ? { ...x, role } : x))
   }
 
@@ -190,7 +191,7 @@ export default function DevicesPage() {
                   <div style={{ flex: 1 }}>
                     <div style={{ fontWeight: 700, fontSize: 15, color: '#111' }}>{device.device_name || 'Unnamed Device'}</div>
                     <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 2 }}>
-                      Linked {new Date(device.linked_at).toLocaleDateString('en-ZA')}
+                      Linked {new Date(device.used_at).toLocaleDateString('en-ZA')}
                       {device.last_seen_at && ` · Last seen ${new Date(device.last_seen_at).toLocaleDateString('en-ZA')}`}
                     </div>
                   </div>
