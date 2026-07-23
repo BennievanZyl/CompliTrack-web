@@ -174,7 +174,7 @@ export default function AnalyticsPage(){
     const COLORS=['#3b82f6','#8b5cf6','#06b6d4','#f59e0b','#84cc16','#ec4899','#14b8a6','#f97316','#a855f7','#0ea5e9']
     let ci=0
     // Keys that represent food/product cost — excluded from operating expenses (already in food cost calc)
-    const isFoodCostKey=(k:string)=>!k||['cost_of_sales','stock_cogs','cogs'].includes(k)||k.toLowerCase().includes('cog')||k.toLowerCase().startsWith('stock_c')
+    const isFoodCostKey=(k:string)=>!k||['cost_of_sales','stock_cogs','cogs','packaging'].includes(k)||k.toLowerCase().includes('cog')||k.toLowerCase().startsWith('stock_c')||k.toLowerCase().includes('packaging')
     const addExp=(key:string,name:string,amt:number)=>{
       const k=key||'other'
       if(isFoodCostKey(k))return
