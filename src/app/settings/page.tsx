@@ -85,8 +85,15 @@ export default function SettingsPage() {
 
   async function saveStockSettings() {
     setSavingStockSettings(true)
-    await supabase.from('store_settings').upsert({ store_id: STORE_ID, ...stockSettings, updated_at: new Date().toISOString() }, { onConflict: 'store_id' })
+    const { error } = await supabase.from('store_settings').upsert(
+      { store_id: STORE_ID, ...stockSettings, updated_at: new Date().toISOString() },
+      { onConflict: 'store_id' }
+    )
     setSavingStockSettings(false)
+    if (error) {
+      alert('Could not save: ' + error.message + '\n\nThe store_settings table may not exist yet. Please run the SQL setup in Supabase.')
+      return
+    }
     setStockSettingsSaved(true)
     setTimeout(() => setStockSettingsSaved(false), 2000)
   }
