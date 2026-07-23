@@ -116,7 +116,7 @@ export default function SettingsPage() {
 
   async function loadAll() {
     setLoading(true)
-    const [storeRes, templRes, catRes, permsRes] = await Promise.all([
+    const [storeRes, templRes, stockSettingsRes, catRes, permsRes] = await Promise.all([
       supabase.from('stores').select('*').eq('id', STORE_ID).single(),
       supabase.from('checklist_templates').select('*').eq('store_id', STORE_ID).order('section').order('sort_order'),
       supabase.from('store_settings').select('*').eq('store_id', STORE_ID).maybeSingle(),
@@ -126,6 +126,7 @@ export default function SettingsPage() {
     if (storeRes.data) { setStore(storeRes.data); setForm(storeRes.data) }
     setStoreId(STORE_ID)
     setTemplates(templRes.data || [])
+    if (stockSettingsRes.data) setStockSettings({ allow_negative_stock: (stockSettingsRes.data as any).allow_negative_stock ?? true, require_pin_on_issue: (stockSettingsRes.data as any).require_pin_on_issue ?? false })
     setCategories(catRes.data || [])
     // Build permissions map: { role: { card: true/false } }
     const permsMap: Record<string, Record<string, boolean>> = {}
