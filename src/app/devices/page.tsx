@@ -42,8 +42,13 @@ export default function DevicesPage() {
       }
       setStoreId(profile.store_id)
       // Linked devices = claimed invitations (used_at IS NOT NULL)
-      const { data } = await supabase.from('device_invitations')
-        .select('*').eq('store_id', profile.store_id).not('used_at', 'is', null).order('used_at', { ascending: false })
+      const { data, error: devErr } = await supabase.from('device_invitations')
+        .select('*')
+        .eq('store_id', profile.store_id)
+        .filter('used_at', 'not.is', null)
+        .order('used_at', { ascending: false })
+      if (devErr) console.error('[devices] query error:', devErr.message)
+      console.log('[devices] found:', data?.length ?? 0, 'linked devices for store:', profile.store_id)
       setDevices(data || [])
       setLoading(false)
     }
