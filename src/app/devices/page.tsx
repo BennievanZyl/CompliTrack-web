@@ -98,7 +98,13 @@ export default function DevicesPage() {
   }
 
   async function changeRole(id: string, role: string) {
+    // Update invitation role
     await supabase.from('device_invitations').update({ role }).eq('id', id)
+    // Also update the profile so the device sees the new role immediately
+    const device = devices.find(d => d.id === id)
+    if (device?.linked_user_id) {
+      await supabase.from('profiles').update({ role }).eq('id', device.linked_user_id)
+    }
     setDevices(d => d.map(x => x.id === id ? { ...x, role } : x))
   }
 
