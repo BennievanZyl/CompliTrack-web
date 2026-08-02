@@ -377,7 +377,7 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
   const cashUpTotal = posSlip - voids;
   const variance = aTotal - cashUpTotal;
   const customers = parseInt(perf.customer_count) || 0;
-  const avgSpend = customers > 0 ? cashUpTotal / customers : 0;
+  const avgSpend = customers > 0 ? aTotal / customers : 0; // use aTotal (actual sales) not cashUpTotal (physical count)
   const varianceColor = variance === 0 ? PRIMARY : variance > 0 ? '#f59e0b' : '#ef4444';
   const varianceLabel = variance === 0 ? 'BALANCED' : variance > 0 ? `OVER by ${fmt(Math.abs(variance))}` : `SHORT by ${fmt(Math.abs(variance))}`;
   const isSignedOff = cashUp?.status === 'signed_off';
