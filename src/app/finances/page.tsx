@@ -2003,15 +2003,9 @@ export default function FinancesPage() {
                                 {/* Result: cost per each */}
                                 <div>
                                   <div style={{ fontSize: 11, color: "#92400e", marginBottom: 4 }}>Cost per {line.unit}</div>
-                                  <div style={{ padding: "6px 10px", background: "#fff", border: "1.5px solid #f59e0b", borderRadius: 8, fontSize: 14, minWidth: 80, fontWeight: 700, color: "#92400e" }}>
-                                    {(() => {
-                                      const kg = parseFloat((line as any).catch_kg || "0")
-                                      const pkg = parseFloat((line as any).catch_price_per_kg || line.unit_cost || "0")
-                                      const u = parseFloat((line as any).catch_units || "0")
-                                      if (kg > 0 && pkg > 0 && u > 0) return "R" + ((kg * pkg) / u).toFixed(2)
-                                      return parseFloat(line.unit_cost) > 0 ? "R" + parseFloat(line.unit_cost).toFixed(2) : "n/a"
-                                    })()}
-                                  </div>
+                                   <div style={{ padding: "6px 10px", background: "#fff", border: "1.5px solid #f59e0b", borderRadius: 8, fontSize: 14, minWidth: 80, fontWeight: 700, color: "#92400e" }}>
+                                     {parseFloat(line.unit_cost) > 0 ? ("R" + parseFloat(line.unit_cost).toFixed(2)) : "n/a"}
+                                   </div>
                                 </div>
                                 <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 14, width: "100%" }}>
                                   Formula: (Total KG x R/kg) / Units = Cost per {line.unit}
