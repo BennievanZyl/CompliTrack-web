@@ -634,12 +634,16 @@ export default function SettingsPage() {
 
                 async function togglePerm(cardKey: string) {
                   const current = perms[cardKey] !== false // default true
-                  const updated = { ...perms, [cardKey]: !current }
-                  setRolePerms(p => ({ ...p, [role]: updated }))
+                  // Build FULL permissions object with ALL cards explicitly set
+                  // so no key is ever missing (missing keys caused display bugs)
+                  const fullPerms = Object.fromEntries(
+                    ALL_CARDS.map(c => [c.key, c.key === cardKey ? !current : (perms[c.key] !== false)])
+                  )
+                  setRolePerms(p => ({ ...p, [role]: fullPerms }))
                   await supabase.from('store_role_permissions').upsert({
                     store_id: STORE_ID,
                     role,
-                    permissions: updated,
+                    permissions: fullPerms,
                     updated_at: new Date().toISOString(),
                   }, { onConflict: 'store_id,role' })
                 }
