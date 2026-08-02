@@ -129,7 +129,7 @@ export default function FinancesPage() {
   const [scanError, setScanError] = useState('')
   const [showScanChoice, setShowScanChoice] = useState(false)
   const [scanSupplier, setScanSupplier] = useState('')
-  const scanSupplierRef = useRef('') // ref mirrors state — always readable in async closures without stale value issues
+  const scanSupplierRef = useRef('') // ref mirrors state n/a always readable in async closures without stale value issues
   const [deviceScanStatus, setDeviceScanStatus] = useState<'waiting' | 'received' | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [error, setError] = useState('')
@@ -288,7 +288,7 @@ export default function FinancesPage() {
     setDeviceScanStatus('waiting')
     setScanError('')
 
-    // Capture supplier template NOW — scanSupplierRef.current is already set
+    // Capture supplier template NOW n/a scanSupplierRef.current is already set
     // when the user clicks "Scan Invoice" (before choosing device vs file).
     const _supplierName = scanSupplierRef.current || ''
     const _matchedSup = suppliers.find(s => s.name === _supplierName)
@@ -323,7 +323,7 @@ export default function FinancesPage() {
         await supabase.from('pending_invoice_scans').update({ status: 'processing' }).eq('id', rowId)
 
         try {
-          // Fetch full row — Realtime payload truncates large columns
+          // Fetch full row n/a Realtime payload truncates large columns
           const { data: scanRow, error: fetchErr } = await supabase
             .from('pending_invoice_scans')
             .select('image_base64, image_url')
@@ -337,7 +337,7 @@ export default function FinancesPage() {
           if (!b64 && scanRow?.image_url) {
             // Old app version: uploaded to storage (bucket is now public, direct fetch works)
             const imgRes = await fetch(scanRow.image_url)
-            if (!imgRes.ok) throw new Error(`Image fetch failed: ${imgRes.status} — try updating the app`)
+            if (!imgRes.ok) throw new Error(`Image fetch failed: ${imgRes.status} n/a try updating the app`)
             const buf = await imgRes.arrayBuffer()
             const uint8 = new Uint8Array(buf)
             const CHUNK = 8190  // must be divisible by 3 to avoid = padding mid-string
@@ -358,7 +358,7 @@ export default function FinancesPage() {
           if (!response.ok) throw new Error(data.error || 'Scan failed')
 
           setShowInvForm(true)
-          // Supplier is already set from pre-selection — never override it with AI-detected name.
+          // Supplier is already set from pre-selection n/a never override it with AI-detected name.
           // Only fill in fields the user hasn't provided yet.
           if (data.invoice_number) setInvForm(f => ({ ...f, invoice_number: data.invoice_number }))
           if (data.invoice_date) setInvForm(f => ({ ...f, invoice_date: data.invoice_date }))
@@ -394,7 +394,7 @@ export default function FinancesPage() {
     setTimeout(() => {
       supabase.removeChannel(channel)
       setDeviceScanStatus(prev => {
-        if (prev === 'waiting') { setScanError('No photo received from device — make sure you\'re logged into the same store on the app.'); return null; }
+        if (prev === 'waiting') { setScanError('No photo received from device n/a make sure you\'re logged into the same store on the app.'); return null; }
         return prev
       })
     }, 180000)
@@ -508,7 +508,7 @@ export default function FinancesPage() {
     const seenMapsTo = new Set<string>()
     for (const c of sup.invoice_columns) {
       if (!c.maps_to || !MAPS_TO_FIELD[c.maps_to]) continue
-      // Deduplicate by maps_to value — allows both unit_price_excl and total_excl
+      // Deduplicate by maps_to value n/a allows both unit_price_excl and total_excl
       // to appear even though they share the same internal field ('unit_price').
       // Without this, "Exclusive Value" (total_excl) was silently dropped whenever
       // "Unit Price (excl)" (unit_price_excl) appeared earlier in the list.
@@ -545,7 +545,7 @@ export default function FinancesPage() {
           updated.vat_amount = Math.round(newExcl * VAT_RATE * 100) / 100
           updated.amount     = Math.round(newExcl * (1 + VAT_RATE) * 100) / 100
         } else {
-          // VAT manually set — just update the total using existing VAT
+          // VAT manually set n/a just update the total using existing VAT
           updated.amount = Math.round((newExcl + currentVat) * 100) / 100
         }
       }
@@ -558,7 +558,7 @@ export default function FinancesPage() {
 
   async function openGRV(inv: Invoice) {
     setGrvInvoice(inv)
-    // Load ALL active stock items for matching — not filtered by supplier
+    // Load ALL active stock items for matching n/a not filtered by supplier
     // because a stock item may not have the supplier name set even if it comes from that supplier
     const { data: items } = await supabase
       .from('stock_items')
@@ -613,7 +613,7 @@ export default function FinancesPage() {
     const invoiceOrderedLines = invLinesForMatch
       .map(invLine => {
         const stockItem = (items || []).find(i => norm(i.description || '') === norm(invLine.description || ''))
-        if (!stockItem) return null // invoice line has no stock item set up — skip
+        if (!stockItem) return null // invoice line has no stock item set up n/a skip
         matchedStockIds.add(stockItem.id)
         return buildLine(stockItem, invLine)
       })
@@ -709,7 +709,7 @@ export default function FinancesPage() {
 
       if (!b64) throw new Error('Could not read file')
 
-      // supplierArg is passed directly from the call site — zero closure/ref ambiguity
+      // supplierArg is passed directly from the call site n/a zero closure/ref ambiguity
       const supplierName = (supplierArg && supplierArg !== '__other__') ? supplierArg : ''
       const matchedSupplier = suppliers.find(s => s.name === supplierName)
       const supplierTemplate = matchedSupplier?.invoice_columns?.length ? {
@@ -727,12 +727,12 @@ export default function FinancesPage() {
       const data = await response.json()
       if (!response.ok) throw new Error(data.error || 'Scan failed')
 
-      // Pre-fill the invoice form — supplier is already set from pre-selection (modal onChange),
+      // Pre-fill the invoice form n/a supplier is already set from pre-selection (modal onChange),
       // so we NEVER change it here. Only fill fields the user hasn't touched yet.
       setShowInvForm(true)
       setInvForm(f => ({
         ...f,
-        // Keep whatever supplier is already set — don't let AI-detected name override pre-selection
+        // Keep whatever supplier is already set n/a don't let AI-detected name override pre-selection
         invoice_number: data.invoice_number || f.invoice_number,
         invoice_date: data.invoice_date || f.invoice_date,
         notes: data.notes || f.notes,
@@ -762,7 +762,7 @@ export default function FinancesPage() {
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Could not read invoice. Please try again.'
       const friendly = /could not be found|NotFoundError|NotReadableError/i.test(msg)
-        ? 'Could not read this file from disk — this can happen if the file was just created/moved or is locked by another app. Wait a moment and try selecting it again.'
+        ? 'Could not read this file from disk n/a this can happen if the file was just created/moved or is locked by another app. Wait a moment and try selecting it again.'
         : msg
       setScanError(friendly)
     }
@@ -829,7 +829,7 @@ export default function FinancesPage() {
     if (deliversStock) {
       openGRV(savedInvoice)
     } else {
-      // Non-stock supplier (rent, Micros, insurance, etc.) — just mark as received, no GRV
+      // Non-stock supplier (rent, Micros, insurance, etc.) n/a just mark as received, no GRV
       await supabase.from('invoices').update({ status: 'received' }).eq('id', savedInvoice.id)
       setShowInvForm(false); setEditInv(null); await load()
     }
@@ -864,7 +864,7 @@ export default function FinancesPage() {
       }).eq('id', editQ.id)
       if (res.error) { setError(res.error.message); setSaving(false); return }
     } else {
-      // Multi-line insert — one row per line
+      // Multi-line insert n/a one row per line
       const rows = validLines.map((l: any) => {
         const cat = categories.find(c => c.key === l.category_key)
         return {
@@ -976,7 +976,7 @@ export default function FinancesPage() {
                     })}
                 </div>
                 <div style={card}>
-                  <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 700 }}>Sales vs Expenses — {month}</h3>
+                  <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 700 }}>Sales vs Expenses n/a {month}</h3>
                   {[
                     { label: 'Total Sales', value: totalSales, color: '#16a34a', pct: 100 },
                     { label: 'Supplier Bills', value: totalInvoices, color: '#dc2626', pct: totalSales > 0 ? (totalInvoices / totalSales) * 100 : 0 },
@@ -1037,8 +1037,8 @@ export default function FinancesPage() {
                           <td style={{ padding: '9px 10px', textAlign: 'right' }}>{fmt(Number(c.eft_total))}</td>
                           <td style={{ padding: '9px 10px', textAlign: 'right', color: '#dc2626' }}>{fmt(Number(c.payouts))}</td>
                           <td style={{ padding: '9px 10px', textAlign: 'right', color: Math.abs(Number(c.variance)) > 50 ? '#dc2626' : '#16a34a', fontWeight: 600 }}>{fmt(Number(c.variance))}</td>
-                          <td style={{ padding: '9px 10px', textAlign: 'right' }}>{c.customer_count || '—'}</td>
-                          <td style={{ padding: '9px 10px', textAlign: 'right' }}>{c.average_spend ? fmt(Number(c.average_spend)) : '—'}</td>
+                          <td style={{ padding: '9px 10px', textAlign: 'right' }}>{c.customer_count || 'n/a'}</td>
+                          <td style={{ padding: '9px 10px', textAlign: 'right' }}>{c.average_spend ? fmt(Number(c.average_spend)) : 'n/a'}</td>
                           <td style={{ padding: '9px 10px' }}>{statusBadge(c.status)}</td>
                         </tr>
                       ))}
@@ -1068,7 +1068,7 @@ export default function FinancesPage() {
                         style={{ display: 'none' }}
                         onChange={e => {
                           const f = e.target.files?.[0]
-                          // Pass the supplier directly as a parameter — no ref/closure ambiguity
+                          // Pass the supplier directly as a parameter n/a no ref/closure ambiguity
                           if (f) scanInvoice(f, scanSupplierRef.current)
                         }} />
                     </div>
@@ -1090,13 +1090,13 @@ export default function FinancesPage() {
                     <div style={{ fontWeight: 700, color: '#1d4ed8', fontSize: 14 }}>Waiting for photo from your device</div>
                     <div style={{ fontSize: 12, color: '#3b82f6', marginTop: 2 }}>Open the CompliTrack app → Supplier Bills → Scan Invoice. The photo will appear here automatically.</div>
                   </div>
-                  <button onClick={() => setDeviceScanStatus(null)} style={{ marginLeft: 'auto', background: 'none', border: 'none', color: '#93c5fd', cursor: 'pointer', fontSize: 18 }}>×</button>
+                  <button onClick={() => setDeviceScanStatus(null)} style={{ marginLeft: 'auto', background: 'none', border: 'none', color: '#93c5fd', cursor: 'pointer', fontSize: 18 }}>x</button>
                 </div>
               )}
               {deviceScanStatus === 'received' && (
                 <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, padding: '14px 18px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
                   <span style={{ fontSize: 24 }}>⚡</span>
-                  <div style={{ fontWeight: 700, color: '#166534', fontSize: 14 }}>Photo received — running AI scan...</div>
+                  <div style={{ fontWeight: 700, color: '#166534', fontSize: 14 }}>Photo received n/a running AI scan...</div>
                 </div>
               )}
 
@@ -1115,7 +1115,7 @@ export default function FinancesPage() {
                         const sup = suppliers.find(s => s.name === name)
                         setInvForm(f => ({ ...f, supplier: name, due_date: sup && f.invoice_date ? addDays(f.invoice_date, sup.payment_terms_days ?? 7) : f.due_date }))
                       }} value={suppliers.some(s => s.name === invForm.supplier) ? invForm.supplier : (invForm.supplier ? '_other' : '')} style={inp}>
-                        <option value="">— Select Supplier —</option>
+                        <option value="">n/a Select Supplier n/a</option>
                         {suppliers.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
                         <option value="_other">+ Other (type name below)</option>
                       </select>
@@ -1174,7 +1174,7 @@ export default function FinancesPage() {
                         <>
                           {hasTemplate && (
                             <div style={{ fontSize: 12, color: '#16a34a', background: '#f0fdf4', borderRadius: 6, padding: '6px 12px', marginBottom: 10 }}>
-                              ✓ Showing {sup!.name} invoice columns — matches their physical invoice layout
+                              ✓ Showing {sup!.name} invoice columns n/a matches their physical invoice layout
                             </div>
                           )}
 
@@ -1202,12 +1202,12 @@ export default function FinancesPage() {
                                     {i === 0 && <button type="button" onClick={() => setShowQuickCat(true)} style={{ fontSize: '11px', color: '#1a5c38', background: 'none', border: 'none', cursor: 'pointer', padding: '2px 0', fontWeight: '600' }}>+ New Category</button>}
                                   </div>
                                   {activeCols.map(col => {
-                                    // Read-only computed columns (e.g. Exclusive Value = qty × unit_price)
+                                    // Read-only computed columns (e.g. Exclusive Value = qty x unit_price)
                                     if (col.type === 'readonly') {
                                       const val = col.compute ? col.compute(line) : 0
                                       return (
                                         <div key={col.header} style={{ ...inp, padding: '8px 10px', background: '#f9fafb', color: '#374151', fontWeight: 700, display: 'flex', alignItems: 'center' }}>
-                                          {val > 0 ? val.toFixed(2) : '—'}
+                                          {val > 0 ? val.toFixed(2) : 'n/a'}
                                         </div>
                                       )
                                     }
@@ -1219,7 +1219,7 @@ export default function FinancesPage() {
                                         onChange={e => updateLine(i, 'uom', e.target.value)}
                                         style={{ ...inp, padding: '8px 10px' }}
                                       >
-                                        <option value="">— select —</option>
+                                        <option value="">n/a select n/a</option>
                                         {['each','kg','g','L','ml','box','case','bag','bottle','can','tray','bunch','carton','pkt','pair','roll','sheet','set'].map(u => <option key={u} value={u}>{u}</option>)}
                                       </select>
                                     )
@@ -1274,7 +1274,7 @@ export default function FinancesPage() {
                                     )
                                   })}
                                   <button onClick={() => removeLine(i)} disabled={invLines.length === 1}
-                                    style={{ background: '#fef2f2', color: '#dc2626', border: 'none', borderRadius: 6, padding: '8px 12px', cursor: 'pointer', fontSize: 16, fontWeight: 700 }}>×</button>
+                                    style={{ background: '#fef2f2', color: '#dc2626', border: 'none', borderRadius: 6, padding: '8px 12px', cursor: 'pointer', fontSize: 16, fontWeight: 700 }}>x</button>
                                 </div>
                               </div>
                               {matches.length > 0 && (
@@ -1305,7 +1305,7 @@ export default function FinancesPage() {
                   {/* Warning banner when editing an already-received invoice */}
                   {editInv && (editInv.status === 'received' || editInv.status === 'paid') && (
                     <div style={{ background: '#fef9c3', border: '1.5px solid #fde68a', borderRadius: 10, padding: '10px 14px', marginBottom: 12, fontSize: 13, color: '#92400e' }}>
-                      ⚠️ <strong>This invoice has already been received.</strong> Saving will update the invoice record only — stock quantities and prices will <strong>not</strong> be changed again.
+                      ⚠️ <strong>This invoice has already been received.</strong> Saving will update the invoice record only n/a stock quantities and prices will <strong>not</strong> be changed again.
                     </div>
                   )}
 
@@ -1315,7 +1315,7 @@ export default function FinancesPage() {
                       const alreadyReceived = editInv && (editInv.status === 'received' || editInv.status === 'paid')
                       const sup = suppliers.find(s => s.name === invForm.supplier)
                       const deliversStock = !sup || sup.delivers_stock !== false
-                      // Already received — show Save Changes only, never re-open GRV
+                      // Already received n/a show Save Changes only, never re-open GRV
                       if (alreadyReceived) return (
                         <button style={btn('#374151')} onClick={() => saveInvoice(false)} disabled={saving}>
                           {saving ? 'Saving…' : '✓ Save Changes'}
@@ -1332,11 +1332,11 @@ export default function FinancesPage() {
                   <p style={{ fontSize: 12, color: '#9ca3af', marginTop: 8 }}>
                     {(() => {
                       const alreadyReceived = editInv && (editInv.status === 'received' || editInv.status === 'paid')
-                      if (alreadyReceived) return 'Editing a received invoice updates the record only — no stock changes will be made.'
+                      if (alreadyReceived) return 'Editing a received invoice updates the record only n/a no stock changes will be made.'
                       const sup = suppliers.find(s => s.name === invForm.supplier)
                       return (!sup || sup.delivers_stock !== false)
                         ? 'Save as Draft keeps this invoice editable without touching your stock sheet. Submit & Receive Stock saves it and opens Receive Goods to update stock and pricing.'
-                        : 'Save as Draft keeps this invoice editable. Submit Bill marks it as received — no stock update needed since this supplier delivers a service, not stock.'
+                        : 'Save as Draft keeps this invoice editable. Submit Bill marks it as received n/a no stock update needed since this supplier delivers a service, not stock.'
                     })()}
                   </p>
                 </div>
@@ -1401,7 +1401,7 @@ export default function FinancesPage() {
                                       {cat?.name || line.category_key}
                                     </span>
                                   </td>
-                                  <td style={{ padding: '7px 10px', color: '#374151' }}>{line.description || '—'}</td>
+                                  <td style={{ padding: '7px 10px', color: '#374151' }}>{line.description || 'n/a'}</td>
                                   <td style={{ padding: '7px 10px', textAlign: 'right', fontWeight: 600 }}>{fmt(Number(line.amount))}</td>
                                   <td style={{ padding: '7px 10px', textAlign: 'right', color: '#6b7280' }}>{fmt(Number(line.vat_amount || 0))}</td>
                                 </tr>
@@ -1423,7 +1423,7 @@ export default function FinancesPage() {
                       {drafts.length > 0 && (
                         <div style={{ marginBottom: 24 }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-                            <span style={{ fontSize: 15, fontWeight: 800, color: '#92400e' }}>📝 Drafts — not yet submitted</span>
+                            <span style={{ fontSize: 15, fontWeight: 800, color: '#92400e' }}>📝 Drafts n/a not yet submitted</span>
                             <span style={{ fontSize: 12, background: '#fef3c7', color: '#92400e', padding: '2px 10px', borderRadius: 20, fontWeight: 700 }}>{drafts.length}</span>
                           </div>
                           {drafts.map(renderInvoiceCard)}
@@ -1448,7 +1448,7 @@ export default function FinancesPage() {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                 <div>
                   <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Quick Expenses</h2>
-                  <p style={{ margin: '4px 0 0', fontSize: 13, color: '#6b7280' }}>Small cash items without a formal invoice — petrol, airtime, staff meals, etc.</p>
+                  <p style={{ margin: '4px 0 0', fontSize: 13, color: '#6b7280' }}>Small cash items without a formal invoice n/a petrol, airtime, staff meals, etc.</p>
                 </div>
                 <div style={{ display: 'flex', gap: 8 }}>
                   <button style={btn('#6b7280')} onClick={() => setShowCatManager(true)}>⚙ Categories</button>
@@ -1527,7 +1527,7 @@ export default function FinancesPage() {
                     <div>
                       <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Supplier (optional)</label>
                       <select value={qForm.supplier} onChange={e => setQForm((f: any) => ({ ...f, supplier: e.target.value }))} style={inp}>
-                        <option value="">— Select supplier —</option>
+                        <option value="">n/a Select supplier n/a</option>
                         {suppliers.map((s: any) => <option key={s.id} value={s.name}>{s.name}</option>)}
                         <option value="other">Other</option>
                       </select>
@@ -1599,11 +1599,11 @@ export default function FinancesPage() {
                             <td style={{ padding: '9px 10px' }}>{e.expense_date}</td>
                             <td style={{ padding: '9px 10px' }}>
                               <span style={{ background: (cat?.colour || '#6b7280') + '20', color: cat?.colour || '#6b7280', padding: '2px 8px', borderRadius: 20, fontSize: 12, fontWeight: 600 }}>
-                                {cat?.name || e.category_name || '—'}
+                                {cat?.name || e.category_name || 'n/a'}
                               </span>
                             </td>
                             <td style={{ padding: '9px 10px' }}>{e.description}</td>
-                            <td style={{ padding: '9px 10px', color: '#6b7280', fontSize: 12 }}>{e.supplier || '—'}</td>
+                            <td style={{ padding: '9px 10px', color: '#6b7280', fontSize: 12 }}>{e.supplier || 'n/a'}</td>
                             <td style={{ padding: '9px 10px', color: '#6b7280', fontSize: 12 }}>{(e.payment_method || '').replace(/_/g, ' ')}</td>
                             <td style={{ padding: '9px 10px', textAlign: 'right', fontWeight: 700, color: '#dc2626' }}>{fmt(Number(e.amount))}</td>
                             <td style={{ padding: '9px 10px' }}>
@@ -1630,7 +1630,7 @@ export default function FinancesPage() {
           {tab === 4 && (() => {
             const [periodStart, periodEnd] = fcPeriodRange()
             const costOfSales = fcData ? fcData.openingValue + fcData.purchases - fcData.closingValue - fcData.wastage : 0
-            // Purchases and stock are ex-VAT — divide sales by 1.15 for apples-to-apples comparison
+            // Purchases and stock are ex-VAT n/a divide sales by 1.15 for apples-to-apples comparison
             const salesExclVat = fcData ? fcData.sales / 1.15 : 0
             const foodCostPct = fcData && salesExclVat > 0 ? (costOfSales / salesExclVat) * 100 : null
             const row = (label: string, value: number, sign: '+' | '-' | '=' | '') => (
@@ -1653,7 +1653,7 @@ export default function FinancesPage() {
                   </div>
                 </div>
                 <p style={{ fontSize: 13, color: '#9ca3af', marginBottom: 16 }}>
-                  {fcMode === 'week' ? `Week of ${periodStart} — ${periodEnd}` : `${new Date(periodStart).toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' })}`}
+                  {fcMode === 'week' ? `Week of ${periodStart} n/a ${periodEnd}` : `${new Date(periodStart).toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' })}`}
                 </p>
 
                 {fcLoading ? (
@@ -1663,13 +1663,13 @@ export default function FinancesPage() {
                     {fcOverrideCountThisQuarter >= 3 && (
                       <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 10, padding: '12px 16px', marginBottom: 16, fontSize: 13, color: '#991b1b', display: 'flex', alignItems: 'center', gap: 8 }}>
                         <span style={{ fontSize: 18 }}>🚩</span>
-                        <span><b>Data quality flag:</b> this store has used {fcOverrideCountThisQuarter} manual stock value overrides in the last 90 days. Food Cost % here is being driven by estimates, not physical counts — worth flagging if reviewed from head office.</span>
+                        <span><b>Data quality flag:</b> this store has used {fcOverrideCountThisQuarter} manual stock value overrides in the last 90 days. Food Cost % here is being driven by estimates, not physical counts n/a worth flagging if reviewed from head office.</span>
                       </div>
                     )}
                     {(fcData.openingMissing || fcData.closingMissing) && (
                       <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 10, padding: '12px 16px', marginBottom: 16, fontSize: 13, color: '#c2410c' }}>
-                        ⚠️ {fcData.openingMissing && 'No completed stock count found before this period — opening value is treated as R0, which will distort the result. '}
-                        {fcData.closingMissing && 'No completed stock count found for this period — closing value is treated as R0. '}
+                        ⚠️ {fcData.openingMissing && 'No completed stock count found before this period n/a opening value is treated as R0, which will distort the result. '}
+                        {fcData.closingMissing && 'No completed stock count found for this period n/a closing value is treated as R0. '}
                         Run a stock count in Stock Management close to the start and end of each period for an accurate Food Cost %, or set a manual opening/closing value below.
                       </div>
                     )}
@@ -1682,7 +1682,7 @@ export default function FinancesPage() {
                           <div>
                             <div style={{ fontSize: 14, color: '#6b7280' }}>Opening Stock Value</div>
                             <div style={{ fontSize: 11, color: fcData.openingManual ? '#c2410c' : '#9ca3af', fontWeight: fcData.openingManual ? 700 : 400 }}>
-                              {fcData.openingManual ? `⚠️ Manual entry${fcData.openingReason ? ` — ${fcData.openingReason}` : ''}` : fcData.openingDate ? `From count on ${fcData.openingDate}` : 'No count found'}
+                              {fcData.openingManual ? `⚠️ Manual entry${fcData.openingReason ? ` n/a ${fcData.openingReason}` : ''}` : fcData.openingDate ? `From count on ${fcData.openingDate}` : 'No count found'}
                             </div>
                           </div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -1701,7 +1701,7 @@ export default function FinancesPage() {
                           <div>
                             <div style={{ fontSize: 14, color: '#6b7280' }}><span style={{ display: 'inline-block', width: 16, fontWeight: 700, color: '#9ca3af' }}>-</span>Closing Stock Value</div>
                             <div style={{ fontSize: 11, color: fcData.closingManual ? '#c2410c' : '#9ca3af', fontWeight: fcData.closingManual ? 700 : 400 }}>
-                              {fcData.closingManual ? `⚠️ Manual entry${fcData.closingReason ? ` — ${fcData.closingReason}` : ''}` : fcData.closingDate ? `From count on ${fcData.closingDate}` : 'No count found'}
+                              {fcData.closingManual ? `⚠️ Manual entry${fcData.closingReason ? ` n/a ${fcData.closingReason}` : ''}` : fcData.closingDate ? `From count on ${fcData.closingDate}` : 'No count found'}
                             </div>
                           </div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -1724,9 +1724,9 @@ export default function FinancesPage() {
                       <div style={{ ...card, textAlign: 'center', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
                         <div style={{ fontSize: 12, color: '#9ca3af', fontWeight: 600, marginBottom: 6 }}>FOOD COST %</div>
                         <div style={{ fontSize: 44, fontWeight: 800, color: foodCostPct === null ? '#9ca3af' : foodCostPct <= 33 ? '#16a34a' : foodCostPct <= 38 ? '#d97706' : '#dc2626' }}>
-                          {foodCostPct === null ? '—' : `${foodCostPct.toFixed(1)}%`}
+                          {foodCostPct === null ? 'n/a' : `${foodCostPct.toFixed(1)}%`}
                         </div>
-                        <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 4 }}>{fmt(costOfSales)} ÷ {fmt(salesExclVat)} sales (ex-VAT)</div>
+                        <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 4 }}>{fmt(costOfSales)} / {fmt(salesExclVat)} sales (ex-VAT)</div>
                         {fcData.sales === 0 && <div style={{ fontSize: 11, color: '#dc2626', marginTop: 8 }}>No sales recorded for this period</div>}
                         {(fcData.openingManual || fcData.closingManual) && <div style={{ fontSize: 11, color: '#c2410c', marginTop: 8, fontWeight: 600 }}>⚠️ Based on a manual entry, not a physical count</div>}
                         <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 16, borderTop: '1px solid #f3f4f6', paddingTop: 12 }}>Typical restaurant target: 28–35%</div>
@@ -1776,7 +1776,7 @@ export default function FinancesPage() {
                   </select>
                 </div>
               </div>
-              <p style={{ fontSize: 12, color: '#9ca3af', marginBottom: 16 }}>Every invoice across all months, most recent first. Showing the last 300 — narrow the filters above for older records.</p>
+              <p style={{ fontSize: 12, color: '#9ca3af', marginBottom: 16 }}>Every invoice across all months, most recent first. Showing the last 300 n/a narrow the filters above for older records.</p>
               {historyLoading ? (
                 <div style={{ textAlign: 'center', padding: 60, color: '#6b7280' }}>Loading…</div>
               ) : filteredHistory.length === 0 ? (
@@ -1799,9 +1799,9 @@ export default function FinancesPage() {
                         <tr key={inv.id} style={{ borderBottom: '1px solid #f3f4f6', cursor: 'pointer' }} onClick={() => openEditInvoice(inv)}>
                           <td style={{ padding: '10px 14px' }}>{inv.invoice_date}</td>
                           <td style={{ padding: '10px 14px', fontWeight: 600 }}>{inv.supplier}</td>
-                          <td style={{ padding: '10px 14px', color: '#6b7280' }}>{inv.invoice_number || '—'}</td>
+                          <td style={{ padding: '10px 14px', color: '#6b7280' }}>{inv.invoice_number || 'n/a'}</td>
                           <td style={{ padding: '10px 14px' }}>{statusBadge(inv.status, 11)}</td>
-                          <td style={{ padding: '10px 14px', color: '#6b7280' }}>{inv.due_date || '—'}</td>
+                          <td style={{ padding: '10px 14px', color: '#6b7280' }}>{inv.due_date || 'n/a'}</td>
                           <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 700 }}>{fmt(Number(inv.total_amount))}</td>
                         </tr>
                       ))}
@@ -1863,8 +1863,8 @@ export default function FinancesPage() {
           <div style={{ background: '#fff', borderRadius: 16, width: '100%', maxWidth: 800, maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 24px 60px rgba(0,0,0,0.2)' }}>
             <div style={{ padding: '20px 24px 16px', borderBottom: '1px solid #f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div>
-                <h2 style={{ margin: 0, fontSize: 18, fontWeight: 800 }}>📦 Receive Goods — {grvInvoice.supplier}</h2>
-                <p style={{ margin: '4px 0 0', fontSize: 13, color: '#6b7280' }}>Invoice {grvInvoice.invoice_number || '—'} • {grvInvoice.invoice_date} • Enter quantities received</p>
+                <h2 style={{ margin: 0, fontSize: 18, fontWeight: 800 }}>📦 Receive Goods n/a {grvInvoice.supplier}</h2>
+                <p style={{ margin: '4px 0 0', fontSize: 13, color: '#6b7280' }}>Invoice {grvInvoice.invoice_number || 'n/a'} • {grvInvoice.invoice_date} • Enter quantities received</p>
               </div>
               <button onClick={() => setShowGRV(false)} style={{ background: '#f3f4f6', border: 'none', borderRadius: 8, width: 32, height: 32, cursor: 'pointer', fontSize: 16 }}>✕</button>
             </div>
@@ -1880,7 +1880,7 @@ export default function FinancesPage() {
                   <div style={{ display: 'grid', gridTemplateColumns: '1.7fr 65px 65px 75px 70px 80px 90px', gap: 6, marginBottom: 4, fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase' as const }}>
                     <div>Item</div><div style={{textAlign:'center'}}>Cases</div><div style={{textAlign:'center'}}>Kg/Case</div><div>Case Price</div><div style={{textAlign:'center'}}>→ Qty</div><div>→ R/unit</div><div></div>
                   </div>
-                  <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 8 }}>For case/box items: fill in Cases, Kg per Case, and Case Price — Qty and R/unit will work out automatically. For simple items, just type Qty and R/unit directly.</div>
+                  <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 8 }}>For case/box items: fill in Cases, Kg per Case, and Case Price n/a Qty and R/unit will work out automatically. For simple items, just type Qty and R/unit directly.</div>
                   <div style={{ maxHeight: 420, overflowY: 'auto' }}>
                     {grvLines.map((line, i) => {
                        // Catch weight: stock tracked in "each" but received/priced by kg
@@ -1894,12 +1894,12 @@ export default function FinancesPage() {
                              <div style={{ fontWeight: 600, fontSize: 14 }}>{line.description}</div>
                              <div style={{ fontSize: 12, color: '#6b7280' }}>{line.unit}</div>
                            </div>
-                           <input type="number" step="1" min="0" placeholder="—"
+                           <input type="number" step="1" min="0" placeholder="n/a"
                              value={line.case_qty}
                              onChange={e => setGrvLines(ls => ls.map((l,idx) => idx===i ? recalcGrvCase({ ...l, case_qty: e.target.value }) : l))}
                              title="Number of cases/boxes received"
                              style={{ width: '100%', padding: '6px 6px', border: '1.5px solid #fde68a', borderRadius: 8, fontSize: 13, outline: 'none', background: '#fefce8', textAlign: 'center' as const }} />
-                           <input type="number" step="0.1" min="0" placeholder="—"
+                           <input type="number" step="0.1" min="0" placeholder="n/a"
                              value={line.units_per_case}
                              onChange={e => setGrvLines(ls => ls.map((l,idx) => idx===i ? recalcGrvCase({ ...l, units_per_case: e.target.value }) : l))}
                              title="Kg (or units) per case/box"
@@ -1912,7 +1912,7 @@ export default function FinancesPage() {
                            <input type="number" step="0.1" min="0" placeholder="0"
                              value={line.qty_received}
                              onChange={e => setGrvLines(ls => ls.map((l,idx) => idx===i ? {...l, qty_received: e.target.value} : l))}
-                             title="Quantity that goes onto your stock sheet — for catch weight items, enter number of UNITS (birds/pieces), not kg"
+                             title="Quantity that goes onto your stock sheet n/a for catch weight items, enter number of UNITS (birds/pieces), not kg"
                              style={{ padding: '6px 6px', border: `1.5px solid ${parseFloat(line.qty_received) > 0 ? '#16a34a' : '#e5e7eb'}`, borderRadius: 8, fontSize: 14, textAlign: 'center' as const, outline: 'none', background: parseFloat(line.qty_received) > 0 ? '#f0fdf4' : '#fff' }} />
                            <input type="number" step="0.01" min="0" placeholder="unit cost"
                              value={line.unit_cost}
@@ -1931,21 +1931,21 @@ export default function FinancesPage() {
                              </button>
                            ) : <div />}
                          </div>
-                         {/* Catch weight toggle button — shown on any "each" item */}
+                         {/* Catch weight toggle button n/a shown on any "each" item */}
                          {['each','unit','units','pcs'].includes((line.unit||'').toLowerCase()) && (
                            <button
                              onClick={() => setGrvLines(ls => ls.map((l,idx) => idx===i ? {...l, is_catch_weight: !l.is_catch_weight} : l))}
                              style={{ marginTop: 6, fontSize: 11, fontWeight: 700, color: line.is_catch_weight ? '#92400e' : '#6b7280', background: line.is_catch_weight ? '#fef9c3' : '#f9fafb', border: `1px solid ${line.is_catch_weight ? '#fde68a' : '#e5e7eb'}`, borderRadius: 6, padding: '3px 10px', cursor: 'pointer' }}
-                             title="Toggle catch weight mode — use when item is bought by kg but counted by unit (e.g. whole chickens)"
+                             title="Toggle catch weight mode n/a use when item is bought by kg but counted by unit (e.g. whole chickens)"
                            >
                              ⚖️ {line.is_catch_weight ? 'Catch weight ON' : 'Catch weight?'}
                            </button>
                          )}
-                         {/* Catch weight helper panel — only when toggled on */}
+                         {/* Catch weight helper panel n/a only when toggled on */}
                          {line.is_catch_weight && (
                            <div style={{ marginTop: 8, background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, padding: '10px 12px' }}>
                              <div style={{ fontSize: 12, fontWeight: 700, color: '#92400e', marginBottom: 6 }}>
-                               ⚖️ Catch Weight — stock tracked in <strong>{line.unit}</strong>
+                               ⚖️ Catch Weight n/a stock tracked in <strong>{line.unit}</strong>
                              </div>
                              <div style={{ fontSize: 12, color: '#78350f', marginBottom: 8 }}>
                                Invoice qty shows <strong>{line.qty_received} kg</strong> at <strong>R{parseFloat(line.unit_cost||'0').toFixed(2)}/kg</strong>. 
@@ -1967,7 +1967,7 @@ export default function FinancesPage() {
                                     }}
                                     style={{ width: 90, padding: "6px 8px", border: "1.5px solid #f59e0b", borderRadius: 8, fontSize: 13 }} />
                                 </div>
-                                <div style={{ color: "#92400e", fontSize: 14, marginTop: 14 }}>×</div>
+                                <div style={{ color: "#92400e", fontSize: 14, marginTop: 14 }}>x</div>
                                 {/* R/kg from invoice */}
                                 <div>
                                   <div style={{ fontSize: 11, color: "#92400e", marginBottom: 4 }}>R/kg</div>
@@ -1983,7 +1983,7 @@ export default function FinancesPage() {
                                     }}
                                     style={{ width: 80, padding: "6px 8px", border: "1.5px solid #f59e0b", borderRadius: 8, fontSize: 13 }} />
                                 </div>
-                                <div style={{ color: "#92400e", fontSize: 14, marginTop: 14 }}>÷</div>
+                                <div style={{ color: "#92400e", fontSize: 14, marginTop: 14 }}>/</div>
                                 {/* Number of eachs */}
                                 <div>
                                   <div style={{ fontSize: 11, color: "#92400e", marginBottom: 4 }}>Number of {line.unit}s</div>
@@ -2009,7 +2009,7 @@ export default function FinancesPage() {
                                       const pkg = parseFloat((line as any).catch_price_per_kg || line.unit_cost || "0")
                                       const u = parseFloat((line as any).catch_units || "0")
                                       if (kg > 0 && pkg > 0 && u > 0) return "R" + ((kg * pkg) / u).toFixed(2)
-                                      return parseFloat(line.unit_cost) > 0 ? "R" + parseFloat(line.unit_cost).toFixed(2) : "—"
+                                      return parseFloat(line.unit_cost) > 0 ? "R" + parseFloat(line.unit_cost).toFixed(2) : "n/a"
                                     })()}
                                   </div>
                                 </div>
@@ -2048,7 +2048,7 @@ export default function FinancesPage() {
           <div style={{ background: '#fff', borderRadius: 20, padding: 32, width: 440, maxWidth: '100%' }} onClick={e => e.stopPropagation()}>
             <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 6 }}>📷 Scan Invoice</div>
 
-            {/* Step 1 — Supplier selection */}
+            {/* Step 1 n/a Supplier selection */}
             <div style={{ marginBottom: 20 }}>
               <label style={{ fontSize: 13, fontWeight: 700, color: '#374151', display: 'block', marginBottom: 6 }}>
                 1. Which supplier is this invoice from?
@@ -2076,7 +2076,7 @@ export default function FinancesPage() {
                 style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: `2px solid ${scanSupplier ? '#1a5c38' : '#e5e7eb'}`, fontSize: 14, background: '#fff' }}
                 autoFocus
               >
-                <option value="">— Select supplier first —</option>
+                <option value="">n/a Select supplier first n/a</option>
                 {suppliers.map(s => <option key={s.id} value={s.name}>{s.name}{s.invoice_columns?.length ? ' ✓' : ''}</option>)}
                 <option value="__other__">Other / Unknown</option>
               </select>
@@ -2085,17 +2085,17 @@ export default function FinancesPage() {
                 const priceCol = sup?.invoice_columns?.find(c => c.maps_to === 'unit_price_excl')
                 return sup?.invoice_columns?.length ? (
                   <div style={{ fontSize: 12, color: '#16a34a', marginTop: 6, background: '#f0fdf4', borderRadius: 6, padding: '5px 10px' }}>
-                    ✓ {sup.invoice_columns.length}-column template loaded{priceCol?.name ? ` — price from "${priceCol.name}" column` : ''}
+                    ✓ {sup.invoice_columns.length}-column template loaded{priceCol?.name ? ` n/a price from "${priceCol.name}" column` : ''}
                   </div>
                 ) : (
                   <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 6 }}>
-                    No column template set for this supplier — AI will use general rules. Set one in Stock → Suppliers → Edit.
+                    No column template set for this supplier n/a AI will use general rules. Set one in Stock → Suppliers → Edit.
                   </div>
                 )
               })()}
             </div>
 
-            {/* Step 2 — Scan method */}
+            {/* Step 2 n/a Scan method */}
             <label style={{ fontSize: 13, fontWeight: 700, color: '#374151', display: 'block', marginBottom: 8 }}>2. How do you want to capture it?</label>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               <button
@@ -2125,7 +2125,7 @@ export default function FinancesPage() {
                 <span style={{ fontSize: 28 }}>📱</span>
                 <div>
                   <div style={{ fontWeight: 700, fontSize: 14, color: '#1d4ed8' }}>Photo Scan from Device</div>
-                  <div style={{ fontSize: 12, color: '#3b82f6', marginTop: 1 }}>Take a photo with your phone — appears here in seconds</div>
+                  <div style={{ fontSize: 12, color: '#3b82f6', marginTop: 1 }}>Take a photo with your phone n/a appears here in seconds</div>
                 </div>
               </button>
             </div>
