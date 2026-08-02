@@ -598,12 +598,22 @@ export default function FinancesPage() {
           is_catch_weight: !!(i as any).is_catch_weight,
         }
       }
+      // For catch weight items, pre-initialize the helper fields so the formula
+      // computes immediately when the user enters the actual kg weight
+      const isCatchWeight = !!(i as any).is_catch_weight
+      const invoiceUnitCost = match && matchUnitCost > 0 ? matchUnitCost.toFixed(4) : String(Number(i.cost_price || i.price || 0) || '')
       return {
         stock_item_id: i.id, description: i.description || '', unit: i.unit || 'each',
         qty_received: match && matchQty > 0 ? String(matchQty) : '',
-        unit_cost: match && matchUnitCost > 0 ? matchUnitCost.toFixed(4) : String(Number(i.cost_price || i.price || 0) || ''),
+        unit_cost: invoiceUnitCost,
         units_per_case: '', case_qty: '', case_price: '',
-        is_catch_weight: !!(i as any).is_catch_weight,
+        is_catch_weight: isCatchWeight,
+        // Pre-init catch weight fields so formula fires as soon as user types kg
+        ...(isCatchWeight && match ? {
+          catch_units: matchQty > 0 ? String(matchQty) : '',
+          catch_rpu: matchUnitCost > 0 ? matchUnitCost.toFixed(4) : '',
+          catch_kg: '',
+        } : {}),
       }
     }
 
