@@ -1951,54 +1951,72 @@ export default function FinancesPage() {
                                Invoice qty shows <strong>{line.qty_received} kg</strong> at <strong>R{parseFloat(line.unit_cost||'0').toFixed(2)}/kg</strong>. 
                                How many actual {line.unit}s did you receive? Enter below to calculate cost per {line.unit}.
                              </div>
-                             <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' as const }}>
-                               <div>
-                                 <div style={{ fontSize: 11, color: '#92400e', marginBottom: 2 }}>Total KG received</div>
-                                 <input type="number" step="0.01"
-                                   defaultValue={line.qty_received}
-                                   placeholder="kg"
-                                   onBlur={e => {
-                                     const totalKg = parseFloat(e.target.value) || 0
-                                     const unitInput = e.target.closest('div.catch-weight-row')?.querySelector('input.unit-count') as HTMLInputElement
-                                     const units = unitInput ? parseFloat(unitInput.value) || 0 : 0
-                                     if (units > 0 && totalKg > 0) {
-                                       const kgPerUnit = totalKg / units
-                                       const costPerUnit = parseFloat(line.unit_cost || '0') * kgPerUnit
-                                       setGrvLines(ls => ls.map((l, idx) => idx === i ? { ...l, qty_received: String(units), unit_cost: costPerUnit.toFixed(4) } : l))
-                                     }
-                                   }}
-                                   style={{ width: 80, padding: '6px 8px', border: '1.5px solid #fde68a', borderRadius: 8, fontSize: 13 }} />
-                               </div>
-                               <div style={{ color: '#92400e', fontSize: 16, marginTop: 14 }}>÷</div>
-                               <div className="catch-weight-row">
-                                 <div style={{ fontSize: 11, color: '#92400e', marginBottom: 2 }}>Number of {line.unit}s</div>
-                                 <input type="number" step="1" min="1"
-                                   className="unit-count"
-                                   placeholder="e.g. 100"
-                                   onChange={e => {
-                                     const units = parseFloat(e.target.value) || 0
-                                     const totalKg = parseFloat(line.qty_received) || 0
-                                     const pricePerKg = parseFloat(line.unit_cost || '0')
-                                     if (units > 0 && totalKg > 0 && pricePerKg > 0) {
-                                       const kgPerUnit = totalKg / units
-                                       const costPerUnit = pricePerKg * kgPerUnit
-                                       setGrvLines(ls => ls.map((l, idx) => idx === i ? { ...l, qty_received: String(units), unit_cost: costPerUnit.toFixed(4) } : l))
-                                     }
-                                   }}
-                                   style={{ width: 80, padding: '6px 8px', border: '1.5px solid #16a34a', borderRadius: 8, fontSize: 13, background: '#f0fdf4' }} />
-                               </div>
-                               <div style={{ color: '#92400e', fontSize: 16, marginTop: 14 }}>=</div>
-                               <div>
-                                 <div style={{ fontSize: 11, color: '#92400e', marginBottom: 2 }}>Cost per {line.unit}</div>
-                                 <div style={{ padding: '6px 10px', background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8, fontSize: 13, fontWeight: 700, minWidth: 80 }}>
-                                   {parseFloat(line.unit_cost) > 0 && parseFloat(line.qty_received) > 0
-                                     ? 'R' + parseFloat(line.unit_cost).toFixed(2)
-                                     : '—'}
-                                 </div>
-                               </div>
-                               <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 14 }}>
-                                 Qty and unit cost above update automatically
-                               </div>
+                              <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                                {/* Total KG received */}
+                                <div>
+                                  <div style={{ fontSize: 11, color: "#92400e", marginBottom: 4 }}>Total KG received</div>
+                                  <input type="number" step="0.01"
+                                    defaultValue={line.catch_kg ?? line.qty_received}
+                                    placeholder="kg"
+                                    onChange={e => {
+                                      const totalKg = parseFloat(e.target.value) || 0
+                                      const pricePerKg = parseFloat((line as any).catch_price_per_kg || line.unit_cost || "0")
+                                      const units = parseFloat((line as any).catch_units || "0")
+                                      const costPerUnit = units > 0 && totalKg > 0 && pricePerKg > 0 ? (totalKg * pricePerKg) / units : 0
+                                      setGrvLines(ls => ls.map((l, idx) => idx === i ? { ...l, catch_kg: String(totalKg), ...(costPerUnit > 0 ? { qty_received: String(units), unit_cost: costPerUnit.toFixed(4) } : {}) } : l))
+                                    }}
+                                    style={{ width: 90, padding: "6px 8px", border: "1.5px solid #f59e0b", borderRadius: 8, fontSize: 13 }} />
+                                </div>
+                                <div style={{ color: "#92400e", fontSize: 14, marginTop: 14 }}>×</div>
+                                {/* R/kg from invoice */}
+                                <div>
+                                  <div style={{ fontSize: 11, color: "#92400e", marginBottom: 4 }}>R/kg</div>
+                                  <input type="number" step="0.01"
+                                    defaultValue={(line as any).catch_price_per_kg ?? line.unit_cost}
+                                    placeholder="R/kg"
+                                    onChange={e => {
+                                      const pricePerKg = parseFloat(e.target.value) || 0
+                                      const totalKg = parseFloat((line as any).catch_kg || line.qty_received || "0")
+                                      const units = parseFloat((line as any).catch_units || "0")
+                                      const costPerUnit = units > 0 && totalKg > 0 && pricePerKg > 0 ? (totalKg * pricePerKg) / units : 0
+                                      setGrvLines(ls => ls.map((l, idx) => idx === i ? { ...l, catch_price_per_kg: String(pricePerKg), ...(costPerUnit > 0 ? { unit_cost: costPerUnit.toFixed(4) } : {}) } : l))
+                                    }}
+                                    style={{ width: 80, padding: "6px 8px", border: "1.5px solid #f59e0b", borderRadius: 8, fontSize: 13 }} />
+                                </div>
+                                <div style={{ color: "#92400e", fontSize: 14, marginTop: 14 }}>÷</div>
+                                {/* Number of eachs */}
+                                <div>
+                                  <div style={{ fontSize: 11, color: "#92400e", marginBottom: 4 }}>Number of {line.unit}s</div>
+                                  <input type="number" step="1" min="1"
+                                    defaultValue={(line as any).catch_units ?? ""}
+                                    placeholder="e.g. 200"
+                                    onChange={e => {
+                                      const units = parseFloat(e.target.value) || 0
+                                      const totalKg = parseFloat((line as any).catch_kg || line.qty_received || "0")
+                                      const pricePerKg = parseFloat((line as any).catch_price_per_kg || line.unit_cost || "0")
+                                      const costPerUnit = units > 0 && totalKg > 0 && pricePerKg > 0 ? (totalKg * pricePerKg) / units : 0
+                                      setGrvLines(ls => ls.map((l, idx) => idx === i ? { ...l, catch_units: String(units), qty_received: String(units), ...(costPerUnit > 0 ? { unit_cost: costPerUnit.toFixed(4) } : {}) } : l))
+                                    }}
+                                    style={{ width: 80, padding: "6px 8px", border: "1.5px solid #f59e0b", borderRadius: 8, fontSize: 13 }} />
+                                </div>
+                                <div style={{ color: "#92400e", fontSize: 14, marginTop: 14 }}>=</div>
+                                {/* Result: cost per each */}
+                                <div>
+                                  <div style={{ fontSize: 11, color: "#92400e", marginBottom: 4 }}>Cost per {line.unit}</div>
+                                  <div style={{ padding: "6px 10px", background: "#fff", border: "1.5px solid #f59e0b", borderRadius: 8, fontSize: 14, minWidth: 80, fontWeight: 700, color: "#92400e" }}>
+                                    {(() => {
+                                      const kg = parseFloat((line as any).catch_kg || "0")
+                                      const pkg = parseFloat((line as any).catch_price_per_kg || line.unit_cost || "0")
+                                      const u = parseFloat((line as any).catch_units || "0")
+                                      if (kg > 0 && pkg > 0 && u > 0) return "R" + ((kg * pkg) / u).toFixed(2)
+                                      return parseFloat(line.unit_cost) > 0 ? "R" + parseFloat(line.unit_cost).toFixed(2) : "—"
+                                    })()}
+                                  </div>
+                                </div>
+                                <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 14, width: "100%" }}>
+                                  Formula: (Total KG × R/kg) ÷ Units = Cost per {line.unit}
+                                </div>
+                              </div>
                              </div>
                            </div>
                          )}
