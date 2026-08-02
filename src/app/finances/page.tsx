@@ -2014,7 +2014,7 @@ export default function FinancesPage() {
                                   </div>
                                 </div>
                                 <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 14, width: "100%" }}>
-                                  Formula: (Total KG × R/kg) ÷ Units = Cost per {line.unit}
+                                  Formula: (Total KG x R/kg) / Units = Cost per {line.unit}
                                 </div>
                               </div>
                              </div>
