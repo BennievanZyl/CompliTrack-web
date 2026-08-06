@@ -37,7 +37,7 @@ export default function DevicesPage() {
       if (!user) { router.push('/login'); return }
       const { data: profile } = await supabase.from('profiles').select('store_id, role').eq('id', user.id).single()
       if (!profile?.store_id) return
-      if (!['owner', 'manager', 'franchisee_owner', 'store_manager', 'platform_admin'].includes(profile.role || '')) {
+      if (!['owner', 'manager', 'franchisee_owner', 'store_manager', 'platform_admin', 'hr_admin'].includes(profile.role || '')) {
         router.push('/dashboard'); return
       }
       setStoreId(profile.store_id)
