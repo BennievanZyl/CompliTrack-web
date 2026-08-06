@@ -471,8 +471,8 @@ export default function PeoplePage() {
         </ModalWrap>
       )}
 
-      {showAttendanceModal && (
-        <ModalWrap onClose={() => { setShowAttendanceModal(false); setSaveError(null); }}>
+      {(showAttendanceModal || !!editingAttendance) && (
+        <ModalWrap onClose={() => { setShowAttendanceModal(false); setEditingAttendance(null); setSaveError(null); }}>
           {editingAttendance && (
             <div style={{ position: 'fixed' as const, inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={() => setEditingAttendance(null)}>
               <div style={{ background: '#fff', borderRadius: 20, padding: 28, width: 420, boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }} onClick={e => e.stopPropagation()}>
