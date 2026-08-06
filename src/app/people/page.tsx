@@ -522,6 +522,7 @@ export default function PeoplePage() {
           )}
 
           {!editingAttendance && (
+          <>
           <ModalHeader title="Log Attendance" onClose={() => { setShowAttendanceModal(false); setSaveError(null); }} />
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <div><label style={lbl}>Date *</label><input type="date" value={attendanceForm.work_date} onChange={e => setAttendanceForm(p => ({ ...p, work_date: e.target.value }))} style={inp} /></div>
@@ -535,6 +536,7 @@ export default function PeoplePage() {
           <ErrorBanner msg={saveError} />
           <button onClick={saveAttendance} disabled={saving} style={{ width: '100%', marginTop: 20, padding: '12px', background: PRIMARY, color: '#fff', border: 'none', borderRadius: 12, fontWeight: 700, cursor: 'pointer' }}>{saving ? 'Saving...' : 'Log Attendance'}</button>
           )}
+          </>
         </ModalWrap>
       )}
 
