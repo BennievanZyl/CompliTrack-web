@@ -88,6 +88,14 @@ function tableHTML(rows: Record<string, any>[], totals?: Record<string, any>) {
 // ── Main Component ─────────────────────────────────────────────────────────────
 export default function ReportsPage() {
   const { storeId: STORE_ID } = useStoreContext()
+  const [isHROnly, setIsHROnly] = React.useState(false)
+  React.useEffect(() => {
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (!user) return
+      supabase.from('profiles').select('role').eq('id', user.id).single()
+        .then(({ data }) => { if (data?.role === 'hr_admin') setIsHROnly(true) })
+    })
+  }, [])
   const router = useRouter()
   const [startDate, setStartDate] = useState(lastMonthStart())
   const [endDate, setEndDate] = useState(lastMonthEnd())
@@ -392,7 +400,7 @@ export default function ReportsPage() {
         </div>
 
         {/* FINANCIAL */}
-        <SectionHeader title="Financial Reports" icon="💰" />
+        {!isHROnly && <SectionHeader title="Financial Reports" icon="💰" />}
         <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 8, marginBottom: 28 }}>
           <ReportCard icon="🏦" title="Cash-Up Sales Report" description="Daily sales totals with incl/excl VAT split, payment methods, cashier names." reportKey="sales" onCSV={() => salesReport('csv')} onExcel={() => salesReport('excel')} onPDF={() => salesReport('pdf')} />
           <ReportCard icon="📄" title="Expenses Report" description="Quick expenses + supplier invoices combined, grouped by date with VAT detail." reportKey="expenses" onCSV={() => expensesReport('csv')} onExcel={() => expensesReport('excel')} onPDF={() => expensesReport('pdf')} />
@@ -410,7 +418,7 @@ export default function ReportsPage() {
         </div>
 
         {/* STOCK */}
-        <SectionHeader title="Stock Reports" icon="📦" />
+        {!isHROnly && <SectionHeader title="Stock Reports" icon="📦" />}
         <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 8, marginBottom: 28 }}>
           <ReportCard icon="📊" title="Stock Valuation" description="Current on-hand quantities × cost price for all active stock items. Point-in-time." reportKey="stockval" onCSV={() => stockValuationReport('csv')} onExcel={() => stockValuationReport('excel')} onPDF={() => stockValuationReport('pdf')} />
           <ReportCard icon="🚚" title="Purchases / GRV Report" description="All goods received with quantities, unit costs and supplier per line." reportKey="purchases" onCSV={() => purchasesReport('csv')} onExcel={() => purchasesReport('excel')} onPDF={() => purchasesReport('pdf')} />
@@ -419,7 +427,7 @@ export default function ReportsPage() {
         </div>
 
         {/* COMPLIANCE */}
-        <SectionHeader title="Compliance Reports" icon="✅" />
+        {!isHROnly && <SectionHeader title="Compliance Reports" icon="✅" />}
         <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 8, marginBottom: 28 }}>
           <ReportCard icon="📋" title="Compliance Session History" description="Daily compliance scores, pass/fail status and session duration for every session." reportKey="compliance" onCSV={() => complianceReport('csv')} onExcel={() => complianceReport('excel')} onPDF={() => complianceReport('pdf')} />
           <ReportCard icon="🌡️" title="Temperature Log" description="Full equipment temperature records with compliance flags and violations highlighted." reportKey="temp" onCSV={() => temperatureReport('csv')} onExcel={() => temperatureReport('excel')} onPDF={() => temperatureReport('pdf')} />
