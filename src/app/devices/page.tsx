@@ -27,6 +27,7 @@ export default function DevicesPage() {
   const [storeId, setStoreId] = useState<string | null>(null)
   const [showCreate, setShowCreate] = useState(false)
   const [selectedRole, setSelectedRole] = useState('staff')
+  const [userRole, setUserRole] = useState<string>('')
   const [generatedCode, setGeneratedCode] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
   const [removing, setRemoving] = useState<string | null>(null)
@@ -40,6 +41,9 @@ export default function DevicesPage() {
       if (!['owner', 'manager', 'franchisee_owner', 'store_manager', 'platform_admin', 'hr_admin'].includes(profile.role || '')) {
         router.push('/dashboard'); return
       }
+      setUserRole(profile.role || '')
+      // hr_admin can only link clock devices
+      if (profile.role === 'hr_admin') setSelectedRole('clock_system')
       setStoreId(profile.store_id)
       // Linked devices = claimed invitations (used_at IS NOT NULL)
       const { data, error: devErr } = await supabase.from('device_invitations')
@@ -143,7 +147,7 @@ export default function DevicesPage() {
               <div style={{ marginBottom: 16 }}>
                 <label style={{ fontWeight: 700, fontSize: 13, color: '#374151', display: 'block', marginBottom: 8 }}>Select Role</label>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
-                  {ROLES.map(r => (
+                  {ROLES.filter(r => userRole === 'hr_admin' ? r.value === 'clock_system' : true).map(r => (
                     <div key={r.value} onClick={() => setSelectedRole(r.value)}
                       style={{ border: `2px solid ${selectedRole === r.value ? r.color : '#e5e7eb'}`, borderRadius: 12, padding: '12px 14px', cursor: 'pointer', background: selectedRole === r.value ? `${r.color}10` : '#fff', transition: 'all 0.15s' }}>
                       <div style={{ fontWeight: 700, fontSize: 13, color: selectedRole === r.value ? r.color : '#111' }}>{r.label}</div>
