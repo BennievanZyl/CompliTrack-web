@@ -842,9 +842,8 @@ export default function PeoplePage() {
                               onClick={() => {
                                 const toTime = (dt: string | null) => dt ? new Date(dt).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit', hour12: false }) : '';
                                 setEditAttendForm({ clock_in: toTime(a.clock_in), clock_out: toTime(a.clock_out), is_late: a.is_late, notes: a.notes || '' });
-                                setEditingAttendance(a);
                                 setEditAttendForm({ clock_in: a.clock_in ? new Date(a.clock_in).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit', hour12: false }) : '', clock_out: a.clock_out ? new Date(a.clock_out).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit', hour12: false }) : '', is_late: a.is_late ?? false, notes: a.notes ?? '' });
-                                setShowAttendanceModal(true);
+                                setEditingAttendance(a);
                               }}
                               style={{ fontSize: 12, fontWeight: 700, color: !a.clock_out ? '#dc2626' : '#1a5c38', background: !a.clock_out ? '#fef2f2' : '#eef2ee', border: `1px solid ${!a.clock_out ? '#fecaca' : '#d1fae5'}`, borderRadius: 8, padding: '4px 10px', cursor: 'pointer' }}
                             >{!a.clock_out ? '⚠ Fix' : '✏ Edit'}</button>
