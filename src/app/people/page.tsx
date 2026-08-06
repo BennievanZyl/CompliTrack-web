@@ -325,8 +325,8 @@ export default function PeoplePage() {
       setSaving(true);
       try {
         const workDate = editingAttendance.work_date;
-        const clockIn = editAttendForm.clock_in ? `${workDate}T${editAttendForm.clock_in}:00` : null;
-        const clockOut = editAttendForm.clock_out ? `${workDate}T${editAttendForm.clock_out}:00` : null;
+        const clockIn = editAttendForm.clock_in ? localTimeToUTC(workDate, editAttendForm.clock_in) : null;
+        const clockOut = editAttendForm.clock_out ? localTimeToUTC(workDate, editAttendForm.clock_out) : null;
         const hours = clockIn && clockOut
           ? (new Date(clockOut).getTime() - new Date(clockIn).getTime()) / 3600000
           : 0;
@@ -347,8 +347,8 @@ export default function PeoplePage() {
     if (!selectedEmployee || !attendanceForm.work_date) return;
     setSaving(true); setSaveError(null);
     try {
-      const clockIn = attendanceForm.clock_in ? `${attendanceForm.work_date}T${attendanceForm.clock_in}:00` : null;
-      const clockOut = attendanceForm.clock_out ? `${attendanceForm.work_date}T${attendanceForm.clock_out}:00` : null;
+      const clockIn = attendanceForm.clock_in ? localTimeToUTC(attendanceForm.work_date, attendanceForm.clock_in) : null;
+      const clockOut = attendanceForm.clock_out ? localTimeToUTC(attendanceForm.work_date, attendanceForm.clock_out) : null;
       const hours = clockIn && clockOut ? (new Date(clockOut).getTime() - new Date(clockIn).getTime()) / (1000 * 60 * 60) : null;
       await supabase.from('attendance').insert({ employee_id: selectedEmployee.id, store_id: STORE_ID, work_date: attendanceForm.work_date, clock_in: clockIn, clock_out: clockOut, hours_worked: hours, is_late: attendanceForm.is_late, notes: attendanceForm.notes || null });
       await loadEmployeeProfile(selectedEmployee); setShowAttendanceModal(false); setAttendanceForm({ work_date: new Date().toISOString().split('T')[0], clock_in: '', clock_out: '', is_late: false, notes: '' });
