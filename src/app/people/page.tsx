@@ -75,6 +75,15 @@ function tenure(startDate: string) {
   const years = Math.floor(months / 12); const rem = months % 12;
   return `${years} year${years > 1 ? 's' : ''}${rem > 0 ? ` ${rem} month${rem > 1 ? 's' : ''}` : ''}`;
 }
+
+// Convert a local "HH:MM" time + "YYYY-MM-DD" date to UTC ISO string
+// Uses browser's local timezone so SA users (UTC+2) get correct UTC time
+function localTimeToUTC(date: string, time: string): string {
+  const [y, m, d] = date.split('-').map(Number)
+  const [h, min] = time.split(':').map(Number)
+  return new Date(y, m - 1, d, h, min, 0).toISOString()
+}
+
 function isExpiringSoon(date: string) { return Math.floor((new Date(date).getTime() - Date.now()) / (1000 * 60 * 60 * 24)) <= 30; }
 function isExpired(date: string) { return new Date(date) < new Date(); }
 function isImage(url: string) { return /\.(jpg|jpeg|png|gif|webp)$/i.test(url); }
