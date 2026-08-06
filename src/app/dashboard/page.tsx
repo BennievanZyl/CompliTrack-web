@@ -38,6 +38,9 @@ function DashboardContent() {
     setProfile(profileData)
 
     // Check payment status — skip for platform admin
+    // HR admin goes directly to People/Attendance — not the full dashboard
+    if (profileData.role === 'hr_admin') { router.push('/people'); return }
+
     if (profileData.role !== 'platform_admin' && profileData.organisation_id) {
       const { data: clientData } = await supabase
         .from('platform_clients')
