@@ -31,6 +31,7 @@ export default function HRPortalPage() {
     { href: '/people', emoji: '👥', title: 'People & Attendance', desc: 'Staff profiles, clock-in records, leave & warnings', color: '#1a5c38' },
     { href: '/wages', emoji: '💰', title: 'Payroll & Wages', desc: 'Hours worked, pay runs, advances & deductions', color: '#2563eb' },
     { href: '/reports', emoji: '📋', title: 'HR Reports', desc: 'Attendance, labour & payroll exports', color: '#7c3aed' },
+    { href: '/devices', emoji: '📱', title: 'Linked Devices', desc: 'Link kiosk tablets for face clock-in/out', color: '#0891b2' },
   ]
 
   async function signOut() {
