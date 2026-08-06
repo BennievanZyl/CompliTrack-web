@@ -535,8 +535,8 @@ export default function PeoplePage() {
           </div>
           <ErrorBanner msg={saveError} />
           <button onClick={saveAttendance} disabled={saving} style={{ width: '100%', marginTop: 20, padding: '12px', background: PRIMARY, color: '#fff', border: 'none', borderRadius: 12, fontWeight: 700, cursor: 'pointer' }}>{saving ? 'Saving...' : 'Log Attendance'}</button>
-          )}
           </>
+          )}
         </ModalWrap>
       )}
 
