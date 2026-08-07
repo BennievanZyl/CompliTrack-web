@@ -7,13 +7,26 @@ export interface StoreContext {
   storeName: string
   role: string
   stores: { id: string; name: string }[]
+  userId: string
 }
 
+// Cache is keyed by userId so different users never share context
 let _cache: StoreContext | null = null
 let _promise: Promise<StoreContext | null> | null = null
 
 export async function getStoreContext(): Promise<StoreContext | null> {
-  if (_cache) return _cache
+  // Always verify the cached context belongs to the CURRENT user
+  if (_cache) {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user || user.id !== _cache.userId) {
+      // Different user logged in — clear stale cache immediately
+      _cache = null
+      _promise = null
+    } else {
+      return _cache
+    }
+  }
+
   if (_promise) return _promise
 
   _promise = (async () => {
@@ -43,6 +56,7 @@ export async function getStoreContext(): Promise<StoreContext | null> {
         storeName: store?.name ?? '',
         role: profile.role ?? '',
         stores,
+        userId: user.id, // track which user owns this cache
       }
       return _cache
     } catch {
@@ -73,24 +87,24 @@ export function useStoreContext() {
   const [ready, setReady] = useState(false)
 
   useEffect(() => {
-    // Read URL param INSIDE the effect to ensure client-side window is available
     const params = new URLSearchParams(window.location.search)
     const urlStoreId = params.get('store')
 
     if (urlStoreId) {
-      // Franchisor viewing a specific store via ?store= URL param
       setCtx({
         storeId: urlStoreId,
         orgId: '',
         storeName: '',
         role: 'franchisor_admin',
         stores: [{ id: urlStoreId, name: '' }],
+        userId: '',
       })
       setReady(true)
       return
     }
 
-    // Normal flow — load from profile
+    // Always clear and reload on mount — never serve a stale cross-user cache
+    clearStoreContext()
     getStoreContext().then(c => {
       setCtx(c)
       setReady(true)
