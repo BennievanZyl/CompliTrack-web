@@ -1307,8 +1307,16 @@ export default function FinancesPage() {
                                       />
                                     )
                                   })}
-                                  <button onClick={() => removeLine(i)} disabled={invLines.length === 1}
-                                    style={{ background: '#fef2f2', color: '#dc2626', border: 'none', borderRadius: 6, padding: '8px 12px', cursor: 'pointer', fontSize: 16, fontWeight: 700 }}>x</button>
+                                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+                                    <button onClick={() => removeLine(i)} disabled={invLines.length === 1}
+                                      style={{ background: '#fef2f2', color: '#dc2626', border: 'none', borderRadius: 6, padding: '8px 12px', cursor: 'pointer', fontSize: 16, fontWeight: 700 }}>x</button>
+                                    <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: line.zero_vat ? '#dc2626' : '#6b7280', cursor: 'pointer', whiteSpace: 'nowrap', fontWeight: line.zero_vat ? 700 : 400 }}>
+                                      <input type="checkbox" checked={!!line.zero_vat}
+                                        onChange={e => updateLine(i, 'zero_vat' as any, e.target.checked)}
+                                        style={{ cursor: 'pointer' }} />
+                                      No VAT
+                                    </label>
+                                  </div>
                                 </div>
                               </div>
                               {matches.length > 0 && (
