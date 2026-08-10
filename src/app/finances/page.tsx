@@ -33,7 +33,7 @@ type Invoice = {
 }
 type QuickExpense = {
   id: string; expense_date: string; category_key: string; category_name: string
-  description: string; amount: number; vat_amount: number
+  description: string; amount: number; vat_amount: number; zero_vat?: boolean
   supplier: string; invoice_number: string; payment_method: string; notes: string
 }
 
@@ -524,9 +524,29 @@ export default function FinancesPage() {
     setInvLines(lines => lines.map((l, idx) => {
       if (idx !== i) return l
       const updated = { ...l, [field]: value }
-      // When amount (incl VAT) changes: back-calc VAT
+      // When amount (total incl VAT) changes: back-calc VAT and unit_price excl
       if (field === 'amount') {
-        updated.vat_amount = Math.round(Number(value) / (1 + VAT_RATE) * VAT_RATE * 100) / 100
+        const totalIncl = Number(value) || 0
+        const qty = Number(l.qty) || 1
+        if (l.zero_vat) {
+          updated.vat_amount = 0
+          updated.unit_price = Math.round((totalIncl / qty) * 10000) / 10000
+        } else {
+          const totalExcl = totalIncl / (1 + VAT_RATE)
+          updated.vat_amount = Math.round((totalIncl - totalExcl) * 100) / 100
+          updated.unit_price = Math.round((totalExcl / qty) * 10000) / 10000
+        }
+      }
+      // When zero_vat toggled: recalculate vat_amount and amount
+      if (field === 'zero_vat') {
+        const excl = Number(l.unit_price) * (Number(l.qty) || 1)
+        if (value) {
+          updated.vat_amount = 0
+          updated.amount = Math.round(excl * 100) / 100
+        } else {
+          updated.vat_amount = Math.round(excl * VAT_RATE * 100) / 100
+          updated.amount = Math.round(excl * (1 + VAT_RATE) * 100) / 100
+        }
       }
       // When unit_price or qty changes: forward-calc totals
       if (field === 'unit_price' || field === 'qty') {
@@ -541,7 +561,11 @@ export default function FinancesPage() {
         // If the user manually set VAT (e.g. 0 for a zero-rated item), preserve it
         const expectedOldVat = Math.round(oldExcl * VAT_RATE * 100) / 100
         const vatWasAuto = oldExcl === 0 || Math.abs(currentVat - expectedOldVat) < 0.02
-        if (vatWasAuto) {
+        if (l.zero_vat) {
+          // Zero-rated line: no VAT regardless of price change
+          updated.vat_amount = 0
+          updated.amount = Math.round(newExcl * 100) / 100
+        } else if (vatWasAuto) {
           updated.vat_amount = Math.round(newExcl * VAT_RATE * 100) / 100
           updated.amount     = Math.round(newExcl * (1 + VAT_RATE) * 100) / 100
         } else {
