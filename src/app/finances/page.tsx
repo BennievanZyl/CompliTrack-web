@@ -1307,15 +1307,14 @@ export default function FinancesPage() {
                                       />
                                     )
                                   })}
-                                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+                                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, minWidth: 48 }}>
                                     <button onClick={() => removeLine(i)} disabled={invLines.length === 1}
                                       style={{ background: '#fef2f2', color: '#dc2626', border: 'none', borderRadius: 6, padding: '8px 12px', cursor: 'pointer', fontSize: 16, fontWeight: 700 }}>x</button>
-                                    <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: line.zero_vat ? '#dc2626' : '#6b7280', cursor: 'pointer', whiteSpace: 'nowrap', fontWeight: line.zero_vat ? 700 : 400 }}>
-                                      <input type="checkbox" checked={!!line.zero_vat}
-                                        onChange={e => updateLine(i, 'zero_vat' as any, e.target.checked)}
-                                        style={{ cursor: 'pointer' }} />
-                                      No VAT
-                                    </label>
+                                    <div onClick={() => updateLine(i, 'zero_vat' as any, !line.zero_vat)}
+                                      style={{ display: 'flex', alignItems: 'center', gap: 3, cursor: 'pointer', userSelect: 'none', fontSize: 11, fontWeight: line.zero_vat ? 700 : 400, color: line.zero_vat ? '#dc2626' : '#9ca3af', padding: '2px 4px', borderRadius: 4, background: line.zero_vat ? '#fef2f2' : 'transparent', border: `1px solid ${line.zero_vat ? '#fecaca' : '#e5e7eb'}` }}>
+                                      <span style={{ fontSize: 13 }}>{line.zero_vat ? '☑' : '☐'}</span>
+                                      <span>0%</span>
+                                    </div>
                                   </div>
                                 </div>
                               </div>
