@@ -268,7 +268,7 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
 
   async function loadOwnerProfiles() {
     // Load store owner/franchisee from profiles (they log in with email, not in employees table)
-    const { data } = await supabase.from('profiles').select('id, full_name, role').eq('store_id', storeId).in('role', ['owner', 'franchisee', 'manager', 'store_manager', 'franchisor']);
+    const { data } = await supabase.from('profiles').select('id, full_name, role').eq('store_id', storeId).in('role', ['owner', 'franchisee', 'manager', 'store_manager', 'franchisor', 'franchisee_owner']).neq('is_device', true);
     setOwnerProfiles(data || []);
   }
 
@@ -1061,6 +1061,7 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
                             ...ownerProfiles.map(p => ({ ...p, _source: 'profile' })),
                             ...empSigners.filter(e => !ownerProfiles.some(p => p.full_name === e.full_name)),
                             ...staff.filter(s => {
+                              if (s.is_device) return false;
                               const r = s.role?.toLowerCase() || '';
                               return (r.includes('manager') || r.includes('franchise') || r.includes('owner')) && !empSigners.some(e => e.full_name === s.full_name) && !ownerProfiles.some(p => p.full_name === s.full_name);
                             }),
