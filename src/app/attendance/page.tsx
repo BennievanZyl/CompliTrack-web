@@ -504,7 +504,8 @@ export default function AttendancePage() {
     const lineItems = [
       row('Normal Hours', formatHM(summary.normalHours), `R${rate.toFixed(2)}/hr`, summary.normalPay),
       summary.otHours > 0 ? row('Overtime', formatHM(summary.otHours), `R${(rate * payrollSettings.overtime_multiplier).toFixed(2)}/hr`, summary.otPay) : '',
-      summary.sundayHolidayHours > 0 ? row('Sunday / Public Holiday', formatHM(summary.sundayHolidayHours), '—', summary.sundayHolidayPay) : '',
+      summary.sundayHours > 0 ? row('Sunday', formatHM(summary.sundayHours), `R${(rate * (payrollSettings.sunday_multiplier || 1.5)).toFixed(2)}/hr`, summary.sundayPay) : '',
+      summary.holidayHours > 0 ? row('Public Holiday', formatHM(summary.holidayHours), `R${(rate * (payrollSettings.holiday_multiplier || 2)).toFixed(2)}/hr`, summary.holidayPay) : '',
       summary.nightHours > 0 ? row('Night Allowance', formatHM(summary.nightHours), `R${(emp.night_allowance_rate || payrollSettings.default_night_rate).toFixed(2)}/hr`, summary.nightPay) : '',
       summary.leaveHours > 0 ? row('Paid Leave', formatHM(summary.leaveHours), `R${rate.toFixed(2)}/hr`, summary.leavePay) : '',
     ].join('');
