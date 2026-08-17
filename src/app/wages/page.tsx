@@ -329,7 +329,7 @@ export default function WagesPage() {
                               <td style={{ padding: '14px 16px', fontSize: '14px', color: '#7c3aed' }}>{formatCurrency(run.advances_deducted)}</td>
                               <td style={{ padding: '14px 16px', fontSize: '15px', color: '#1a5c38', fontWeight: '800' }}>{formatCurrency(run.net_pay)}</td>
                               <td style={{ padding: '14px 16px' }}><span style={{ fontSize: '11px', fontWeight: '700', padding: '3px 10px', borderRadius: '100px', background: s.bg, color: s.color }}>{run.status}</span></td>
-                              <td style={{ padding: '14px 16px' }}><button onClick={() => async () => {
+                              <td style={{ padding: '14px 16px' }}><button onClick={async () => {
                               setShowSlip(run)
                               setSlipBreakdown(null)
                               // Fetch attendance for Sunday/Holiday/Night breakdown
