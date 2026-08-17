@@ -33,6 +33,13 @@ export default function WagesPage() {
   const [showAdvanceModal, setShowAdvanceModal] = useState(false)
   const [showWageModal, setShowWageModal] = useState(false)
   const [showSlip, setShowSlip] = useState<PayrollRun | null>(null)
+  const [slipBreakdown, setSlipBreakdown] = useState<{
+    normalHours: number; normalPay: number;
+    sundayHours: number; sundayPay: number;
+    holidayHours: number; holidayPay: number;
+    nightHours: number; nightPay: number;
+    overtimeHours: number; overtimePay: number;
+  } | null>(null)
   const [calculating, setCalculating] = useState(false)
   const [saving, setSaving] = useState(false)
   const [periodForm, setPeriodForm] = useState({ period_start: '', period_end: '', pay_frequency: 'monthly' })
@@ -322,7 +329,46 @@ export default function WagesPage() {
                               <td style={{ padding: '14px 16px', fontSize: '14px', color: '#7c3aed' }}>{formatCurrency(run.advances_deducted)}</td>
                               <td style={{ padding: '14px 16px', fontSize: '15px', color: '#1a5c38', fontWeight: '800' }}>{formatCurrency(run.net_pay)}</td>
                               <td style={{ padding: '14px 16px' }}><span style={{ fontSize: '11px', fontWeight: '700', padding: '3px 10px', borderRadius: '100px', background: s.bg, color: s.color }}>{run.status}</span></td>
-                              <td style={{ padding: '14px 16px' }}><button onClick={() => setShowSlip(run)} style={{ fontSize: '12px', color: '#1d4ed8', background: '#eff6ff', border: 'none', borderRadius: '8px', padding: '5px 10px', cursor: 'pointer', fontWeight: '600' }}>Slip</button></td>
+                              <td style={{ padding: '14px 16px' }}><button onClick={() => async () => {
+                              setShowSlip(run)
+                              setSlipBreakdown(null)
+                              // Fetch attendance for Sunday/Holiday/Night breakdown
+                              if (!selectedPeriod) return
+                              const { data: att } = await supabase.from('attendance')
+                                .select('work_date, hours_worked, clock_in, clock_out')
+                                .eq('employee_id', run.employee_id)
+                                .gte('work_date', selectedPeriod.period_start)
+                                .lte('work_date', selectedPeriod.period_end)
+                                .not('clock_out', 'is', null)
+                              const { data: holidays } = await supabase.from('public_holidays')
+                                .select('holiday_date')
+                                .gte('holiday_date', selectedPeriod.period_start)
+                                .lte('holiday_date', selectedPeriod.period_end)
+                              const holidaySet = new Set((holidays || []).map((h: any) => h.holiday_date))
+                              const nightStart = 18
+                              let normalH = 0, sunH = 0, holH = 0, nightH = 0, otH = 0
+                              for (const r of (att || [])) {
+                                const dow = new Date(r.work_date + 'T00:00:00').getDay()
+                                const h = r.hours_worked || 0
+                                if (holidaySet.has(r.work_date)) holH += h
+                                else if (dow === 0) sunH += h
+                                else normalH += h
+                                // Night hours
+                                if (r.clock_in && r.clock_out) {
+                                  const inH = parseInt(r.clock_in.split('T')[1]?.split(':')[0] || r.clock_in.split(':')[0] || '0')
+                                  if (inH >= nightStart || inH < 6) nightH += Math.min(h, 2)
+                                }
+                              }
+                              const rate = run.hourly_rate || 0
+                              const sunMult = 1.5, holMult = 2, nightRate = 0.5
+                              setSlipBreakdown({
+                                normalHours: normalH, normalPay: normalH * rate,
+                                sundayHours: sunH, sundayPay: sunH * rate * sunMult,
+                                holidayHours: holH, holidayPay: holH * rate * holMult,
+                                nightHours: nightH, nightPay: nightH * nightRate,
+                                overtimeHours: 0, overtimePay: 0,
+                              })
+                            }} style={{ fontSize: '12px', color: '#1d4ed8', background: '#eff6ff', border: 'none', borderRadius: '8px', padding: '5px 10px', cursor: 'pointer', fontWeight: '600' }}>Slip</button></td>
                             </tr>
                           )
                         })}
@@ -638,7 +684,41 @@ export default function WagesPage() {
                     </div>
                   ))}
                 </div>
-                <button onClick={() => window.print()} style={{ width: '100%', padding: '14px', background: '#1a5c38', color: 'white', border: 'none', borderRadius: '12px', fontSize: '14px', fontWeight: '800', cursor: 'pointer' }}>🖨️ Print Wage Slip</button>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button onClick={() => {
+                    const win = window.open('', '_blank')
+                    if (!win || !emp) return
+                    const monthLabel = period ? `${period.period_start} – ${period.period_end}` : ''
+                    const rows = slipBreakdown ? [
+                      slipBreakdown.normalHours > 0 ? `<tr><td>Normal Hours</td><td>${formatHours(slipBreakdown.normalHours)}h</td><td>R${showSlip.hourly_rate.toFixed(2)}/hr</td><td>R${slipBreakdown.normalPay.toFixed(2)}</td></tr>` : '',
+                      slipBreakdown.sundayHours > 0 ? `<tr><td>Sunday</td><td>${formatHours(slipBreakdown.sundayHours)}h</td><td>R${(showSlip.hourly_rate*1.5).toFixed(2)}/hr</td><td>R${slipBreakdown.sundayPay.toFixed(2)}</td></tr>` : '',
+                      slipBreakdown.holidayHours > 0 ? `<tr><td>Public Holiday</td><td>${formatHours(slipBreakdown.holidayHours)}h</td><td>R${(showSlip.hourly_rate*2).toFixed(2)}/hr</td><td>R${slipBreakdown.holidayPay.toFixed(2)}</td></tr>` : '',
+                      slipBreakdown.nightHours > 0 ? `<tr><td>Night Allowance</td><td>${formatHours(slipBreakdown.nightHours)}h</td><td>R0.50/hr</td><td>R${slipBreakdown.nightPay.toFixed(2)}</td></tr>` : '',
+                    ].join('') : `<tr><td>Basic Pay</td><td>${formatHours(showSlip.hours_worked)}h</td><td>R${showSlip.hourly_rate.toFixed(2)}/hr</td><td>R${showSlip.gross_pay.toFixed(2)}</td></tr>`
+                    win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Payslip — ${emp.full_name}</title>
+                    <style>body{font-family:Arial,sans-serif;padding:24px;color:#111;font-size:13px}h1{color:#1a5c38;margin:0 0 4px;font-size:18px}.badge{background:#1a5c38;color:#fff;padding:4px 12px;border-radius:20px;font-size:11px;font-weight:700}.head{display:flex;justify-content:space-between;border-bottom:2px solid #1a5c38;padding-bottom:12px;margin-bottom:16px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:4px 24px;margin-bottom:16px;font-size:12px}.grid .lbl{color:#888}table{width:100%;border-collapse:collapse;margin-bottom:16px;font-size:13px}th{background:#f3f4f6;padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase}th:last-child,th:nth-child(3){text-align:right}td{padding:8px 10px;border-bottom:1px solid #f0f0f0}td:last-child,td:nth-child(3){text-align:right}.totals{border-top:2px solid #111;padding-top:10px}.row{display:flex;justify-content:space-between;padding:4px 0}.net{font-size:17px;font-weight:800;color:#1a5c38;border-top:1px solid #ddd;margin-top:6px;padding-top:6px}.sign{margin-top:50px;display:grid;grid-template-columns:1fr 1fr;gap:40px;font-size:11px}.sign div{border-top:1px solid #999;padding-top:6px;color:#666;text-align:center}.footer{margin-top:20px;font-size:10px;color:#aaa;text-align:center;border-top:1px solid #eee;padding-top:12px}</style>
+                    </head><body>
+                    <div class="head"><div><h1>Mochachos Hartswater (Pty) Ltd</h1><div style="font-size:12px;color:#666">Payslip · ${monthLabel}</div></div><div class="badge">PAYSLIP</div></div>
+                    <div class="grid"><div><span class="lbl">Employee: </span><b>${emp.full_name}</b></div><div><span class="lbl">ID Number: </span>${wage?.id_number || '—'}</div><div><span class="lbl">Role: </span>${emp.role}</div><div><span class="lbl">Pay Frequency: </span>Monthly</div></div>
+                    <table><thead><tr><th>Description</th><th>Hours</th><th>Rate</th><th>Amount</th></tr></thead><tbody>${rows}</tbody></table>
+                    <div class="totals"><div class="row"><span>Gross Pay</span><b>R${showSlip.gross_pay.toFixed(2)}</b></div><div class="row" style="color:#c2410c"><span>UIF (1%)</span><span>-R${showSlip.uif_employee.toFixed(2)}</span></div>${showSlip.advances_deducted > 0 ? `<div class="row" style="color:#c2410c"><span>Advance Deduction</span><span>-R${showSlip.advances_deducted.toFixed(2)}</span></div>` : ''}<div class="row net"><span>Net Pay</span><span>R${showSlip.net_pay.toFixed(2)}</span></div></div>
+                    <div class="sign"><div>Employee Signature</div><div>Employer Signature</div></div>
+                    <div class="footer">Generated by CompliTrack · complitrack.co.za · ${new Date().toLocaleString('en-ZA')}</div>
+                    <script>window.onload=()=>{window.print()}<\/script></body></html>`)
+                    win.document.close()
+                  }} style={{ flex: 1, padding: '12px', background: '#1a5c38', color: '#fff', border: 'none', borderRadius: '10px', cursor: 'pointer', fontWeight: '700', fontSize: '13px' }}>🖨 Print / PDF</button>
+                  <button onClick={() => {
+                    if (!emp) return
+                    const body = `Hi ${emp.full_name},%0A%0AYour payslip:%0AGross: R${showSlip.gross_pay.toFixed(2)}%0AUIF: -R${showSlip.uif_employee.toFixed(2)}%0ANet Pay: R${showSlip.net_pay.toFixed(2)}`
+                    window.open(`mailto:?subject=Payslip&body=${body}`, '_blank')
+                  }} style={{ padding: '12px 16px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: '10px', cursor: 'pointer', fontWeight: '700', fontSize: '13px' }}>✉️ Email</button>
+                  <button onClick={() => {
+                    if (!emp) return
+                    const text = `*Payslip — ${emp.full_name}*%0AGross: R${showSlip.gross_pay.toFixed(2)}%0AUIF: -R${showSlip.uif_employee.toFixed(2)}%0A*Net Pay: R${showSlip.net_pay.toFixed(2)}*`
+                    const phone = emp.phone ? emp.phone.replace(/[^0-9]/g,'').replace(/^0/,'27') : ''
+                    window.open(phone ? `https://wa.me/${phone}?text=${text}` : `https://wa.me/?text=${text}`, '_blank')
+                  }} style={{ padding: '12px 16px', background: '#25d366', color: '#fff', border: 'none', borderRadius: '10px', cursor: 'pointer', fontWeight: '700', fontSize: '13px' }}>💬 WhatsApp</button>
+                </div>
               </div>
             </div>
           </div>
