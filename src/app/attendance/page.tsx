@@ -211,7 +211,7 @@ export default function AttendancePage() {
     const isWeeklyPaid = emp?.pay_frequency === 'weekly';
     const days = buildRegisterDays(employeeId); // most-recent-first; fine, we don't depend on order below
 
-    let ordinaryHours = 0, sundayHolidayHours = 0, sundayHolidayPay = 0, nightHours = 0, nightPay = 0, leaveHours = 0, leavePay = 0;
+    let ordinaryHours = 0, sundayHours = 0, sundayPay = 0, holidayHours = 0, holidayPay = 0, nightHours = 0, nightPay = 0, leaveHours = 0, leavePay = 0;
     const ordinaryByWeek: Record<string, number> = {}; // ISO week key -> hours, for weekly-paid OT
 
     for (const day of days) {
@@ -222,9 +222,12 @@ export default function AttendancePage() {
         leavePay += day.leaveHours * rate;
         continue;
       }
-      if (day.type === 'sunday' || day.type === 'holiday') {
-        sundayHolidayHours += day.hours;
-        sundayHolidayPay += day.hours * rate * day.mult;
+      if (day.type === 'sunday') {
+        sundayHours += day.hours;
+        sundayPay += day.hours * rate * day.mult;
+      } else if (day.type === 'holiday') {
+        holidayHours += day.hours;
+        holidayPay += day.hours * rate * day.mult;
       } else {
         ordinaryHours += day.hours;
         const dt = new Date(day.date + 'T00:00:00');
@@ -248,6 +251,8 @@ export default function AttendancePage() {
     const normalPay = normalHours * rate;
     const otPay = otHours * rate * payrollSettings.overtime_multiplier;
 
+    const sundayHolidayHours = sundayHours + holidayHours;
+    const sundayHolidayPay = sundayPay + holidayPay;
     const totalHours = ordinaryHours + sundayHolidayHours + leaveHours;
     const totalPay = normalPay + otPay + sundayHolidayPay + nightPay + leavePay;
     const uifBase = Math.min(totalPay, payrollSettings.uif_ceiling);
@@ -256,7 +261,9 @@ export default function AttendancePage() {
     const outstandingAdvances = advances.filter(a => a.employee_id === employeeId && a.deduct_from_wages && a.repayment_status === 'outstanding').reduce((s, a) => s + Number(a.amount), 0);
     return {
       totalHours, totalPay, netPay: totalPay - outstandingAdvances - uifEmployee, outstandingAdvances,
-      normalHours, normalPay, otHours, otPay, sundayHolidayHours, sundayHolidayPay,
+      normalHours, normalPay, otHours, otPay,
+      sundayHours, sundayPay, holidayHours, holidayPay,
+      sundayHolidayHours, sundayHolidayPay,
       nightHours, nightPay, leaveHours, leavePay, uifEmployee, uifEmployer,
     };
   }
