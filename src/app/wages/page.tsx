@@ -312,7 +312,7 @@ export default function WagesPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {periodRuns.map(run => {
+                        {periodRuns.filter(run => employees.some(e => e.id === run.employee_id)).map(run => {
                           const emp = employees.find(e => e.id === run.employee_id)
                           const s = sc(run.status)
                           return (
