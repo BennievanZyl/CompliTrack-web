@@ -436,7 +436,7 @@ export default function WagesPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {advances.map(adv => {
+                      {advances.filter(adv => adv.advance_date?.replace(/\//g, '-').slice(0,7) === advanceMonth).map(adv => {
                         const emp = employees.find(e => e.id === adv.employee_id)
                         return (
                           <tr key={adv.id} style={{ borderTop: '1px solid #f3f4f6' }}>
