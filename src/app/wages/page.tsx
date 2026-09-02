@@ -413,7 +413,7 @@ export default function WagesPage() {
               <div style={{ background: 'white', borderRadius: '20px', border: '1.5px solid #eef2ee', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                   <div style={{ fontWeight: 700, color: '#374151', fontSize: 14 }}>
-                    {advances.filter(a => a.advance_date?.slice(0,7) === advanceMonth).length} advance(s) in {new Date(advanceMonth + '-01').toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' })}
+                    {advances.filter(a => a.advance_date?.replace(/\//g, '-').slice(0,7) === advanceMonth).length} advance(s) in {new Date(advanceMonth + '-01').toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' })}
                   </div>
                   <input type="month" value={advanceMonth} onChange={e => setAdvanceMonth(e.target.value)}
                     style={{ padding: '6px 12px', border: '1.5px solid #e5e7eb', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer', background: '#f9fafb' }} />
