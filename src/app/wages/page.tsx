@@ -301,14 +301,6 @@ export default function WagesPage() {
               )}
 
               {selectedPeriod && periodRuns.length > 0 && (
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                  <div style={{ fontWeight: 700, color: '#374151', fontSize: 14 }}>
-                    Showing {advances.filter(a => a.advance_date?.slice(0,7) === advanceMonth).length} advance{advances.filter(a => a.advance_date?.slice(0,7) === advanceMonth).length !== 1 ? 's' : ''} for {new Date(advanceMonth + '-01').toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' })}
-                  </div>
-                  <input type="month" value={advanceMonth} onChange={e => setAdvanceMonth(e.target.value)}
-                    style={{ padding: '6px 12px', border: '1.5px solid #e5e7eb', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer', background: '#f9fafb' }} />
-                </div>
-
                 <div style={{ background: 'white', borderRadius: '20px', border: '1.5px solid #eef2ee', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
                   <div style={{ padding: '16px 24px', borderBottom: '1px solid #f3f4f6', fontWeight: '800', fontSize: '15px', color: '#111' }}>Employee Breakdown</div>
                   <div style={{ overflowX: 'auto' }}>
@@ -427,6 +419,14 @@ export default function WagesPage() {
               )}
 
               <div style={{ background: 'white', borderRadius: '20px', border: '1.5px solid #eef2ee', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                  <div style={{ fontWeight: 700, color: '#374151', fontSize: 14 }}>
+                    {advances.filter(a => a.advance_date?.slice(0,7) === advanceMonth).length} advance(s) in {new Date(advanceMonth + '-01').toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' })}
+                  </div>
+                  <input type="month" value={advanceMonth} onChange={e => setAdvanceMonth(e.target.value)}
+                    style={{ padding: '6px 12px', border: '1.5px solid #e5e7eb', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer', background: '#f9fafb' }} />
+                </div>
+
                 {advances.filter(a => a.repayment_status === 'paid').length > 0 && (
                   <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 10, padding: 12, marginBottom: 16, fontSize: 13, color: '#92400e' }}>
                     <strong>⚠ Incorrectly settled advances?</strong> If advances were marked paid by a calculate run (not by actual payment), use the Revert button below to reset them to Outstanding.
