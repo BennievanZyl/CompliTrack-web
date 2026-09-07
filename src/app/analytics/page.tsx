@@ -95,6 +95,7 @@ export default function AnalyticsPage(){
   const [loading,setLoading]=useState(false)
   const [data,setData]=useState<any>(null)
   const [compareData,setCompareData]=useState<any>(null)
+  const [breakevenMode,setBreakevenMode]=useState<'estimate'|'actual'>('estimate')
 
   async function fetchAnalytics(start:string,end:string){
     if(!STORE_ID) return null
