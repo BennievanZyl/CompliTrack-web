@@ -238,11 +238,14 @@ export default function AnalyticsPage(){
       ...Object.entries(expByCat).map(([,c])=>({label:c.name,value:c.total,color:c.color})),
     ].filter(s=>s.value>0)
 
+    const estimateBase=lastMonthTotal>0?lastMonthTotal:totalOperatingCosts
+    const actualBase=totalOperatingCosts
     return{
       sales,salesExclVat,dailyCashUps,daysArr,purchases,wastage,wagesGross,estimatedWages,displayWages,isWageEstimate,uifEmployer,
       openingValue,closingValue,foodCostAmount,foodCostPct,
       grossProfit,grossMarginPct,expByCat,otherExpenses,pieSlices,
       totalOperatingCosts,dailyBreakeven,monthlyBreakeven,
+      estimateBase,actualBase,
       useLastMonth,daysInPeriod,daysElapsed,daysAbove,daysBelow,
       dailySalesAvg,totalCosts,netProfit,netMarginPct,
       sessionScores,avgCompliance,uifEmployer,
@@ -357,10 +360,17 @@ export default function AnalyticsPage(){
           {/* Breakeven card */}
           <div style={{...card,border:`1.5px solid ${data.dailySalesAvg>=data.dailyBreakeven?'#bbf7d0':'#fecaca'}`}}>
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:4}}>
-              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
                 <div style={{fontSize:15,fontWeight:700}}>Breakeven</div>
-                <div style={{fontSize:11,color:'#6b7280',background:'#f3f4f6',padding:'2px 8px',borderRadius:6,fontWeight:600}}>
-                  {breakevenMode==='estimate'?'Based on last month':'Based on this month'}
+                <div style={{display:'flex',gap:4}}>
+                  {(['estimate','actual'] as const).map(m=>(
+                    <button key={m} onClick={()=>setBreakevenMode(m)}
+                      style={{padding:'4px 10px',border:'none',borderRadius:6,cursor:'pointer',fontWeight:700,fontSize:11,
+                        background:breakevenMode===m?'#1a5c38':'#f3f4f6',
+                        color:breakevenMode===m?'#fff':'#6b7280'}}>
+                      {m==='estimate'?'Est.':'Actual'}
+                    </button>
+                  ))}
                 </div>
               </div>
               {data.useLastMonth&&<span style={{fontSize:11,background:'#fef9c3',color:'#854d0e',borderRadius:6,padding:'2px 8px',fontWeight:600}}>Est.</span>}
