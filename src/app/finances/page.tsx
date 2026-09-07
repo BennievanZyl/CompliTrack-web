@@ -149,6 +149,15 @@ export default function FinancesPage() {
   const [invForm, setInvForm] = useState(emptyInvoice())
   const [invLines, setInvLines] = useState<InvoiceLine[]>([emptyLine()])
   const [expandedInv, setExpandedInv] = useState<string | null>(null)
+  const [expandedDates, setExpandedDates] = useState<Set<string>>(() => {
+    // Open today and yesterday by default
+    const s = new Set<string>()
+    const now = new Date()
+    s.add(now.toISOString().slice(0, 10))
+    const yest = new Date(now); yest.setDate(yest.getDate() - 1)
+    s.add(yest.toISOString().slice(0, 10))
+    return s
+  })
 
   // Quick expense form state
   const [showQForm, setShowQForm] = useState(false)
@@ -1470,12 +1479,69 @@ export default function FinancesPage() {
                           {drafts.map(renderInvoiceCard)}
                         </div>
                       )}
-                      {submitted.length > 0 && (
-                        <div>
-                          {drafts.length > 0 && <div style={{ fontSize: 15, fontWeight: 800, color: '#374151', marginBottom: 10 }}>Submitted Invoices</div>}
-                          {submitted.map(renderInvoiceCard)}
-                        </div>
-                      )}
+                      {submitted.length > 0 && (() => {
+                        // Group by invoice_date
+                        const byDate: Record<string, typeof submitted> = {}
+                        submitted.forEach(inv => {
+                          const d = inv.invoice_date || 'Unknown'
+                          if (!byDate[d]) byDate[d] = []
+                          byDate[d].push(inv)
+                        })
+                        const sortedDates = Object.keys(byDate).sort((a, b) => b.localeCompare(a))
+                        return (
+                          <div>
+                            {drafts.length > 0 && <div style={{ fontSize: 15, fontWeight: 800, color: '#374151', marginBottom: 12 }}>Submitted Invoices</div>}
+                            {sortedDates.map(dateKey => {
+                              const dayInvs = byDate[dateKey]
+                              const dayTotal = dayInvs.reduce((s, i) => s + (Number(i.total_amount) || 0), 0)
+                              const isOpen = expandedDates.has(dateKey)
+                              const dateLabel = dateKey !== 'Unknown'
+                                ? new Date(dateKey + 'T00:00:00').toLocaleDateString('en-ZA', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+                                : 'Unknown Date'
+                              return (
+                                <div key={dateKey} style={{ marginBottom: 12 }}>
+                                  {/* Day header — clickable */}
+                                  <button
+                                    onClick={() => {
+                                      const next = new Set(expandedDates)
+                                      if (next.has(dateKey)) next.delete(dateKey)
+                                      else next.add(dateKey)
+                                      setExpandedDates(next)
+                                    }}
+                                    style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                                      background: isOpen ? '#1a5c38' : '#f0fdf4', border: `2px solid ${isOpen ? '#1a5c38' : '#bbf7d0'}`,
+                                      borderRadius: isOpen ? '14px 14px 0 0' : 14, padding: '12px 18px', cursor: 'pointer',
+                                      transition: 'all 0.15s' }}
+                                  >
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                      <span style={{ fontSize: 18 }}>📅</span>
+                                      <div style={{ textAlign: 'left' }}>
+                                        <div style={{ fontWeight: 800, fontSize: 14, color: isOpen ? '#fff' : '#14532d' }}>{dateLabel}</div>
+                                        <div style={{ fontSize: 12, color: isOpen ? 'rgba(255,255,255,0.7)' : '#16a34a', marginTop: 1 }}>
+                                          {dayInvs.length} invoice{dayInvs.length !== 1 ? 's' : ''}
+                                        </div>
+                                      </div>
+                                    </div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                                      <span style={{ fontWeight: 800, fontSize: 16, color: isOpen ? '#fff' : '#dc2626' }}>
+                                        R {dayTotal.toLocaleString('en-ZA', { minimumFractionDigits: 2 })}
+                                      </span>
+                                      <span style={{ fontSize: 18, color: isOpen ? '#fff' : '#16a34a' }}>{isOpen ? '▲' : '▼'}</span>
+                                    </div>
+                                  </button>
+                                  {/* Day invoices — expanded */}
+                                  {isOpen && (
+                                    <div style={{ border: '2px solid #1a5c38', borderTop: 'none', borderRadius: '0 0 14px 14px',
+                                      padding: '8px 8px', background: '#fff' }}>
+                                      {dayInvs.map(renderInvoiceCard)}
+                                    </div>
+                                  )}
+                                </div>
+                              )
+                            })}
+                          </div>
+                        )
+                      })()}
                     </>
                   )
                 })()}
