@@ -203,9 +203,14 @@ export default function AnalyticsPage(){
     }
     const lastMonthTotal=lmWages+lmOpExp
 
-    const daysInPeriod=Math.round((new Date(end).getTime()-new Date(start).getTime())/86400000)+1
+    // Use reliable day count — avoids timezone/DST off-by-one errors
+    const [curY,curM]=start.split('-').map(Number)
+    const daysInPeriod=new Date(curY,curM,0).getDate() // days in current month
+    // Days in previous month (for estimate mode)
+    const prevMonthDate=new Date(curY,curM-2,1)
+    const daysInPrevMonth=new Date(prevMonthDate.getFullYear(),prevMonthDate.getMonth()+1,0).getDate()
     const todayStr=new Date().toISOString().slice(0,10)
-    const daysElapsed=todayStr<=end?Math.round((new Date(Math.min(new Date(todayStr).getTime(),new Date(end).getTime())).getTime()-new Date(start).getTime())/86400000)+1:daysInPeriod
+    const daysElapsed=todayStr<=end?Math.max(1,Math.round((new Date(Math.min(new Date(todayStr).getTime(),new Date(end).getTime())).getTime()-new Date(start).getTime())/86400000)+1):daysInPeriod
     const pctElapsed=daysElapsed/daysInPeriod
     const useLastMonth=pctElapsed<0.5&&lastMonthTotal>0
     const breakevenBase=useLastMonth?lastMonthTotal:totalOperatingCosts
@@ -239,14 +244,18 @@ export default function AnalyticsPage(){
       ...Object.entries(expByCat).map(([,c])=>({label:c.name,value:c.total,color:c.color})),
     ].filter(s=>s.value>0)
 
+    // Estimate: last month's costs ÷ last month's days
+    // Actual: this month's costs ÷ this month's days
     const estimateBase=lastMonthTotal>0?lastMonthTotal:totalOperatingCosts
+    const estimateDailyBreakeven=estimateBase/daysInPrevMonth
     const actualBase=totalOperatingCosts
+    const actualDailyBreakeven=actualBase/daysInPeriod
     return{
       sales,salesExclVat,dailyCashUps,daysArr,purchases,wastage,wagesGross,estimatedWages,displayWages,isWageEstimate,uifEmployer,
       openingValue,closingValue,foodCostAmount,foodCostPct,
       grossProfit,grossMarginPct,expByCat,otherExpenses,pieSlices,
       totalOperatingCosts,dailyBreakeven,monthlyBreakeven,
-      estimateBase,actualBase,
+      estimateBase,actualBase,estimateDailyBreakeven,actualDailyBreakeven,daysInPrevMonth,
       useLastMonth,daysInPeriod,daysElapsed,daysAbove,daysBelow,
       dailySalesAvg,totalCosts,netProfit,netMarginPct,
       sessionScores,avgCompliance,uifEmployer,
@@ -381,10 +390,10 @@ export default function AnalyticsPage(){
             </div>
             <div style={{textAlign:'center',background:'#f8faf8',borderRadius:12,padding:'16px 8px',marginBottom:12}}>
               <div style={{fontSize:11,color:'#9ca3af',marginBottom:2}}>DAILY TARGET (ex-VAT)</div>
-              <div style={{fontSize:32,fontWeight:800,color:'#111'}}>{fmt((breakevenMode==='estimate'?data.estimateBase:data.actualBase)/data.daysInPeriod)}</div>
+              <div style={{fontSize:32,fontWeight:800,color:'#111'}}>{fmt(breakevenMode==='estimate'?data.estimateDailyBreakeven:data.actualDailyBreakeven)}</div>
             </div>
             <div style={{fontSize:12,color:'#6b7280',marginBottom:8,textAlign:'center'}}>
-              = {fmt(breakevenMode==='estimate'?data.estimateBase:data.actualBase)} ÷ {data.daysInPeriod} days
+              = {fmt(breakevenMode==='estimate'?data.estimateBase:data.actualBase)} ÷ {breakevenMode==='estimate'?data.daysInPrevMonth:data.daysInPeriod} days
             </div>
             {/* Progress bar: avg daily vs target */}
             <div style={{marginTop:8}}>
