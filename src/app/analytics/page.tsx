@@ -331,7 +331,7 @@ export default function AnalyticsPage(){
           <KPI label="Gross Profit" value={fmt(data.grossProfit)} sub={`${data.grossMarginPct.toFixed(1)}% margin`} color={data.grossMarginPct>=55?'#16a34a':data.grossMarginPct>=40?'#d97706':'#dc2626'} big/>
           <KPI label="Net Profit/Loss" value={fmt(data.netProfit)} sub={`${data.netMarginPct.toFixed(1)}% of sales`} color={data.netProfit>=0?'#16a34a':'#dc2626'} big/>
           <KPI label="Food Cost %" value={data.salesExclVat>0?data.foodCostPct.toFixed(1)+'%':'—'} sub={data.foodCostPct<=35?'✓ On target':'⚠️ Above target'} color={data.foodCostPct<=35?'#16a34a':data.foodCostPct<=40?'#d97706':'#dc2626'} big/>
-          <KPI label="Daily Breakeven" value={fmt(data.dailyBreakeven)} sub={`Monthly: ${fmt(data.monthlyBreakeven)}`} color="#f59e0b" big/>
+          <KPI label="Daily Breakeven" value={fmt(breakevenMode==='estimate'?data.estimateDailyBreakeven:data.actualDailyBreakeven)} sub={`Monthly: ${fmt(breakevenMode==='estimate'?data.estimateBase:data.actualBase)}`} color="#f59e0b" big/>
           <KPI label="Compliance" value={data.avgCompliance>0?data.avgCompliance+'%':'—'} sub={data.sessionScores.length+' sessions this month'} color={pctColor(data.avgCompliance)} big/>
         </div>
 
@@ -350,7 +350,7 @@ export default function AnalyticsPage(){
                 <span style={{display:'flex',alignItems:'center',gap:4}}><span style={{width:16,height:2,background:'#f59e0b',display:'inline-block'}}/> Target</span>
               </div>
             </div>
-            <SalesBarChart days={data.daysArr} breakeven={data.dailyBreakeven}/>
+            <SalesBarChart days={data.daysArr} breakeven={breakevenMode==='estimate'?data.estimateDailyBreakeven:data.actualDailyBreakeven}/>
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:8,marginTop:12}}>
               <div style={{textAlign:'center',background:'#f0fdf4',borderRadius:8,padding:'8px 0'}}>
                 <div style={{fontSize:20,fontWeight:800,color:'#16a34a'}}>{data.daysAbove}</div>
@@ -368,7 +368,7 @@ export default function AnalyticsPage(){
           </div>
 
           {/* Breakeven card */}
-          <div style={{...card,border:`1.5px solid ${data.dailySalesAvg>=data.dailyBreakeven?'#bbf7d0':'#fecaca'}`}}>
+          <div style={{...card,border:`1.5px solid ${data.dailySalesAvg>=(breakevenMode==='estimate'?data.estimateDailyBreakeven:data.actualDailyBreakeven)?'#bbf7d0':'#fecaca'}`}}>
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:4}}>
               <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
                 <div style={{fontSize:15,fontWeight:700}}>Breakeven</div>
@@ -399,21 +399,21 @@ export default function AnalyticsPage(){
             <div style={{marginTop:8}}>
               <div style={{display:'flex',justifyContent:'space-between',fontSize:12,marginBottom:4}}>
                 <span style={{color:'#6b7280'}}>Your avg daily (ex-VAT)</span>
-                <span style={{fontWeight:700,color:data.dailySalesAvg>=data.dailyBreakeven?'#16a34a':'#dc2626'}}>{fmt(data.dailySalesAvg)}</span>
+                <span style={{fontWeight:700,color:data.dailySalesAvg>=(breakevenMode==='estimate'?data.estimateDailyBreakeven:data.actualDailyBreakeven)?'#16a34a':'#dc2626'}}>{fmt(data.dailySalesAvg)}</span>
               </div>
               <div style={{height:12,background:'#f3f4f6',borderRadius:6}}>
-                <div style={{height:'100%',width:`${Math.min(100,data.dailyBreakeven>0?data.dailySalesAvg/data.dailyBreakeven*100:0)}%`,background:data.dailySalesAvg>=data.dailyBreakeven?'#16a34a':'#ef4444',borderRadius:6}}/>
+                <div style={{height:'100%',width:`${Math.min(100,(breakevenMode==='estimate'?data.estimateDailyBreakeven:data.actualDailyBreakeven)>0?data.dailySalesAvg/(breakevenMode==='estimate'?data.estimateDailyBreakeven:data.actualDailyBreakeven)*100:0)}%`,background:data.dailySalesAvg>=(breakevenMode==='estimate'?data.estimateDailyBreakeven:data.actualDailyBreakeven)?'#16a34a':'#ef4444',borderRadius:6}}/>
               </div>
               <div style={{display:'flex',justifyContent:'space-between',fontSize:11,color:'#9ca3af',marginTop:3}}>
                 <span>R0</span><span>Target</span>
               </div>
             </div>
-            <div style={{marginTop:12,padding:'10px',borderRadius:10,background:data.dailySalesAvg>=data.dailyBreakeven?'#f0fdf4':'#fef2f2',textAlign:'center'}}>
-              <div style={{fontSize:13,fontWeight:700,color:data.dailySalesAvg>=data.dailyBreakeven?'#16a34a':'#dc2626'}}>
-                {data.dailySalesAvg>=data.dailyBreakeven?'✓ Trading above breakeven':'✗ Trading below breakeven'}
+            <div style={{marginTop:12,padding:'10px',borderRadius:10,background:data.dailySalesAvg>=(breakevenMode==='estimate'?data.estimateDailyBreakeven:data.actualDailyBreakeven)?'#f0fdf4':'#fef2f2',textAlign:'center'}}>
+              <div style={{fontSize:13,fontWeight:700,color:data.dailySalesAvg>=(breakevenMode==='estimate'?data.estimateDailyBreakeven:data.actualDailyBreakeven)?'#16a34a':'#dc2626'}}>
+                {data.dailySalesAvg>=(breakevenMode==='estimate'?data.estimateDailyBreakeven:data.actualDailyBreakeven)?'✓ Trading above breakeven':'✗ Trading below breakeven'}
               </div>
               <div style={{fontSize:12,color:'#6b7280',marginTop:2}}>
-                {fmt(Math.abs(data.dailySalesAvg-data.dailyBreakeven))}/day {data.dailySalesAvg>=data.dailyBreakeven?'above':'below'} target
+                {fmt(Math.abs(data.dailySalesAvg-(breakevenMode==='estimate'?data.estimateDailyBreakeven:data.actualDailyBreakeven)))}/day {data.dailySalesAvg>=(breakevenMode==='estimate'?data.estimateDailyBreakeven:data.actualDailyBreakeven)?'above':'below'} target
               </div>
             </div>
           </div>
