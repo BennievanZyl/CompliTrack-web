@@ -1019,7 +1019,7 @@ export default function FinancesPage() {
                     })}
                 </div>
                 <div style={card}>
-                  <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 700 }}>Sales vs Expenses n/a {month}</h3>
+                  <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 700 }}>Sales vs Expenses {'—'} {month}</h3>
                   {[
                     { label: 'Total Sales', value: totalSales, color: '#16a34a', pct: 100 },
                     { label: 'Supplier Bills', value: totalInvoices, color: '#dc2626', pct: totalSales > 0 ? (totalInvoices / totalSales) * 100 : 0 },
@@ -1473,7 +1473,7 @@ export default function FinancesPage() {
                       {drafts.length > 0 && (
                         <div style={{ marginBottom: 24 }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-                            <span style={{ fontSize: 15, fontWeight: 800, color: '#92400e' }}>📝 Drafts n/a not yet submitted</span>
+                            <span style={{ fontSize: 15, fontWeight: 800, color: '#92400e' }}>📝 Drafts {'—'} not yet submitted</span>
                             <span style={{ fontSize: 12, background: '#fef3c7', color: '#92400e', padding: '2px 10px', borderRadius: 20, fontWeight: 700 }}>{drafts.length}</span>
                           </div>
                           {drafts.map(renderInvoiceCard)}
@@ -1987,7 +1987,7 @@ export default function FinancesPage() {
                   <div style={{ display: 'grid', gridTemplateColumns: '1.7fr 65px 65px 75px 70px 80px 90px', gap: 6, marginBottom: 4, fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase' as const }}>
                     <div>Item</div><div style={{textAlign:'center'}}>Cases</div><div style={{textAlign:'center'}}>Kg/Case</div><div>Case Price</div><div style={{textAlign:'center'}}>→ Qty</div><div>→ R/unit</div><div></div>
                   </div>
-                  <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 8 }}>For case/box items: fill in Cases, Kg per Case, and Case Price n/a Qty and R/unit will work out automatically. For simple items, just type Qty and R/unit directly.</div>
+                  <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 8 }}>For case/box items: fill in Cases, Kg per Case, and Case Price — Qty and R/unit will work out automatically. For simple items, just type Qty and R/unit directly.</div>
                   <div style={{ maxHeight: 420, overflowY: 'auto' }}>
                     {grvLines.map((line, i) => {
                        // Catch weight: stock tracked in "each" but received/priced by kg
@@ -2052,7 +2052,7 @@ export default function FinancesPage() {
                          {line.is_catch_weight && (
                            <div style={{ marginTop: 8, background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, padding: '10px 12px' }}>
                              <div style={{ fontSize: 12, fontWeight: 700, color: '#92400e', marginBottom: 6 }}>
-                               ⚖️ Catch Weight n/a stock tracked in <strong>{line.unit}</strong>
+                               ⚖️ Catch Weight {'—'} stock tracked in <strong>{line.unit}</strong>
                              </div>
                              <div style={{ fontSize: 12, color: '#78350f', marginBottom: 8 }}>
                                Invoice qty shows <strong>{line.qty_received} kg</strong> at <strong>R{parseFloat(line.unit_cost||'0').toFixed(2)}/kg</strong>. 
