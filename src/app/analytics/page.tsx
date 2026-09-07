@@ -357,7 +357,12 @@ export default function AnalyticsPage(){
           {/* Breakeven card */}
           <div style={{...card,border:`1.5px solid ${data.dailySalesAvg>=data.dailyBreakeven?'#bbf7d0':'#fecaca'}`}}>
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:4}}>
-              <div style={{fontSize:15,fontWeight:700}}>Breakeven</div>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                <div style={{fontSize:15,fontWeight:700}}>Breakeven</div>
+                <div style={{fontSize:11,color:'#6b7280',background:'#f3f4f6',padding:'2px 8px',borderRadius:6,fontWeight:600}}>
+                  {breakevenMode==='estimate'?'Based on last month':'Based on this month'}
+                </div>
+              </div>
               {data.useLastMonth&&<span style={{fontSize:11,background:'#fef9c3',color:'#854d0e',borderRadius:6,padding:'2px 8px',fontWeight:600}}>Est.</span>}
             </div>
             <div style={{fontSize:12,color:'#9ca3af',marginBottom:16}}>
@@ -365,10 +370,10 @@ export default function AnalyticsPage(){
             </div>
             <div style={{textAlign:'center',background:'#f8faf8',borderRadius:12,padding:'16px 8px',marginBottom:12}}>
               <div style={{fontSize:11,color:'#9ca3af',marginBottom:2}}>DAILY TARGET (ex-VAT)</div>
-              <div style={{fontSize:32,fontWeight:800,color:'#111'}}>{fmt(data.dailyBreakeven)}</div>
+              <div style={{fontSize:32,fontWeight:800,color:'#111'}}>{fmt((breakevenMode==='estimate'?data.estimateBase:data.actualBase)/data.daysInPeriod)}</div>
             </div>
             <div style={{fontSize:12,color:'#6b7280',marginBottom:8,textAlign:'center'}}>
-              = {fmt(data.monthlyBreakeven)} ÷ {data.daysInPeriod} days
+              = {fmt(breakevenMode==='estimate'?data.estimateBase:data.actualBase)} ÷ {data.daysInPeriod} days
             </div>
             {/* Progress bar: avg daily vs target */}
             <div style={{marginTop:8}}>
