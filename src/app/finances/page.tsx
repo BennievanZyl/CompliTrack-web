@@ -1158,7 +1158,7 @@ export default function FinancesPage() {
                         const sup = suppliers.find(s => s.name === name)
                         setInvForm(f => ({ ...f, supplier: name, due_date: sup && f.invoice_date ? addDays(f.invoice_date, sup.payment_terms_days ?? 7) : f.due_date }))
                       }} value={suppliers.some(s => s.name === invForm.supplier) ? invForm.supplier : (invForm.supplier ? '_other' : '')} style={inp}>
-                        <option value="">n/a Select Supplier n/a</option>
+                        <option value="">{'— Select Supplier —'}</option>
                         {suppliers.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
                         <option value="_other">+ Other (type name below)</option>
                       </select>
