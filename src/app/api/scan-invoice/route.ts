@@ -59,8 +59,8 @@ Extract EVERY visible line item — do not skip any. If date not found use ${tod
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
       body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 2048,
+        model: 'claude-sonnet-4-6',
+        max_tokens: 4096,
         messages: [{ role: 'user', content: [contentBlock, { type: 'text', text: prompt }] }]
       })
     })
@@ -73,17 +73,33 @@ Extract EVERY visible line item — do not skip any. If date not found use ${tod
 
     const result = await response.json()
     const text = result.content?.[0]?.text || ''
-    const jsonStart = text.indexOf('{')
-    const jsonEnd = text.lastIndexOf('}')
-    if (jsonStart === -1 || jsonEnd === -1) {
-      return NextResponse.json({ error: 'Could not extract data from invoice' }, { status: 500 })
+    if (!text) {
+      return NextResponse.json({ error: 'No response from AI' }, { status: 500 })
     }
-    try {
-      const data = JSON.parse(text.substring(jsonStart, jsonEnd + 1))
-      return NextResponse.json(data)
-    } catch {
-      return NextResponse.json({ error: 'Could not parse invoice data' }, { status: 500 })
+    // Try multiple extraction strategies
+    let parsed: any = null
+    let lastErr = ''
+    const strategies = [
+      // 1. Strip markdown code fences
+      () => { const m = text.match(/```(?:json)?\s*([\s\S]*?)```/); return m ? JSON.parse(m[1].trim()) : null },
+      // 2. Find outermost { ... }
+      () => {
+        const s = text.indexOf('{'); const e = text.lastIndexOf('}')
+        if (s === -1 || e === -1) return null
+        return JSON.parse(text.substring(s, e + 1))
+      },
+      // 3. Try the whole text
+      () => JSON.parse(text.trim()),
+    ]
+    for (const strategy of strategies) {
+      try { const r = strategy(); if (r && typeof r === 'object') { parsed = r; break } }
+      catch (e: any) { lastErr = e.message }
     }
+    if (!parsed) {
+      console.error('[scan-invoice] parse failed. lastErr:', lastErr, 'text preview:', text.slice(0, 500))
+      return NextResponse.json({ error: 'Could not parse invoice data — ' + lastErr.slice(0, 100) }, { status: 500 })
+    }
+    return NextResponse.json(parsed)
   } catch (e: unknown) {
     console.error('Invoice scan error:', e)
     return NextResponse.json({ error: e instanceof Error ? e.message : 'Unknown error' }, { status: 500 })
