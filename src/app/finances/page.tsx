@@ -805,7 +805,7 @@ export default function FinancesPage() {
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Could not read invoice. Please try again.'
       const friendly = /could not be found|NotFoundError|NotReadableError/i.test(msg)
-        ? 'Could not read this file from disk n/a this can happen if the file was just created/moved or is locked by another app. Wait a moment and try selecting it again.'
+        ? 'Could not read this file from disk — this can happen if the file was just created/moved or is locked by another app. Wait a moment and try selecting it again.'
         : msg
       setScanError(friendly)
     }
@@ -1139,7 +1139,7 @@ export default function FinancesPage() {
               {deviceScanStatus === 'received' && (
                 <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, padding: '14px 18px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
                   <span style={{ fontSize: 24 }}>⚡</span>
-                  <div style={{ fontWeight: 700, color: '#166534', fontSize: 14 }}>Photo received n/a running AI scan...</div>
+                  <div style={{ fontWeight: 700, color: '#166534', fontSize: 14 }}>Photo received — running AI scan...</div>
                 </div>
               )}
 
@@ -1217,7 +1217,7 @@ export default function FinancesPage() {
                         <>
                           {hasTemplate && (
                             <div style={{ fontSize: 12, color: '#16a34a', background: '#f0fdf4', borderRadius: 6, padding: '6px 12px', marginBottom: 10 }}>
-                              ✓ Showing {sup!.name} invoice columns n/a matches their physical invoice layout
+                              ✓ Showing {sup!.name} invoice columns — matches their physical invoice layout
                             </div>
                           )}
 
@@ -1970,7 +1970,7 @@ export default function FinancesPage() {
           <div style={{ background: '#fff', borderRadius: 16, width: '100%', maxWidth: 800, maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 24px 60px rgba(0,0,0,0.2)' }}>
             <div style={{ padding: '20px 24px 16px', borderBottom: '1px solid #f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div>
-                <h2 style={{ margin: 0, fontSize: 18, fontWeight: 800 }}>📦 Receive Goods n/a {grvInvoice.supplier}</h2>
+                <h2 style={{ margin: 0, fontSize: 18, fontWeight: 800 }}>📦 Receive Goods — {grvInvoice.supplier}</h2>
                 <p style={{ margin: '4px 0 0', fontSize: 13, color: '#6b7280' }}>Invoice {grvInvoice.invoice_number || 'n/a'} • {grvInvoice.invoice_date} • Enter quantities received</p>
               </div>
               <button onClick={() => setShowGRV(false)} style={{ background: '#f3f4f6', border: 'none', borderRadius: 8, width: 32, height: 32, cursor: 'pointer', fontSize: 16 }}>✕</button>
@@ -2180,11 +2180,11 @@ export default function FinancesPage() {
                 const priceCol = sup?.invoice_columns?.find(c => c.maps_to === 'unit_price_excl')
                 return sup?.invoice_columns?.length ? (
                   <div style={{ fontSize: 12, color: '#16a34a', marginTop: 6, background: '#f0fdf4', borderRadius: 6, padding: '5px 10px' }}>
-                    ✓ {sup.invoice_columns.length}-column template loaded{priceCol?.name ? ` n/a price from "${priceCol.name}" column` : ''}
+                    ✓ {sup.invoice_columns.length}-column template loaded{priceCol?.name ? ` — price from "${priceCol.name}" column` : ''}
                   </div>
                 ) : (
                   <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 6 }}>
-                    No column template set for this supplier n/a AI will use general rules. Set one in Stock → Suppliers → Edit.
+                    No column template set for this supplier — AI will use general rules. Set one in Stock → Suppliers → Edit.
                   </div>
                 )
               })()}
