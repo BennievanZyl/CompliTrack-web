@@ -761,21 +761,36 @@ export default function FinancesPage() {
         vatIncluded: matchedSupplier.invoice_vat_included !== false,
       } : undefined
 
-      const response = await fetch('/api/scan-invoice', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ base64: b64, mediaType, supplierTemplate })
-      })
+      // Auto-retry up to 3 times on failure
+      let response: Response | null = null
+      let data: any = null
+      let lastErr = ''
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          if (attempt > 1) {
+            setScanStatus(`Retry ${attempt}/3 — running AI scan...`)
+            await new Promise(r => setTimeout(r, 1000 * attempt)) // back-off: 2s, 3s
+          }
+          response = await fetch('/api/scan-invoice', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ base64: b64, mediaType, supplierTemplate })
+          })
+          data = await response.json()
+          if (response.ok) break // success
+          lastErr = data.error || 'Scan failed'
+        } catch (e: any) {
+          lastErr = e.message
+        }
+      }
+      if (!response?.ok) throw new Error(lastErr || 'Scan failed after 3 attempts')
 
-      const data = await response.json()
-      if (!response.ok) throw new Error(data.error || 'Scan failed')
-
-      // Pre-fill the invoice form n/a supplier is already set from pre-selection (modal onChange),
+      // Pre-fill the invoice form — supplier is already set from pre-selection (modal onChange),
       // so we NEVER change it here. Only fill fields the user hasn't touched yet.
       setShowInvForm(true)
       setInvForm(f => ({
         ...f,
-        // Keep whatever supplier is already set n/a don't let AI-detected name override pre-selection
+        // Keep whatever supplier is already set — don't let AI override pre-selection
         invoice_number: data.invoice_number || f.invoice_number,
         invoice_date: data.invoice_date || f.invoice_date,
         notes: data.notes || f.notes,
