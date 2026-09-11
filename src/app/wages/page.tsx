@@ -218,6 +218,7 @@ export default function WagesPage() {
   const totalGross = periodRuns.reduce((s, r) => s + r.gross_pay, 0)
   const totalNet = periodRuns.reduce((s, r) => s + r.net_pay, 0)
   const totalUIF = periodRuns.reduce((s, r) => s + r.uif_employee + r.uif_employer, 0)
+  const totalAdvances = periodRuns.reduce((s, r) => s + (r.advances_deducted || 0), 0)
   const unpaidAdvances = advances.filter(a => a.repayment_status === 'outstanding' && a.deduct_from_wages)
   const sc = (s: string) => s === 'paid' ? { bg: '#dcfce7', color: '#166534' } : s === 'approved' ? { bg: '#dbeafe', color: '#1e40af' } : { bg: '#f3f4f6', color: '#6b7280' }
 
