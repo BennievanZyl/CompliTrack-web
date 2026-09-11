@@ -2070,8 +2070,8 @@ export default function FinancesPage() {
                                ⚖️ Catch Weight {'—'} stock tracked in <strong>{line.unit}</strong>
                              </div>
                              <div style={{ fontSize: 12, color: '#78350f', marginBottom: 8 }}>
-                               Invoice qty shows <strong>{line.qty_received} kg</strong> at <strong>R{parseFloat(line.unit_cost||'0').toFixed(2)}/kg</strong>. 
-                               How many actual {line.unit}s did you receive? Enter below to calculate cost per {line.unit}.
+                               Invoice shows <strong>{line.qty_received} {line.unit}s</strong> at <strong>R{parseFloat(line.catch_rpu||line.unit_cost||'0').toFixed(2)}/{line.unit}</strong>.
+                               Weigh the delivery, enter total KG and number of {line.unit}s to calculate the true cost per {line.unit}.
                               </div>
                               <div style={{ background: "#fff8ec", border: "1px solid #f59e0b", borderRadius: 8, padding: "10px 12px", fontSize: 13 }}>
                                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
