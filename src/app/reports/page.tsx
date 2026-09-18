@@ -266,10 +266,10 @@ export default function ReportsPage() {
           ${spacer()}
 
           <!-- GROSS PROFIT -->
-          <tr style="background:#1a5c38;">
-            <td style="padding:10px 12px;font-weight:800;font-size:13px;color:#fff;">GROSS PROFIT</td>
-            <td style="padding:10px 12px;text-align:right;font-weight:800;font-size:13px;color:#fff;">${grossProfit < 0 ? '(' + fmtR(grossProfit) + ')' : fmtR(grossProfit)}</td>
-            <td style="padding:10px 12px;text-align:right;font-size:12px;color:rgba(255,255,255,0.7);">${fmtPct(grossMargin)} margin</td>
+          <tr>
+            <td style="padding:10px 12px;font-weight:800;font-size:13px;color:#fff;background:#1a5c38;">GROSS PROFIT</td>
+            <td style="padding:10px 12px;text-align:right;font-weight:800;font-size:13px;color:#fff;background:#1a5c38;">${grossProfit < 0 ? '(' + fmtR(grossProfit) + ')' : fmtR(grossProfit)}</td>
+            <td style="padding:10px 12px;text-align:right;font-size:12px;color:rgba(255,255,255,0.7);background:#1a5c38;">${fmtPct(grossMargin)} margin</td>
           </tr>
           ${spacer()}
 
@@ -303,10 +303,10 @@ export default function ReportsPage() {
           ${spacer()}
 
           <!-- NET PROFIT -->
-          <tr style="background:${netProfit >= 0 ? '#1a5c38' : '#dc2626'};">
-            <td style="padding:12px 12px;font-weight:800;font-size:14px;color:#fff;">NET ${netProfit >= 0 ? 'PROFIT' : 'LOSS'}</td>
-            <td style="padding:12px 12px;text-align:right;font-weight:800;font-size:14px;color:#fff;">${netProfit < 0 ? '(' + fmtR(netProfit) + ')' : fmtR(netProfit)}</td>
-            <td style="padding:12px 12px;text-align:right;font-size:12px;color:rgba(255,255,255,0.8);">${fmtPct(netMargin)} margin</td>
+          <tr>
+            <td style="padding:12px 12px;font-weight:800;font-size:14px;color:#fff;background:${netProfit >= 0 ? '#1a5c38' : '#dc2626'};">NET ${netProfit >= 0 ? 'PROFIT' : 'LOSS'}</td>
+            <td style="padding:12px 12px;text-align:right;font-weight:800;font-size:14px;color:#fff;background:${netProfit >= 0 ? '#1a5c38' : '#dc2626'};">${netProfit < 0 ? '(' + fmtR(netProfit) + ')' : fmtR(netProfit)}</td>
+            <td style="padding:12px 12px;text-align:right;font-size:12px;color:rgba(255,255,255,0.8);background:${netProfit >= 0 ? '#1a5c38' : '#dc2626'};">${fmtPct(netMargin)} margin</td>
           </tr>
         </table>
 
