@@ -502,7 +502,6 @@ export default function AttendancePage() {
     // Count late sessions from attendance records for this employee in this period
     const lateCount = days.filter(d => d.isLate).length;
     const totalSessions = days.filter(d => d.hours > 0).length;
-    const totalSessions = days.filter(d => d.hours > 0).length;
     const row = (label: string, hrs: string, rateStr: string, amount: number) =>
       `<tr><td>${label}</td><td style="text-align:center">${hrs}</td><td style="text-align:center">${rateStr}</td><td style="text-align:right">R${amount.toFixed(2)}</td></tr>`;
     const lineItems = [
