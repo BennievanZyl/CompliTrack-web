@@ -112,6 +112,199 @@ export default function ReportsPage() {
     setLoading(key); try { await fn() } catch (e: any) { alert('Error: ' + e.message) } finally { setLoading(null) }
   }
 
+
+  // ── INCOME & EXPENSES STATEMENT (P&L) ──────────────────────────────────────
+  async function incomeStatement() {
+    const [
+      { data: cashUps },
+      { data: invLines },
+      { data: invoices },
+      { data: quickExp },
+      { data: payrollRuns },
+      { data: storeData },
+    ] = await Promise.all([
+      supabase.from('cash_ups').select('cash_up_date,a_total,payouts')
+        .eq('store_id', STORE_ID).gte('cash_up_date', startDate).lte('cash_up_date', endDate),
+      supabase.from('invoice_lines').select('description,category_key,amount,vat_amount')
+        .eq('store_id', STORE_ID).gte('created_at', startDate).lte('created_at', endDate + 'T23:59:59'),
+      supabase.from('invoices').select('invoice_date,supplier,total_amount,vat_total,status,category')
+        .eq('store_id', STORE_ID).neq('status', 'draft').gte('invoice_date', startDate).lte('invoice_date', endDate),
+      supabase.from('expenses').select('expense_date,category_name,description,amount')
+        .eq('store_id', STORE_ID).gte('expense_date', startDate).lte('expense_date', endDate),
+      supabase.from('payroll_runs').select('gross_pay,net_pay,uif_employee,uif_employer,advances_deducted')
+        .eq('store_id', STORE_ID).gte('created_at', startDate).lte('created_at', endDate + 'T23:59:59'),
+      supabase.from('stores').select('name,city').eq('id', STORE_ID).single(),
+    ])
+
+    const VAT = 0.15
+    const storeName = storeData?.name || 'Mochachos Hartswater'
+    const storeCity = storeData?.city || ''
+
+    // INCOME — Sales excl VAT
+    const salesInclVAT = (cashUps || []).reduce((s, r) => s + Number(r.a_total || 0), 0)
+    const salesExclVAT = salesInclVAT / (1 + VAT)
+    const payouts = (cashUps || []).reduce((s, r) => s + Number(r.payouts || 0), 0)
+
+    // COGS — Supplier invoices categorised as cost_of_sales / stock
+    const cogsInvoices = (invoices || []).filter(i =>
+      !i.category || i.category === 'cost_of_sales' || i.category === 'stock' || i.category === 'Stock'
+    )
+    const cogsTotal = cogsInvoices.reduce((s, i) => s + Number(i.total_amount || 0) - Number(i.vat_total || 0), 0)
+
+    // OPERATING EXPENSES — other invoices (not COGS)
+    const opInvoices = (invoices || []).filter(i =>
+      i.category && i.category !== 'cost_of_sales' && i.category !== 'stock' && i.category !== 'Stock'
+    )
+    const opInvoiceTotal = opInvoices.reduce((s, i) => s + Number(i.total_amount || 0) - Number(i.vat_total || 0), 0)
+
+    // Group operating invoices by category
+    const opByCategory: Record<string, number> = {}
+    opInvoices.forEach(i => {
+      const cat = i.category || 'Other'
+      opByCategory[cat] = (opByCategory[cat] || 0) + Number(i.total_amount || 0) - Number(i.vat_total || 0)
+    })
+
+    // Quick expenses by category
+    const quickByCategory: Record<string, number> = {}
+    ;(quickExp || []).forEach(e => {
+      const cat = e.category_name || 'Other'
+      quickByCategory[cat] = (quickByCategory[cat] || 0) + Number(e.amount || 0)
+    })
+    const quickTotal = Object.values(quickByCategory).reduce((s, v) => s + v, 0)
+
+    // Wages
+    const wagesGross = (payrollRuns || []).reduce((s, r) => s + Number(r.gross_pay || 0), 0)
+    const uifEmployer = (payrollRuns || []).reduce((s, r) => s + Number(r.uif_employer || 0), 0)
+    const totalWages = wagesGross + uifEmployer
+
+    // Calculations
+    const totalIncome = salesExclVAT
+    const grossProfit = totalIncome - cogsTotal
+    const grossMargin = totalIncome > 0 ? (grossProfit / totalIncome * 100) : 0
+    const totalOpEx = opInvoiceTotal + quickTotal + totalWages
+    const netProfit = grossProfit - totalOpEx
+    const netMargin = totalIncome > 0 ? (netProfit / totalIncome * 100) : 0
+
+    const fmtR = (n: number) => 'R ' + Math.abs(n).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    const fmtPct = (n: number) => n.toFixed(1) + '%'
+    const row = (label: string, value: number, bold = false, indent = false, isTotal = false, highlight = '') => `
+      <tr style="${isTotal ? 'border-top:2px solid #1a5c38;' : ''}${highlight ? \`background:\${highlight};\` : ''}">
+        <td style="padding:6px 12px;${indent ? 'padding-left:28px;' : ''}${bold ? 'font-weight:700;' : ''}font-size:12px;">${label}</td>
+        <td style="padding:6px 12px;text-align:right;${bold ? 'font-weight:800;' : ''}font-size:12px;white-space:nowrap;">${value < 0 ? '(' + fmtR(value) + ')' : fmtR(value)}</td>
+        <td style="padding:6px 12px;text-align:right;font-size:11px;color:#888;"></td>
+      </tr>`
+    const divider = (label: string) => `
+      <tr><td colspan="3" style="padding:14px 12px 4px;font-weight:800;font-size:11px;text-transform:uppercase;letter-spacing:0.8px;color:#1a5c38;border-top:1px solid #e5e7eb;">${label}</td></tr>`
+    const spacer = () => `<tr><td colspan="3" style="padding:4px;"></td></tr>`
+
+    const html = `
+      <div style="max-width:680px;margin:0 auto;font-family:Arial,sans-serif;">
+        <!-- Header -->
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;padding-bottom:16px;border-bottom:3px solid #1a5c38;">
+          <div>
+            <div style="font-size:22px;font-weight:800;color:#1a5c38;">${storeName}</div>
+            <div style="font-size:13px;color:#666;margin-top:2px;">${storeCity ? storeCity + ' · ' : ''}VAT Registered</div>
+          </div>
+          <div style="text-align:right;">
+            <div style="font-size:16px;font-weight:800;color:#111;">Income &amp; Expenses Statement</div>
+            <div style="font-size:12px;color:#666;margin-top:2px;">${startDate} to ${endDate}</div>
+            <div style="font-size:11px;color:#9ca3af;margin-top:2px;">Generated ${new Date().toLocaleString('en-ZA')}</div>
+          </div>
+        </div>
+
+        <table style="width:100%;border-collapse:collapse;">
+          <!-- INCOME -->
+          ${divider('Income')}
+          ${row('Sales (excl. VAT)', salesExclVAT, false, true)}
+          ${row('Less: Payouts / Float', -payouts, false, true)}
+          ${row('Total Income', salesExclVAT - payouts, true, false, true, '#f0fdf4')}
+          ${spacer()}
+
+          <!-- COST OF GOODS SOLD -->
+          ${divider('Cost of Goods Sold')}
+          ${cogsInvoices.length === 0
+            ? `<tr><td colspan="3" style="padding:6px 28px;color:#9ca3af;font-size:12px;font-style:italic;">No COGS invoices for this period</td></tr>`
+            : cogsInvoices.map(i => row(
+                i.supplier || 'Supplier',
+                Number(i.total_amount || 0) - Number(i.vat_total || 0),
+                false, true
+              )).join('')}
+          ${row('Total Cost of Goods Sold', cogsTotal, true, false, true, '#fef2f2')}
+          ${spacer()}
+
+          <!-- GROSS PROFIT -->
+          <tr style="background:#1a5c38;">
+            <td style="padding:10px 12px;font-weight:800;font-size:13px;color:#fff;">GROSS PROFIT</td>
+            <td style="padding:10px 12px;text-align:right;font-weight:800;font-size:13px;color:#fff;">${grossProfit < 0 ? '(' + fmtR(grossProfit) + ')' : fmtR(grossProfit)}</td>
+            <td style="padding:10px 12px;text-align:right;font-size:12px;color:rgba(255,255,255,0.7);">${fmtPct(grossMargin)} margin</td>
+          </tr>
+          ${spacer()}
+
+          <!-- OPERATING EXPENSES -->
+          ${divider('Operating Expenses')}
+
+          <!-- Wages -->
+          <tr><td colspan="3" style="padding:6px 12px 2px;font-weight:700;font-size:11px;color:#374151;">Labour</td></tr>
+          ${row('Gross Wages', wagesGross, false, true)}
+          ${row('UIF (Employer Contribution)', uifEmployer, false, true)}
+          ${row('Total Labour', totalWages, true, false, false, '#fafafa')}
+          ${spacer()}
+
+          <!-- Operating invoices by category -->
+          ${Object.entries(opByCategory).length > 0 ? `
+            <tr><td colspan="3" style="padding:6px 12px 2px;font-weight:700;font-size:11px;color:#374151;">Operating Expenses (Invoices)</td></tr>
+            ${Object.entries(opByCategory).map(([cat, val]) => row(cat, val, false, true)).join('')}
+            ${row('Total Operating Invoices', opInvoiceTotal, true, false, false, '#fafafa')}
+            ${spacer()}
+          ` : ''}
+
+          <!-- Quick expenses by category -->
+          ${Object.entries(quickByCategory).length > 0 ? `
+            <tr><td colspan="3" style="padding:6px 12px 2px;font-weight:700;font-size:11px;color:#374151;">Quick Expenses</td></tr>
+            ${Object.entries(quickByCategory).map(([cat, val]) => row(cat, val, false, true)).join('')}
+            ${row('Total Quick Expenses', quickTotal, true, false, false, '#fafafa')}
+            ${spacer()}
+          ` : ''}
+
+          ${row('Total Operating Expenses', totalOpEx, true, false, true, '#fef2f2')}
+          ${spacer()}
+
+          <!-- NET PROFIT -->
+          <tr style="background:${netProfit >= 0 ? '#1a5c38' : '#dc2626'};">
+            <td style="padding:12px 12px;font-weight:800;font-size:14px;color:#fff;">NET ${netProfit >= 0 ? 'PROFIT' : 'LOSS'}</td>
+            <td style="padding:12px 12px;text-align:right;font-weight:800;font-size:14px;color:#fff;">${netProfit < 0 ? '(' + fmtR(netProfit) + ')' : fmtR(netProfit)}</td>
+            <td style="padding:12px 12px;text-align:right;font-size:12px;color:rgba(255,255,255,0.8);">${fmtPct(netMargin)} margin</td>
+          </tr>
+        </table>
+
+        <!-- Summary boxes -->
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:24px;">
+          <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:14px;text-align:center;">
+            <div style="font-size:11px;color:#166534;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;">Total Income</div>
+            <div style="font-size:16px;font-weight:800;color:#166534;margin-top:4px;">${fmtR(totalIncome)}</div>
+          </div>
+          <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:14px;text-align:center;">
+            <div style="font-size:11px;color:#991b1b;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;">Total Expenses</div>
+            <div style="font-size:16px;font-weight:800;color:#991b1b;margin-top:4px;">${fmtR(cogsTotal + totalOpEx)}</div>
+          </div>
+          <div style="background:${netProfit >= 0 ? '#f0fdf4' : '#fef2f2'};border:1px solid ${netProfit >= 0 ? '#bbf7d0' : '#fecaca'};border-radius:10px;padding:14px;text-align:center;">
+            <div style="font-size:11px;color:${netProfit >= 0 ? '#166534' : '#991b1b'};font-weight:700;text-transform:uppercase;letter-spacing:0.5px;">Net ${netProfit >= 0 ? 'Profit' : 'Loss'}</div>
+            <div style="font-size:16px;font-weight:800;color:${netProfit >= 0 ? '#166534' : '#991b1b'};margin-top:4px;">${fmtR(netProfit)}</div>
+          </div>
+        </div>
+
+        <div style="margin-top:40px;padding-top:16px;border-top:1px solid #e5e7eb;display:grid;grid-template-columns:1fr 1fr;gap:40px;">
+          <div style="border-top:1px solid #999;padding-top:8px;text-align:center;font-size:11px;color:#666;">Authorised Signature</div>
+          <div style="border-top:1px solid #999;padding-top:8px;text-align:center;font-size:11px;color:#666;">Date</div>
+        </div>
+        <div style="margin-top:20px;text-align:center;font-size:10px;color:#aaa;">
+          Generated by CompliTrack &middot; complitrack.co.za &middot; All figures exclude VAT unless stated
+        </div>
+      </div>`
+
+    printPDF('Income & Expenses Statement', html, dateLabel)
+  }
+
   // ── FINANCIAL REPORTS ──────────────────────────────────────────────────────
   async function salesReport(fmt_: 'csv' | 'excel' | 'pdf') {
     const { data } = await supabase.from('cash_ups').select('cash_up_date,cash_up_total,a_total,bank_total,eft_total,payouts,float_total,variance,status,signed_by_name,notes').eq('store_id', STORE_ID).gte('cash_up_date', startDate).lte('cash_up_date', endDate).order('cash_up_date')
@@ -402,6 +595,8 @@ export default function ReportsPage() {
         {/* FINANCIAL */}
         {!isHROnly && <SectionHeader title="Financial Reports" icon="💰" />}
         <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 8, marginBottom: 28 }}>
+          <ReportCard icon="📊" title="Income &amp; Expenses Statement" description="Full P&amp;L — Sales, COGS, wages and expenses with net profit. Share with Head Office or your accountant."
+            onPDF={() => run('income-statement', incomeStatement)} />
           <ReportCard icon="🏦" title="Cash-Up Sales Report" description="Daily sales totals with incl/excl VAT split, payment methods, cashier names." reportKey="sales" onCSV={() => salesReport('csv')} onExcel={() => salesReport('excel')} onPDF={() => salesReport('pdf')} />
           <ReportCard icon="📄" title="Expenses Report" description="Quick expenses + supplier invoices combined, grouped by date with VAT detail." reportKey="expenses" onCSV={() => expensesReport('csv')} onExcel={() => expensesReport('excel')} onPDF={() => expensesReport('pdf')} />
           <ReportCard icon="🧾" title="Supplier Invoice Report" description="All received/paid supplier bills with invoice numbers, amounts and VAT." reportKey="invoices" onCSV={() => invoiceReport('csv')} onExcel={() => invoiceReport('excel')} onPDF={() => invoiceReport('pdf')} />
