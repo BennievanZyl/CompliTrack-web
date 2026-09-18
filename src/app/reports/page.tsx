@@ -115,43 +115,75 @@ export default function ReportsPage() {
 
   // ── INCOME & EXPENSES STATEMENT (P&L) ──────────────────────────────────────
   async function incomeStatement() {
+    const VAT = 0.15
+
+    // Step 1: get invoice IDs (same as analytics — status must be received or paid)
+    const { data: invIdsData } = await supabase.from('invoices').select('id,supplier')
+      .eq('store_id', STORE_ID).in('status', ['received', 'paid'])
+      .gte('invoice_date', startDate).lte('invoice_date', endDate)
+    const invIds = (invIdsData || []).map((r: any) => r.id)
+
+    // Step 2: fetch all data using same queries as analytics page
     const [
       { data: cashUps },
-      { data: invoices },
+      { data: invLines },
       { data: quickExp },
-      { data: payrollRuns },
+      { data: wages },
       { data: storeData },
     ] = await Promise.all([
-      supabase.from('cash_ups').select('cash_up_date,a_total,payouts')
-        .eq('store_id', STORE_ID).gte('cash_up_date', startDate).lte('cash_up_date', endDate),
-      // Fetch all non-draft invoices — any status except draft counts
-      supabase.from('invoices').select('id,invoice_date,supplier,total_amount,vat_total,status')
-        .eq('store_id', STORE_ID).not('status', 'eq', 'draft')
-        .gte('invoice_date', startDate).lte('invoice_date', endDate),
-      supabase.from('expenses').select('expense_date,category_name,description,amount')
+      supabase.from('cash_ups').select('cash_up_date,cash_up_total,payouts')
+        .eq('store_id', STORE_ID).neq('status', 'draft')
+        .gte('cash_up_date', startDate).lte('cash_up_date', endDate),
+      invIds.length
+        ? supabase.from('invoice_lines').select('amount,vat_amount,category_key,invoice_id')
+            .in('invoice_id', invIds)
+        : Promise.resolve({ data: [] }),
+      supabase.from('expenses').select('expense_date,category_name,category_key,amount')
         .eq('store_id', STORE_ID).gte('expense_date', startDate).lte('expense_date', endDate),
-      supabase.from('payroll_runs').select('gross_pay,net_pay,uif_employee,uif_employer,advances_deducted')
-        .eq('store_id', STORE_ID).gte('created_at', startDate).lte('created_at', endDate + 'T23:59:59'),
+      supabase.from('wage_payments').select('gross_pay,uif_employer,net_pay')
+        .eq('store_id', STORE_ID).gte('paid_date', startDate).lte('paid_date', endDate),
       supabase.from('stores').select('name,city').eq('id', STORE_ID).single(),
     ])
 
-    const VAT = 0.15
     const storeName = storeData?.name || 'Mochachos Hartswater'
     const storeCity = storeData?.city || ''
 
-    // INCOME
-    const salesInclVAT = (cashUps || []).reduce((s, r) => s + Number(r.a_total || 0), 0)
+    // INCOME — using cash_up_total (same as analytics)
+    const salesInclVAT = (cashUps || []).reduce((s: number, r: any) => s + Number(r.cash_up_total || 0), 0)
     const salesExclVAT = salesInclVAT / (1 + VAT)
-    const payouts = (cashUps || []).reduce((s, r) => s + Number(r.payouts || 0), 0)
+    const payouts = (cashUps || []).reduce((s: number, r: any) => s + Number(r.payouts || 0), 0)
 
-    // All submitted invoices treated as COGS (food/stock purchases for a restaurant)
-    // grouped by supplier for the breakdown
-    const cogsInvoices = invoices || []
-    const cogsTotal = cogsInvoices.reduce((s, i) => s + (Number(i.total_amount || 0) - Number(i.vat_total || 0)), 0)
+    // COGS — invoice lines with cost_of_sales category (same as analytics)
+    const cogsLines = (invLines || []).filter((l: any) => {
+      const k = (l.category_key || '').toLowerCase()
+      return k === 'cost_of_sales' || k === 'stock' || k === 'cogs' || k === 'food_beverage' || k === ''
+    })
+    const cogsTotal = cogsLines.reduce((s: number, l: any) => s + Number(l.amount || 0) - Number(l.vat_amount || 0), 0)
 
-    // No separate op invoice category (all invoices = COGS for restaurant)
+    // Group COGS by supplier for display
+    const cogsBySupplier: Record<string, number> = {}
+    cogsLines.forEach((l: any) => {
+      const inv = (invIdsData || []).find((i: any) => i.id === l.invoice_id)
+      const sup = inv?.supplier || 'Supplier'
+      cogsBySupplier[sup] = (cogsBySupplier[sup] || 0) + Number(l.amount || 0) - Number(l.vat_amount || 0)
+    })
+    const cogsInvoices = Object.entries(cogsBySupplier)
+
+    // OPERATING EXPENSES — expense lines not in COGS (same as analytics expByCat)
     const opByCategory: Record<string, number> = {}
-    const opInvoiceTotal = 0
+    ;(quickExp || []).forEach((e: any) => {
+      const cat = e.category_name || e.category_key || 'Other'
+      opByCategory[cat] = (opByCategory[cat] || 0) + Number(e.amount || 0)
+    })
+    // Also add non-COGS invoice lines
+    ;(invLines || []).filter((l: any) => {
+      const k = (l.category_key || '').toLowerCase()
+      return k !== 'cost_of_sales' && k !== 'stock' && k !== 'cogs' && k !== 'food_beverage' && k !== ''
+    }).forEach((l: any) => {
+      const cat = l.category_key || 'Other'
+      opByCategory[cat] = (opByCategory[cat] || 0) + Number(l.amount || 0) - Number(l.vat_amount || 0)
+    })
+    const opInvoiceTotal = Object.values(opByCategory).reduce((s: number, v: any) => s + v, 0)
 
     // Quick expenses by category
     const quickByCategory: Record<string, number> = {}
@@ -161,9 +193,9 @@ export default function ReportsPage() {
     })
     const quickTotal = Object.values(quickByCategory).reduce((s, v) => s + v, 0)
 
-    // Wages
-    const wagesGross = (payrollRuns || []).reduce((s, r) => s + Number(r.gross_pay || 0), 0)
-    const uifEmployer = (payrollRuns || []).reduce((s, r) => s + Number(r.uif_employer || 0), 0)
+    // Wages from wage_payments (same as analytics)
+    const wagesGross = (wages || []).reduce((s: number, r: any) => s + Number(r.gross_pay || 0), 0)
+    const uifEmployer = (wages || []).reduce((s: number, r: any) => s + Number(r.uif_employer || 0), 0)
     const totalWages = wagesGross + uifEmployer
 
     // Calculations
@@ -214,15 +246,7 @@ export default function ReportsPage() {
           ${divider('Cost of Goods Sold')}
           ${cogsInvoices.length === 0
             ? '<tr><td colspan="3" style="padding:6px 28px;color:#9ca3af;font-size:12px;font-style:italic;">No supplier invoices for this period</td></tr>'
-            : (() => {
-                // Group by supplier for cleaner display
-                const bySupplier: Record<string,number> = {}
-                cogsInvoices.forEach((i:any) => {
-                  const s = i.supplier || 'Other'
-                  bySupplier[s] = (bySupplier[s]||0) + (Number(i.total_amount||0) - Number(i.vat_total||0))
-                })
-                return Object.entries(bySupplier).map(([s,v]) => row(s, v as number, false, true)).join('')
-              })()
+            : cogsInvoices.map(([sup, val]) => row(sup, val as number, false, true)).join('')
             }
           ${row('Total Cost of Goods Sold', cogsTotal, true, false, true, '#fef2f2')}
           ${spacer()}
