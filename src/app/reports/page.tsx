@@ -124,8 +124,9 @@ export default function ReportsPage() {
     ] = await Promise.all([
       supabase.from('cash_ups').select('cash_up_date,a_total,payouts')
         .eq('store_id', STORE_ID).gte('cash_up_date', startDate).lte('cash_up_date', endDate),
+      // Fetch all non-draft invoices — any status except draft counts
       supabase.from('invoices').select('id,invoice_date,supplier,total_amount,vat_total,status')
-        .eq('store_id', STORE_ID).neq('status', 'draft')
+        .eq('store_id', STORE_ID).not('status', 'eq', 'draft')
         .gte('invoice_date', startDate).lte('invoice_date', endDate),
       supabase.from('expenses').select('expense_date,category_name,description,amount')
         .eq('store_id', STORE_ID).gte('expense_date', startDate).lte('expense_date', endDate),
@@ -134,51 +135,23 @@ export default function ReportsPage() {
       supabase.from('stores').select('name,city').eq('id', STORE_ID).single(),
     ])
 
-    // Fetch invoice lines separately to get category breakdown
-    const invoiceIds = (invoices || []).map(i => i.id)
-    const { data: invLines } = invoiceIds.length > 0
-      ? await supabase.from('invoice_lines').select('invoice_id,category_key,amount,vat_amount,description')
-          .in('invoice_id', invoiceIds)
-      : { data: [] }
-
     const VAT = 0.15
     const storeName = storeData?.name || 'Mochachos Hartswater'
     const storeCity = storeData?.city || ''
 
-    // INCOME — Sales excl VAT
+    // INCOME
     const salesInclVAT = (cashUps || []).reduce((s, r) => s + Number(r.a_total || 0), 0)
     const salesExclVAT = salesInclVAT / (1 + VAT)
     const payouts = (cashUps || []).reduce((s, r) => s + Number(r.payouts || 0), 0)
 
-    // Group invoice lines by category_key
-    const linesByCategory: Record<string, number> = {}
-    ;(invLines || []).forEach(l => {
-      const cat = l.category_key || 'other'
-      const excl = Number(l.amount || 0) - Number(l.vat_amount || 0)
-      linesByCategory[cat] = (linesByCategory[cat] || 0) + excl
-    })
+    // All submitted invoices treated as COGS (food/stock purchases for a restaurant)
+    // grouped by supplier for the breakdown
+    const cogsInvoices = invoices || []
+    const cogsTotal = cogsInvoices.reduce((s, i) => s + (Number(i.total_amount || 0) - Number(i.vat_total || 0)), 0)
 
-    // COGS = lines where category_key is cost_of_sales / stock
-    const cogsKeys = ['cost_of_sales', 'stock', 'food_beverage', 'cogs']
-    const cogsTotal = Object.entries(linesByCategory)
-      .filter(([k]) => cogsKeys.some(c => k.toLowerCase().includes(c)))
-      .reduce((s, [, v]) => s + v, 0)
-
-    // COGS supplier list (per invoice, not per line)
-    const cogsInvIds = new Set(
-      (invLines || []).filter(l => cogsKeys.some(c => (l.category_key || '').toLowerCase().includes(c))).map(l => l.invoice_id)
-    )
-    const cogsInvoices = (invoices || []).filter(i => cogsInvIds.has(i.id))
-
-    // OPERATING EXPENSES — other category lines
+    // No separate op invoice category (all invoices = COGS for restaurant)
     const opByCategory: Record<string, number> = {}
-    Object.entries(linesByCategory).forEach(([k, v]) => {
-      if (!cogsKeys.some(c => k.toLowerCase().includes(c))) {
-        const label = k.replace(/_/g, ' ').replace(/\w/g, c => c.toUpperCase())
-        opByCategory[label] = (opByCategory[label] || 0) + v
-      }
-    })
-    const opInvoiceTotal = Object.values(opByCategory).reduce((s, v) => s + v, 0)
+    const opInvoiceTotal = 0
 
     // Quick expenses by category
     const quickByCategory: Record<string, number> = {}
@@ -240,12 +213,17 @@ export default function ReportsPage() {
           <!-- COST OF GOODS SOLD -->
           ${divider('Cost of Goods Sold')}
           ${cogsInvoices.length === 0
-            ? '<tr><td colspan="3" style="padding:6px 28px;color:#9ca3af;font-size:12px;font-style:italic;">No COGS invoices for this period</td></tr>'
-            : cogsInvoices.map(i => row(
-                i.supplier || 'Supplier',
-                Number(i.total_amount || 0) - Number(i.vat_total || 0),
-                false, true
-              )).join('')}
+            ? '<tr><td colspan="3" style="padding:6px 28px;color:#9ca3af;font-size:12px;font-style:italic;">No supplier invoices for this period</td></tr>'
+            : (() => {
+                // Group by supplier for cleaner display
+                const bySupplier: Record<string,number> = {}
+                cogsInvoices.forEach((i:any) => {
+                  const s = i.supplier || 'Other'
+                  bySupplier[s] = (bySupplier[s]||0) + (Number(i.total_amount||0) - Number(i.vat_total||0))
+                })
+                return Object.entries(bySupplier).map(([s,v]) => row(s, v as number, false, true)).join('')
+              })()
+            }
           ${row('Total Cost of Goods Sold', cogsTotal, true, false, true, '#fef2f2')}
           ${spacer()}
 
