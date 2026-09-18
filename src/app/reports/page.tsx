@@ -151,9 +151,9 @@ export default function ReportsPage() {
     const storeCity = storeData?.city || ''
 
     // INCOME — using cash_up_total (same as analytics)
+    // Payouts NOT deducted here — they are already captured as supplier invoices/expenses (double entry if deducted)
     const salesInclVAT = (cashUps || []).reduce((s: number, r: any) => s + Number(r.cash_up_total || 0), 0)
     const salesExclVAT = salesInclVAT / (1 + VAT)
-    const payouts = (cashUps || []).reduce((s: number, r: any) => s + Number(r.payouts || 0), 0)
 
     // COGS category keys — covers all variants used in the system
     const COGS_KEYS = ['cost_of_sales', 'stock', 'cogs', 'food_beverage', 'stock_cogs', 'food', 'packaging', '']
@@ -214,7 +214,7 @@ export default function ReportsPage() {
     const totalWages = displayWages + displayUIF
 
     // Calculations
-    const totalIncome = salesExclVAT
+    const totalIncome = salesExclVAT  // clean revenue, payouts excluded (already in expenses)
     const grossProfit = totalIncome - cogsTotal
     const grossMargin = totalIncome > 0 ? (grossProfit / totalIncome * 100) : 0
     const totalOpEx = opInvoiceTotal + quickTotal + totalWages
@@ -253,8 +253,7 @@ export default function ReportsPage() {
           <!-- INCOME -->
           ${divider('Income')}
           ${row('Sales (excl. VAT)', salesExclVAT, false, true)}
-          ${row('Less: Payouts / Float', -payouts, false, true)}
-          ${row('Total Income', salesExclVAT - payouts, true, false, true, '#f0fdf4')}
+          ${row('Total Income', salesExclVAT, true, false, true, '#f0fdf4')}
           ${spacer()}
 
           <!-- COST OF GOODS SOLD -->
