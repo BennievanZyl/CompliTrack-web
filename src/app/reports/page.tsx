@@ -187,12 +187,13 @@ export default function ReportsPage() {
 
     const fmtR = (n: number) => 'R ' + Math.abs(n).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
     const fmtPct = (n: number) => n.toFixed(1) + '%'
-    const row = (label: string, value: number, bold = false, indent = false, isTotal = false, highlight = '') => `
-      <tr style="${isTotal ? 'border-top:2px solid #1a5c38;' : ''}${highlight ? \`background:\${highlight};\` : ''}">
-        <td style="padding:6px 12px;${indent ? 'padding-left:28px;' : ''}${bold ? 'font-weight:700;' : ''}font-size:12px;">${label}</td>
-        <td style="padding:6px 12px;text-align:right;${bold ? 'font-weight:800;' : ''}font-size:12px;white-space:nowrap;">${value < 0 ? '(' + fmtR(value) + ')' : fmtR(value)}</td>
-        <td style="padding:6px 12px;text-align:right;font-size:11px;color:#888;"></td>
-      </tr>`
+    const row = (label: string, value: number, bold = false, indent = false, isTotal = false, highlight = '') => {
+      const trStyle = (isTotal ? 'border-top:2px solid #1a5c38;' : '') + (highlight ? 'background:' + highlight + ';' : '')
+      const td1Style = 'padding:6px 12px;' + (indent ? 'padding-left:28px;' : '') + (bold ? 'font-weight:700;' : '') + 'font-size:12px;'
+      const td2Style = 'padding:6px 12px;text-align:right;' + (bold ? 'font-weight:800;' : '') + 'font-size:12px;white-space:nowrap;'
+      const valStr = value < 0 ? '(' + fmtR(value) + ')' : fmtR(value)
+      return '<tr style="' + trStyle + '"><td style="' + td1Style + '">' + label + '</td><td style="' + td2Style + '">' + valStr + '</td><td style="padding:6px 12px;text-align:right;font-size:11px;color:#888;"></td></tr>'
+    }
     const divider = (label: string) => `
       <tr><td colspan="3" style="padding:14px 12px 4px;font-weight:800;font-size:11px;text-transform:uppercase;letter-spacing:0.8px;color:#1a5c38;border-top:1px solid #e5e7eb;">${label}</td></tr>`
     const spacer = () => `<tr><td colspan="3" style="padding:4px;"></td></tr>`
