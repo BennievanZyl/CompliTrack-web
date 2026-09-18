@@ -118,7 +118,7 @@ export default function ReportsPage() {
     const VAT = 0.15
 
     // Step 1: get invoice IDs (same as analytics — status must be received or paid)
-    const { data: invIdsData } = await supabase.from('invoices').select('id,supplier')
+    const { data: invIdsData } = await supabase.from('invoices').select('id,supplier,total_amount')
       .eq('store_id', STORE_ID).in('status', ['received', 'paid'])
       .gte('invoice_date', startDate).lte('invoice_date', endDate)
     const invIds = (invIdsData || []).map((r: any) => r.id)
@@ -136,7 +136,7 @@ export default function ReportsPage() {
         .gte('cash_up_date', startDate).lte('cash_up_date', endDate),
       invIds.length
         ? supabase.from('invoice_lines').select('amount,vat_amount,category_key,invoice_id')
-            .in('invoice_id', invIds)
+            .eq('store_id', STORE_ID).in('invoice_id', invIds)
         : Promise.resolve({ data: [] }),
       supabase.from('expenses').select('expense_date,category_name,category_key,amount')
         .eq('store_id', STORE_ID).gte('expense_date', startDate).lte('expense_date', endDate),
@@ -153,20 +153,30 @@ export default function ReportsPage() {
     const salesExclVAT = salesInclVAT / (1 + VAT)
     const payouts = (cashUps || []).reduce((s: number, r: any) => s + Number(r.payouts || 0), 0)
 
-    // COGS — invoice lines with cost_of_sales category (same as analytics)
-    const cogsLines = (invLines || []).filter((l: any) => {
-      const k = (l.category_key || '').toLowerCase()
-      return k === 'cost_of_sales' || k === 'stock' || k === 'cogs' || k === 'food_beverage' || k === ''
-    })
-    const cogsTotal = cogsLines.reduce((s: number, l: any) => s + Number(l.amount || 0) - Number(l.vat_amount || 0), 0)
-
-    // Group COGS by supplier for display
+    // COGS — if invoice_lines available use them; fallback to invoice total_amount / 1.15
+    const hasLines = (invLines || []).length > 0
+    let cogsTotal = 0
     const cogsBySupplier: Record<string, number> = {}
-    cogsLines.forEach((l: any) => {
-      const inv = (invIdsData || []).find((i: any) => i.id === l.invoice_id)
-      const sup = inv?.supplier || 'Supplier'
-      cogsBySupplier[sup] = (cogsBySupplier[sup] || 0) + Number(l.amount || 0) - Number(l.vat_amount || 0)
-    })
+
+    if (hasLines) {
+      const cogsLines = (invLines || []).filter((l: any) => {
+        const k = (l.category_key || '').toLowerCase()
+        return k === 'cost_of_sales' || k === 'stock' || k === 'cogs' || k === 'food_beverage' || k === ''
+      })
+      cogsTotal = cogsLines.reduce((s: number, l: any) => s + Number(l.amount || 0) - Number(l.vat_amount || 0), 0)
+      cogsLines.forEach((l: any) => {
+        const inv = (invIdsData || []).find((i: any) => i.id === l.invoice_id)
+        const sup = inv?.supplier || 'Supplier'
+        cogsBySupplier[sup] = (cogsBySupplier[sup] || 0) + Number(l.amount || 0) - Number(l.vat_amount || 0)
+      })
+    } else {
+      // Fallback: use invoice total_amount directly (excl VAT = total / 1.15)
+      ;(invIdsData || []).forEach((i: any) => {
+        const exclVat = Number(i.total_amount || 0) / (1 + VAT)
+        cogsBySupplier[i.supplier || 'Supplier'] = (cogsBySupplier[i.supplier || 'Supplier'] || 0) + exclVat
+        cogsTotal += exclVat
+      })
+    }
     const cogsInvoices = Object.entries(cogsBySupplier)
 
     // OPERATING EXPENSES — expense lines not in COGS (same as analytics expByCat)
