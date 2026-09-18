@@ -502,6 +502,7 @@ export default function AttendancePage() {
     // Count late sessions from attendance records for this employee in this period
     const lateCount = days.filter(d => d.isLate).length;
     const totalSessions = days.filter(d => d.hours > 0).length;
+    const totalSessions = days.filter(d => d.hours > 0).length;
     const row = (label: string, hrs: string, rateStr: string, amount: number) =>
       `<tr><td>${label}</td><td style="text-align:center">${hrs}</td><td style="text-align:center">${rateStr}</td><td style="text-align:right">R${amount.toFixed(2)}</td></tr>`;
     const lineItems = [
@@ -555,6 +556,10 @@ export default function AttendancePage() {
       </div>
       <div style="font-size:11px;color:#999;margin-top:6px">Employer UIF Contribution (${payrollSettings.uif_employer_rate}%): R${summary.uifEmployer.toFixed(2)} — not deducted from employee, shown for payroll records.</div>
       <div class="sign"><div>Employer Signature</div><div>Employee Signature</div></div>
+      ${lateCount > 0
+        ? '<div style="margin-top:16px;padding:10px 14px;background:#fef9c3;border:1px solid #fde047;border-left:4px solid #eab308;border-radius:6px;font-size:11px;color:#713f12;"><b>&#9888; Attendance Notice:</b> You were recorded late for <b>' + lateCount + ' of ' + totalSessions + ' session' + (totalSessions !== 1 ? 's' : '') + '</b> this pay period. Punctuality is expected — repeated late arrivals may result in a formal warning.</div>'
+        : '<div style="margin-top:16px;padding:10px 14px;background:#f0fdf4;border:1px solid #bbf7d0;border-left:4px solid #22c55e;border-radius:6px;font-size:11px;color:#166534;"><b>&#10003; Attendance:</b> No late sessions recorded this pay period. Well done!</div>'
+      }
       ${brandFooter()}
       </div>
       </body></html>`;
