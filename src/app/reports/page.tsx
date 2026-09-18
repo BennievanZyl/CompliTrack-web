@@ -130,6 +130,7 @@ export default function ReportsPage() {
       { data: quickExp },
       { data: wages },
       { data: storeData },
+      { data: empRates },
     ] = await Promise.all([
       supabase.from('cash_ups').select('cash_up_date,cash_up_total,payouts')
         .eq('store_id', STORE_ID).neq('status', 'draft')
@@ -143,6 +144,7 @@ export default function ReportsPage() {
       supabase.from('wage_payments').select('gross_pay,uif_employer,net_pay')
         .eq('store_id', STORE_ID).gte('paid_date', startDate).lte('paid_date', endDate),
       supabase.from('stores').select('name,city').eq('id', STORE_ID).single(),
+      supabase.from('employees').select('id,hourly_rate').eq('store_id', STORE_ID).eq('is_active', true),
     ])
 
     const storeName = storeData?.name || 'Mochachos Hartswater'
@@ -153,16 +155,16 @@ export default function ReportsPage() {
     const salesExclVAT = salesInclVAT / (1 + VAT)
     const payouts = (cashUps || []).reduce((s: number, r: any) => s + Number(r.payouts || 0), 0)
 
-    // COGS — if invoice_lines available use them; fallback to invoice total_amount / 1.15
+    // COGS category keys — covers all variants used in the system
+    const COGS_KEYS = ['cost_of_sales', 'stock', 'cogs', 'food_beverage', 'stock_cogs', 'food', 'packaging', '']
+    const isCogs = (k: string) => COGS_KEYS.includes(k.toLowerCase()) || k.toLowerCase().startsWith('stock') || k.toLowerCase().startsWith('food')
+
     const hasLines = (invLines || []).length > 0
     let cogsTotal = 0
     const cogsBySupplier: Record<string, number> = {}
 
     if (hasLines) {
-      const cogsLines = (invLines || []).filter((l: any) => {
-        const k = (l.category_key || '').toLowerCase()
-        return k === 'cost_of_sales' || k === 'stock' || k === 'cogs' || k === 'food_beverage' || k === ''
-      })
+      const cogsLines = (invLines || []).filter((l: any) => isCogs(l.category_key || ''))
       cogsTotal = cogsLines.reduce((s: number, l: any) => s + Number(l.amount || 0) - Number(l.vat_amount || 0), 0)
       cogsLines.forEach((l: any) => {
         const inv = (invIdsData || []).find((i: any) => i.id === l.invoice_id)
@@ -170,7 +172,6 @@ export default function ReportsPage() {
         cogsBySupplier[sup] = (cogsBySupplier[sup] || 0) + Number(l.amount || 0) - Number(l.vat_amount || 0)
       })
     } else {
-      // Fallback: use invoice total_amount directly (excl VAT = total / 1.15)
       ;(invIdsData || []).forEach((i: any) => {
         const exclVat = Number(i.total_amount || 0) / (1 + VAT)
         cogsBySupplier[i.supplier || 'Supplier'] = (cogsBySupplier[i.supplier || 'Supplier'] || 0) + exclVat
@@ -179,18 +180,10 @@ export default function ReportsPage() {
     }
     const cogsInvoices = Object.entries(cogsBySupplier)
 
-    // OPERATING EXPENSES — expense lines not in COGS (same as analytics expByCat)
+    // OPERATING EXPENSES — non-COGS invoice lines only (no quick expenses here — shown separately)
     const opByCategory: Record<string, number> = {}
-    ;(quickExp || []).forEach((e: any) => {
-      const cat = e.category_name || e.category_key || 'Other'
-      opByCategory[cat] = (opByCategory[cat] || 0) + Number(e.amount || 0)
-    })
-    // Also add non-COGS invoice lines
-    ;(invLines || []).filter((l: any) => {
-      const k = (l.category_key || '').toLowerCase()
-      return k !== 'cost_of_sales' && k !== 'stock' && k !== 'cogs' && k !== 'food_beverage' && k !== ''
-    }).forEach((l: any) => {
-      const cat = l.category_key || 'Other'
+    ;(invLines || []).filter((l: any) => !isCogs(l.category_key || '')).forEach((l: any) => {
+      const cat = l.category_key || 'other'
       opByCategory[cat] = (opByCategory[cat] || 0) + Number(l.amount || 0) - Number(l.vat_amount || 0)
     })
     const opInvoiceTotal = Object.values(opByCategory).reduce((s: number, v: any) => s + v, 0)
@@ -203,10 +196,22 @@ export default function ReportsPage() {
     })
     const quickTotal = Object.values(quickByCategory).reduce((s, v) => s + v, 0)
 
-    // Wages from wage_payments (same as analytics)
+    // Wages from wage_payments; if none paid yet estimate from attendance (same as analytics)
     const wagesGross = (wages || []).reduce((s: number, r: any) => s + Number(r.gross_pay || 0), 0)
     const uifEmployer = (wages || []).reduce((s: number, r: any) => s + Number(r.uif_employer || 0), 0)
-    const totalWages = wagesGross + uifEmployer
+    let estimatedWages = 0
+    let isWageEstimate = false
+    if (wagesGross === 0 && (empRates || []).length > 0) {
+      const rateMap: Record<string, number> = {}
+      const empIds = (empRates || []).map((e: any) => { rateMap[e.id] = Number(e.hourly_rate || 0); return e.id })
+      const { data: attData } = await supabase.from('attendance').select('employee_id,hours_worked')
+        .in('employee_id', empIds).gte('work_date', startDate).lte('work_date', endDate)
+      estimatedWages = (attData || []).reduce((s: number, a: any) => s + Number(a.hours_worked || 0) * (rateMap[a.employee_id] || 0), 0)
+      isWageEstimate = estimatedWages > 0
+    }
+    const displayWages = wagesGross > 0 ? wagesGross : estimatedWages
+    const displayUIF = wagesGross > 0 ? uifEmployer : displayWages * 0.01
+    const totalWages = displayWages + displayUIF
 
     // Calculations
     const totalIncome = salesExclVAT
@@ -274,9 +279,9 @@ export default function ReportsPage() {
 
           <!-- Wages -->
           <tr><td colspan="3" style="padding:6px 12px 2px;font-weight:700;font-size:11px;color:#374151;">Labour</td></tr>
-          ${row('Gross Wages', wagesGross, false, true)}
-          ${row('UIF (Employer Contribution)', uifEmployer, false, true)}
-          ${row('Total Labour', totalWages, true, false, false, '#fafafa')}
+          ${row((isWageEstimate ? 'Gross Wages (est.)' : 'Gross Wages'), displayWages, false, true)}
+          ${row('UIF (Employer Contribution)', displayUIF, false, true)}
+          ${row((isWageEstimate ? 'Total Labour (est.)' : 'Total Labour'), totalWages, true, false, false, '#fafafa')}
           ${spacer()}
 
           <!-- Operating invoices by category -->
