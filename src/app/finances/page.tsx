@@ -486,6 +486,7 @@ export default function FinancesPage() {
     setInvLines(inv.invoice_lines?.length ? inv.invoice_lines.map(l => ({ id: l.id, category_key: l.category_key, description: l.description || '', qty: Number(l.qty) || 1, uom: l.uom || 'each', unit_price: Number(l.unit_price) || 0, amount: Number(l.amount), vat_amount: Number(l.vat_amount || 0) })) : [emptyLine(defaultCatKey)])
     setShowInvForm(true)
     setTab(2)
+    setTimeout(() => window.scrollTo({ top: 0, behavior: 'smooth' }), 50)
   }
 
   function addLine() { setInvLines(l => [...l, emptyLine(defaultCatKey)]) }
