@@ -184,11 +184,9 @@ export default function AnalyticsPage(){
     }
     for(const e of expRes.data||[])addExp(e.category_key,e.category_name,Number(e.amount||0))
     for(const l of invLinesRes.data||[]){
-      const k=(l.category_key||'').toLowerCase()
-      // Royalties and marketing fees are non-VAT items — use full amount
-      const isNonVat=k.includes('royalt')||k.includes('marketing')||k.includes('levy')||k.includes('franchise_fee')
+      // Use amount - vat_amount for all categories — handles both VAT-able and zero-rated correctly
       const exVat=Number(l.amount||0)-Number(l.vat_amount||0)
-      addExp(l.category_key,l.category_key,isNonVat?Number(l.amount||0):(exVat>0?exVat:Number(l.amount||0)))
+      addExp(l.category_key,l.category_key,exVat>0?exVat:Number(l.amount||0))
     }
     const otherExpenses=Object.values(expByCat).reduce((s,c)=>s+c.total,0)
     const totalOperatingCosts=displayWages+otherExpenses
