@@ -113,6 +113,112 @@ export default function ReportsPage() {
   }
 
 
+  // ── VAT RETURN (VAT 201) ────────────────────────────────────────────────────
+  async function vatReturn() {
+    if (!STORE_ID) return
+
+    // 1. Output VAT — cash-ups (sales collected in period)
+    const { data: cashUps } = await supabase
+      .from('cash_ups').select('cash_up_total')
+      .eq('store_id', STORE_ID).eq('status', 'signed_off')
+      .gte('cash_up_date', startDate).lte('cash_up_date', endDate)
+
+    const totalSalesIncl = (cashUps || []).reduce((s: number, c: any) => s + Number(c.cash_up_total || 0), 0)
+    const outputVAT = totalSalesIncl - totalSalesIncl / 1.15
+    const totalSalesExcl = totalSalesIncl / 1.15
+
+    // 2. Quick expenses VAT (cash purchases)
+    const { data: qe } = await supabase
+      .from('expenses').select('amount,vat_amount,category_name')
+      .eq('store_id', STORE_ID)
+      .gte('expense_date', startDate).lte('expense_date', endDate)
+    const qeVAT = (qe || []).reduce((s: number, e: any) => s + Number(e.vat_amount || 0), 0)
+
+    // 3. Invoice / supplier VAT — invoice_lines requires store_id filter for RLS
+    const { data: invData } = await supabase
+      .from('invoices').select('id,supplier_name,total_amount')
+      .eq('store_id', STORE_ID).in('status', ['received', 'paid'])
+      .gte('invoice_date', startDate).lte('invoice_date', endDate)
+
+    const invIds = (invData || []).map((i: any) => i.id)
+    let lines: any[] = []
+    if (invIds.length) {
+      const { data: ld } = await supabase
+        .from('invoice_lines').select('invoice_id,amount,vat_amount')
+        .eq('store_id', STORE_ID).in('invoice_id', invIds)
+      lines = ld || []
+    }
+
+    // Group input VAT by supplier
+    const supMap = new Map<string, { name: string; totalIncl: number; vatAmt: number; zeroRated: number }>()
+    for (const inv of invData || []) {
+      const invLines = lines.filter((l: any) => l.invoice_id === inv.id)
+      const vatAmt = invLines.reduce((s: number, l: any) => s + Number(l.vat_amount || 0), 0)
+      const totalIncl = invLines.reduce((s: number, l: any) => s + Number(l.amount || 0), 0) || Number(inv.total_amount || 0)
+      const zeroRated = invLines.filter((l: any) => Number(l.vat_amount || 0) === 0).reduce((s: number, l: any) => s + Number(l.amount || 0), 0)
+      const key = inv.supplier_name || 'Unknown Supplier'
+      const ex = supMap.get(key)
+      if (ex) { ex.totalIncl += totalIncl; ex.vatAmt += vatAmt; ex.zeroRated += zeroRated }
+      else supMap.set(key, { name: key, totalIncl, vatAmt, zeroRated })
+    }
+
+    const supRows = Array.from(supMap.values()).sort((a, b) => b.vatAmt - a.vatAmt)
+    const invoiceInputVAT = supRows.reduce((s, r) => s + r.vatAmt, 0)
+    const totalInputVAT = invoiceInputVAT + qeVAT
+    const netVAT = outputVAT - totalInputVAT
+    const payable = netVAT > 0
+
+    const bg = payable ? '#fff3cd' : '#d4edda'
+    const border = payable ? '#ffc107' : '#28a745'
+    const textCol = payable ? '#856404' : '#155724'
+
+    const supTableRows = supRows.map(r => `
+      <tr>
+        <td>${r.name}</td>
+        <td style="text-align:right">${fmt(r.totalIncl)}</td>
+        <td style="text-align:right;color:#c0392b">${fmt(r.vatAmt)}</td>
+        <td style="text-align:right;color:#888">${r.zeroRated > 0 ? fmt(r.zeroRated) : '—'}</td>
+      </tr>`).join('')
+
+    const html = `
+<h2 style="font-size:16px;margin:0 0 12px">Output VAT (Tax Collected on Sales)</h2>
+<table>
+  <tbody>
+    <tr><td>Total Sales (Incl. VAT)</td><td style="text-align:right"><strong>${fmt(totalSalesIncl)}</strong></td></tr>
+    <tr><td style="color:#888">Sales (Excl. VAT)</td><td style="text-align:right;color:#888">${fmt(totalSalesExcl)}</td></tr>
+    <tr class="total"><td>Output VAT @ 15%</td><td style="text-align:right;color:#1a5c38">${fmt(outputVAT)}</td></tr>
+  </tbody>
+</table>
+
+<h2 style="font-size:16px;margin:24px 0 12px">Input VAT (Tax Paid on Purchases)</h2>
+${supRows.length ? `<table>
+  <thead>
+    <tr><th>Supplier</th><th>Total (Incl.)</th><th>VAT (15%)</th><th>Zero-Rated</th></tr>
+  </thead>
+  <tbody>
+    ${supTableRows}
+    ${qeVAT > 0 ? `<tr><td>Quick / Cash Expenses</td><td></td><td style="text-align:right;color:#c0392b">${fmt(qeVAT)}</td><td></td></tr>` : ''}
+  </tbody>
+  <tfoot>
+    <tr class="total"><td colspan="2">Total Input VAT</td><td style="text-align:right;color:#c0392b">${fmt(totalInputVAT)}</td><td></td></tr>
+  </tfoot>
+</table>` : `<p style="color:#888">No supplier invoices found for this period.${qeVAT > 0 ? ` Quick expenses VAT: ${fmt(qeVAT)}` : ''}</p>`}
+
+<div style="margin-top:24px;padding:20px;background:${bg};border:2px solid ${border};border-radius:8px;text-align:center;print-color-adjust:exact;-webkit-print-color-adjust:exact">
+  <div style="font-size:12px;color:${textCol};margin-bottom:4px">NET VAT POSITION</div>
+  <div style="font-size:28px;font-weight:800;color:${textCol}">${fmt(Math.abs(netVAT))}</div>
+  <div style="font-size:14px;font-weight:700;color:${textCol};margin-top:4px">${payable ? '⚠️ PAYABLE TO SARS' : '✅ REFUNDABLE FROM SARS'}</div>
+  <div style="font-size:11px;color:${textCol};margin-top:8px;opacity:.8">Output VAT ${fmt(outputVAT)} − Input VAT ${fmt(totalInputVAT)} = ${netVAT >= 0 ? '' : '−'}${fmt(Math.abs(netVAT))}</div>
+</div>
+
+<div style="margin-top:16px;padding:12px;background:#fff8e1;border-left:4px solid #ffc107;font-size:11px;color:#666">
+  <strong>⚠️ Important:</strong> This is a calculation aid only. Have a registered tax practitioner verify all figures before submitting to SARS.
+  Ensure zero-rated and exempt supplies are correctly classified. A VAT registration number and official VAT 201 form are required for SARS submission.
+</div>`
+
+    printPDF('VAT Return (VAT 201)', html, dateLabel)
+  }
+
   // ── INCOME & EXPENSES STATEMENT (P&L) ──────────────────────────────────────
   async function incomeStatement() {
     const VAT = 0.15
@@ -628,6 +734,8 @@ export default function ReportsPage() {
         {/* FINANCIAL */}
         {!isHROnly && <SectionHeader title="Financial Reports" icon="💰" />}
         <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 8, marginBottom: 28 }}>
+          <ReportCard icon="🧾" title="VAT Return (VAT 201)" description="Output VAT from sales vs Input VAT from purchases — shows the net amount payable to SARS or refundable."
+            onPDF={() => run('vat-return', vatReturn)} />
           <ReportCard icon="📊" title="Income &amp; Expenses Statement" description="Full P&amp;L — Sales, COGS, wages and expenses with net profit. Share with Head Office or your accountant."
             onPDF={() => run('income-statement', incomeStatement)} />
           <ReportCard icon="🏦" title="Cash-Up Sales Report" description="Daily sales totals with incl/excl VAT split, payment methods, cashier names." reportKey="sales" onCSV={() => salesReport('csv')} onExcel={() => salesReport('excel')} onPDF={() => salesReport('pdf')} />
