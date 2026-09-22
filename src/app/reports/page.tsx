@@ -134,29 +134,19 @@ export default function ReportsPage() {
       .gte('expense_date', startDate).lte('expense_date', endDate)
     const qeVAT = (qe || []).reduce((s: number, e: any) => s + Number(e.vat_amount || 0), 0)
 
-    // 3. Invoice / supplier VAT — invoice_lines requires store_id filter for RLS
+    // 3. Invoice / supplier VAT — use total_vat directly from invoices (no invoice_lines needed)
     const { data: invData } = await supabase
-      .from('invoices').select('id,supplier_name,total_amount')
+      .from('invoices').select('supplier,total_amount,total_vat')
       .eq('store_id', STORE_ID).in('status', ['received', 'paid'])
       .gte('invoice_date', startDate).lte('invoice_date', endDate)
-
-    const invIds = (invData || []).map((i: any) => i.id)
-    let lines: any[] = []
-    if (invIds.length) {
-      const { data: ld } = await supabase
-        .from('invoice_lines').select('invoice_id,amount,vat_amount')
-        .eq('store_id', STORE_ID).in('invoice_id', invIds)
-      lines = ld || []
-    }
 
     // Group input VAT by supplier
     const supMap = new Map<string, { name: string; totalIncl: number; vatAmt: number; zeroRated: number }>()
     for (const inv of invData || []) {
-      const invLines = lines.filter((l: any) => l.invoice_id === inv.id)
-      const vatAmt = invLines.reduce((s: number, l: any) => s + Number(l.vat_amount || 0), 0)
-      const totalIncl = invLines.reduce((s: number, l: any) => s + Number(l.amount || 0), 0) || Number(inv.total_amount || 0)
-      const zeroRated = invLines.filter((l: any) => Number(l.vat_amount || 0) === 0).reduce((s: number, l: any) => s + Number(l.amount || 0), 0)
-      const key = inv.supplier_name || 'Unknown Supplier'
+      const vatAmt = Number(inv.total_vat || 0)
+      const totalIncl = Number(inv.total_amount || 0)
+      const zeroRated = vatAmt === 0 ? totalIncl : 0
+      const key = inv.supplier || 'Unknown Supplier'
       const ex = supMap.get(key)
       if (ex) { ex.totalIncl += totalIncl; ex.vatAmt += vatAmt; ex.zeroRated += zeroRated }
       else supMap.set(key, { name: key, totalIncl, vatAmt, zeroRated })
