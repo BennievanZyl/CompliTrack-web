@@ -162,46 +162,91 @@ export default function ReportsPage() {
     const border = payable ? '#ffc107' : '#28a745'
     const textCol = payable ? '#856404' : '#155724'
 
-    const supTableRows = supRows.map(r => `
-      <tr>
-        <td>${r.name}</td>
-        <td style="text-align:right">${fmt(r.totalIncl)}</td>
-        <td style="text-align:right;color:#c0392b">${fmt(r.vatAmt)}</td>
-        <td style="text-align:right;color:#888">${r.zeroRated > 0 ? fmt(r.zeroRated) : '—'}</td>
+    const supTableRows = supRows.map((r, i) => `
+      <tr style="background:${i % 2 === 0 ? '#fff' : '#f9f9f9'}">
+        <td style="width:45%;padding:7px 10px;border-bottom:1px solid #eee">${r.name}</td>
+        <td style="width:20%;padding:7px 10px;text-align:right;border-bottom:1px solid #eee;color:#444">${fmt(r.totalIncl)}</td>
+        <td style="width:20%;padding:7px 10px;text-align:right;border-bottom:1px solid #eee;color:#c0392b;font-weight:600">${fmt(r.vatAmt)}</td>
+        <td style="width:15%;padding:7px 10px;text-align:right;border-bottom:1px solid #eee;color:#999">${r.zeroRated > 0 ? fmt(r.zeroRated) : '—'}</td>
       </tr>`).join('')
 
     const html = `
-<h2 style="font-size:16px;margin:0 0 12px">Output VAT (Tax Collected on Sales)</h2>
-<table>
+<h2 style="font-size:15px;font-weight:700;color:#1a1a2e;margin:0 0 10px;padding-bottom:6px;border-bottom:2px solid #1a5c38">
+  Output VAT — Tax Collected on Sales
+</h2>
+<table style="width:100%;border-collapse:collapse;margin-bottom:20px">
+  <colgroup><col style="width:60%"><col style="width:40%"></colgroup>
   <tbody>
-    <tr><td>Total Sales (Incl. VAT)</td><td style="text-align:right"><strong>${fmt(totalSalesIncl)}</strong></td></tr>
-    <tr><td style="color:#888">Sales (Excl. VAT)</td><td style="text-align:right;color:#888">${fmt(totalSalesExcl)}</td></tr>
-    <tr class="total"><td>Output VAT @ 15%</td><td style="text-align:right;color:#1a5c38">${fmt(outputVAT)}</td></tr>
+    <tr style="background:#f9f9f9">
+      <td style="padding:8px 10px;border-bottom:1px solid #eee;color:#333">Total Sales (Incl. VAT)</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #eee;text-align:right;font-weight:700;font-size:14px">${fmt(totalSalesIncl)}</td>
+    </tr>
+    <tr>
+      <td style="padding:8px 10px;border-bottom:1px solid #eee;color:#888">  Sales (Excl. VAT)</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #eee;text-align:right;color:#888">${fmt(totalSalesExcl)}</td>
+    </tr>
+    <tr style="background:#e8f5ee">
+      <td style="padding:9px 10px;font-weight:700;color:#1a5c38">Output VAT @ 15%</td>
+      <td style="padding:9px 10px;text-align:right;font-weight:700;color:#1a5c38;font-size:15px">${fmt(outputVAT)}</td>
+    </tr>
   </tbody>
 </table>
 
-<h2 style="font-size:16px;margin:24px 0 12px">Input VAT (Tax Paid on Purchases)</h2>
-${supRows.length ? `<table>
+<h2 style="font-size:15px;font-weight:700;color:#1a1a2e;margin:0 0 10px;padding-bottom:6px;border-bottom:2px solid #c0392b">
+  Input VAT — Tax Paid on Purchases
+</h2>
+${supRows.length ? `<table style="width:100%;border-collapse:collapse;margin-bottom:20px">
+  <colgroup>
+    <col style="width:45%"><col style="width:20%"><col style="width:20%"><col style="width:15%">
+  </colgroup>
   <thead>
-    <tr><th>Supplier</th><th>Total (Incl.)</th><th>VAT (15%)</th><th>Zero-Rated</th></tr>
+    <tr style="background:#2c3e50;color:#fff">
+      <th style="padding:8px 10px;text-align:left;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.5px">Supplier</th>
+      <th style="padding:8px 10px;text-align:right;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.5px">Total (Incl.)</th>
+      <th style="padding:8px 10px;text-align:right;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.5px">VAT (15%)</th>
+      <th style="padding:8px 10px;text-align:right;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.5px">Zero-Rated</th>
+    </tr>
   </thead>
   <tbody>
     ${supTableRows}
-    ${qeVAT > 0 ? `<tr><td>Quick / Cash Expenses</td><td></td><td style="text-align:right;color:#c0392b">${fmt(qeVAT)}</td><td></td></tr>` : ''}
+    ${qeVAT > 0 ? `<tr style="background:#fff8e1">
+      <td style="padding:7px 10px;border-bottom:1px solid #eee;font-style:italic;color:#555">Quick / Cash Expenses</td>
+      <td style="padding:7px 10px;border-bottom:1px solid #eee"></td>
+      <td style="padding:7px 10px;border-bottom:1px solid #eee;text-align:right;color:#c0392b;font-weight:600">${fmt(qeVAT)}</td>
+      <td style="padding:7px 10px;border-bottom:1px solid #eee"></td>
+    </tr>` : ''}
   </tbody>
   <tfoot>
-    <tr class="total"><td colspan="2">Total Input VAT</td><td style="text-align:right;color:#c0392b">${fmt(totalInputVAT)}</td><td></td></tr>
+    <tr style="background:#fdf2f2">
+      <td colspan="2" style="padding:9px 10px;font-weight:700;color:#c0392b">Total Input VAT</td>
+      <td style="padding:9px 10px;text-align:right;font-weight:700;color:#c0392b;font-size:15px">${fmt(totalInputVAT)}</td>
+      <td></td>
+    </tr>
   </tfoot>
-</table>` : `<p style="color:#888">No supplier invoices found for this period.${qeVAT > 0 ? ` Quick expenses VAT: ${fmt(qeVAT)}` : ''}</p>`}
+</table>` : `<p style="color:#888;padding:12px;background:#f9f9f9;border-radius:6px">No supplier invoices found for this period.${qeVAT > 0 ? ` Quick expenses VAT: ${fmt(qeVAT)}` : ''}</p>`}
 
-<div style="margin-top:24px;padding:20px;background:${bg};border:2px solid ${border};border-radius:8px;text-align:center;print-color-adjust:exact;-webkit-print-color-adjust:exact">
-  <div style="font-size:12px;color:${textCol};margin-bottom:4px">NET VAT POSITION</div>
-  <div style="font-size:28px;font-weight:800;color:${textCol}">${fmt(Math.abs(netVAT))}</div>
-  <div style="font-size:14px;font-weight:700;color:${textCol};margin-top:4px">${payable ? '⚠️ PAYABLE TO SARS' : '✅ REFUNDABLE FROM SARS'}</div>
-  <div style="font-size:11px;color:${textCol};margin-top:8px;opacity:.8">Output VAT ${fmt(outputVAT)} − Input VAT ${fmt(totalInputVAT)} = ${netVAT >= 0 ? '' : '−'}${fmt(Math.abs(netVAT))}</div>
+<table style="width:100%;border-collapse:collapse;margin-bottom:20px;border-top:2px solid #ddd">
+  <tbody>
+    <tr style="background:#f5f5f5">
+      <td style="padding:8px 10px;color:#555;width:60%">Output VAT</td>
+      <td style="padding:8px 10px;text-align:right;color:#1a5c38;font-weight:600">${fmt(outputVAT)}</td>
+    </tr>
+    <tr>
+      <td style="padding:8px 10px;color:#555">Input VAT</td>
+      <td style="padding:8px 10px;text-align:right;color:#c0392b;font-weight:600">− ${fmt(totalInputVAT)}</td>
+    </tr>
+  </tbody>
+</table>
+
+<div style="margin-top:4px;padding:18px 24px;background:${bg};border:2px solid ${border};border-radius:8px;display:flex;justify-content:space-between;align-items:center;print-color-adjust:exact;-webkit-print-color-adjust:exact">
+  <div>
+    <div style="font-size:11px;color:${textCol};text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px">Net VAT Position</div>
+    <div style="font-size:13px;font-weight:700;color:${textCol}">${payable ? '⚠️ Payable to SARS' : '✅ Refundable from SARS'}</div>
+  </div>
+  <div style="font-size:30px;font-weight:800;color:${textCol}">${fmt(Math.abs(netVAT))}</div>
 </div>
 
-<div style="margin-top:16px;padding:12px;background:#fff8e1;border-left:4px solid #ffc107;font-size:11px;color:#666">
+<div style="margin-top:14px;padding:10px 12px;background:#fff8e1;border-left:4px solid #ffc107;font-size:10.5px;color:#666;line-height:1.5">
   <strong>⚠️ Important:</strong> This is a calculation aid only. Have a registered tax practitioner verify all figures before submitting to SARS.
   Ensure zero-rated and exempt supplies are correctly classified. A VAT registration number and official VAT 201 form are required for SARS submission.
 </div>`
