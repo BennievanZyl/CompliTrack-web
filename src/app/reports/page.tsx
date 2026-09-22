@@ -134,26 +134,51 @@ export default function ReportsPage() {
       .gte('expense_date', startDate).lte('expense_date', endDate)
     const qeVAT = (qe || []).reduce((s: number, e: any) => s + Number(e.vat_amount || 0), 0)
 
-    // 3. Invoice / supplier VAT — use total_vat directly from invoices (no invoice_lines needed)
-    const { data: invData } = await supabase
-      .from('invoices').select('supplier,total_amount,total_vat')
+    // 3. Invoice / supplier VAT — split at invoice_lines level so mixed invoices
+    //    (some VAT lines + some zero-rated lines) are handled correctly
+    const { data: invHeaders } = await supabase
+      .from('invoices').select('id,supplier')
       .eq('store_id', STORE_ID).in('status', ['received', 'paid'])
       .gte('invoice_date', startDate).lte('invoice_date', endDate)
 
-    // Group input VAT by supplier
-    const supMap = new Map<string, { name: string; totalIncl: number; vatAmt: number; zeroRated: number }>()
-    for (const inv of invData || []) {
-      const vatAmt = Number(inv.total_vat || 0)
-      const totalIncl = Number(inv.total_amount || 0)
-      const zeroRated = vatAmt === 0 ? totalIncl : 0
-      const key = inv.supplier || 'Unknown Supplier'
-      const ex = supMap.get(key)
-      if (ex) { ex.totalIncl += totalIncl; ex.vatAmt += vatAmt; ex.zeroRated += zeroRated }
-      else supMap.set(key, { name: key, totalIncl, vatAmt, zeroRated })
+    const invIds = (invHeaders || []).map((i: any) => i.id)
+    const invSupMap = new Map((invHeaders || []).map((i: any) => [i.id as string, (i.supplier || 'Unknown Supplier') as string]))
+
+    let invLines: any[] = []
+    if (invIds.length) {
+      const { data: linesData } = await supabase
+        .from('invoice_lines').select('invoice_id,amount,vat_amount')
+        .eq('store_id', STORE_ID).in('invoice_id', invIds)
+      invLines = linesData || []
+    }
+
+    // Group by supplier — separate VAT-able lines from zero-rated lines at line level
+    type SupEntry = { name: string; vatableIncl: number; vatAmt: number; zeroRated: number }
+    const supMap = new Map<string, SupEntry>()
+    for (const line of invLines) {
+      const supplier = invSupMap.get(line.invoice_id) || 'Unknown Supplier'
+      const vatAmt  = Number(line.vat_amount || 0)
+      const lineAmt = Number(line.amount || 0)
+      const isZero  = vatAmt === 0
+      const ex = supMap.get(supplier)
+      if (ex) {
+        ex.vatAmt      += vatAmt
+        if (isZero) ex.zeroRated    += lineAmt
+        else        ex.vatableIncl  += lineAmt
+      } else {
+        supMap.set(supplier, {
+          name: supplier,
+          vatableIncl: isZero ? 0 : lineAmt,
+          vatAmt,
+          zeroRated: isZero ? lineAmt : 0,
+        })
+      }
     }
 
     const supRows = Array.from(supMap.values()).sort((a, b) => b.vatAmt - a.vatAmt)
     const invoiceInputVAT = supRows.reduce((s, r) => s + r.vatAmt, 0)
+    // totalIncl alias for display (VAT-able portion incl. VAT + zero-rated)
+    supRows.forEach((r: any) => { r.totalIncl = r.vatableIncl + r.zeroRated })
     const totalInputVAT = invoiceInputVAT + qeVAT
     const netVAT = outputVAT - totalInputVAT
     const payable = netVAT > 0
@@ -162,12 +187,13 @@ export default function ReportsPage() {
     const border = payable ? '#ffc107' : '#28a745'
     const textCol = payable ? '#856404' : '#155724'
 
-    const supTableRows = supRows.map((r, i) => `
+    const supTableRows = supRows.map((r: any, i: number) => `
       <tr style="background:${i % 2 === 0 ? '#fff' : '#f9f9f9'}">
-        <td style="width:45%;padding:7px 10px;border-bottom:1px solid #eee">${r.name}</td>
-        <td style="width:20%;padding:7px 10px;text-align:right;border-bottom:1px solid #eee;color:#444">${fmt(r.totalIncl)}</td>
-        <td style="width:20%;padding:7px 10px;text-align:right;border-bottom:1px solid #eee;color:#c0392b;font-weight:600">${fmt(r.vatAmt)}</td>
-        <td style="width:15%;padding:7px 10px;text-align:right;border-bottom:1px solid #eee;color:#999">${r.zeroRated > 0 ? fmt(r.zeroRated) : '—'}</td>
+        <td style="width:34%;padding:7px 10px;border-bottom:1px solid #eee">${r.name}</td>
+        <td style="width:18%;padding:7px 10px;text-align:right;border-bottom:1px solid #eee;color:#444">${r.vatableIncl > 0 ? fmt(r.vatableIncl) : '—'}</td>
+        <td style="width:16%;padding:7px 10px;text-align:right;border-bottom:1px solid #eee;color:#c0392b;font-weight:600">${r.vatAmt > 0 ? fmt(r.vatAmt) : '—'}</td>
+        <td style="width:18%;padding:7px 10px;text-align:right;border-bottom:1px solid #eee;color:#888">${r.zeroRated > 0 ? fmt(r.zeroRated) : '—'}</td>
+        <td style="width:14%;padding:7px 10px;text-align:right;border-bottom:1px solid #eee;font-weight:700">${fmt(r.totalIncl)}</td>
       </tr>`).join('')
 
     const html = `
@@ -197,14 +223,15 @@ export default function ReportsPage() {
 </h2>
 ${supRows.length ? `<table style="width:100%;border-collapse:collapse;margin-bottom:20px">
   <colgroup>
-    <col style="width:45%"><col style="width:20%"><col style="width:20%"><col style="width:15%">
+    <col style="width:34%"><col style="width:18%"><col style="width:16%"><col style="width:18%"><col style="width:14%">
   </colgroup>
   <thead>
     <tr style="background:#2c3e50;color:#fff">
       <th style="padding:8px 10px;text-align:left;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.5px">Supplier</th>
-      <th style="padding:8px 10px;text-align:right;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.5px">Total (Incl.)</th>
-      <th style="padding:8px 10px;text-align:right;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.5px">VAT (15%)</th>
+      <th style="padding:8px 10px;text-align:right;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.5px">VAT-able (Excl.)</th>
+      <th style="padding:8px 10px;text-align:right;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.5px">Input VAT</th>
       <th style="padding:8px 10px;text-align:right;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.5px">Zero-Rated</th>
+      <th style="padding:8px 10px;text-align:right;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.5px">Total (Incl.)</th>
     </tr>
   </thead>
   <tbody>
@@ -214,12 +241,14 @@ ${supRows.length ? `<table style="width:100%;border-collapse:collapse;margin-bot
       <td style="padding:7px 10px;border-bottom:1px solid #eee"></td>
       <td style="padding:7px 10px;border-bottom:1px solid #eee;text-align:right;color:#c0392b;font-weight:600">${fmt(qeVAT)}</td>
       <td style="padding:7px 10px;border-bottom:1px solid #eee"></td>
+      <td style="padding:7px 10px;border-bottom:1px solid #eee"></td>
     </tr>` : ''}
   </tbody>
   <tfoot>
     <tr style="background:#fdf2f2">
       <td colspan="2" style="padding:9px 10px;font-weight:700;color:#c0392b">Total Input VAT</td>
       <td style="padding:9px 10px;text-align:right;font-weight:700;color:#c0392b;font-size:15px">${fmt(totalInputVAT)}</td>
+      <td></td>
       <td></td>
     </tr>
   </tfoot>

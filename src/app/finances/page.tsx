@@ -1363,8 +1363,9 @@ export default function FinancesPage() {
                         </>
                       )
                     })()}                    <div style={{ borderTop: '2px solid #e5e7eb', marginTop: 8, paddingTop: 12, display: 'flex', justifyContent: 'flex-end', gap: 24, fontSize: 14 }}>
-                      <span style={{ color: '#6b7280' }}>VAT: <strong>{fmt(lineVatTotal)}</strong></span>
-                      <span style={{ fontWeight: 800, fontSize: 16 }}>Total: <span style={{ color: '#1a5c38' }}>{fmt(lineTotal)}</span></span>
+                      <span style={{ color: '#6b7280' }}>Subtotal (excl. VAT): <strong>{fmt(lineTotal - lineVatTotal)}</strong></span>
+                      <span style={{ color: '#c0392b' }}>VAT: <strong>{fmt(lineVatTotal)}</strong></span>
+                      <span style={{ fontWeight: 800, fontSize: 16 }}>Total (incl. VAT): <span style={{ color: '#1a5c38' }}>{fmt(lineTotal)}</span></span>
                     </div>
                   </div>
 
@@ -1473,10 +1474,20 @@ export default function FinancesPage() {
                                 </tr>
                               )
                             })}
+                            <tr style={{ borderTop: '1px solid #e5e7eb', background: '#f9fafb' }}>
+                              <td colSpan={2} style={{ padding: '7px 10px', color: '#6b7280' }}>Subtotal (excl. VAT)</td>
+                              <td style={{ padding: '7px 10px', textAlign: 'right', color: '#374151', fontWeight: 600 }}>{fmt(Number(inv.total_amount) - Number(inv.total_vat || 0))}</td>
+                              <td style={{ padding: '7px 10px', textAlign: 'right', color: '#6b7280' }}></td>
+                            </tr>
+                            <tr style={{ background: '#fdf2f2' }}>
+                              <td colSpan={2} style={{ padding: '7px 10px', color: '#c0392b' }}>VAT (15%)</td>
+                              <td style={{ padding: '7px 10px', textAlign: 'right', color: '#c0392b', fontWeight: 600 }}>{fmt(Number(inv.total_vat || 0))}</td>
+                              <td style={{ padding: '7px 10px', textAlign: 'right', color: '#6b7280' }}>{fmt(Number(inv.total_vat || 0))}</td>
+                            </tr>
                             <tr style={{ borderTop: '2px solid #e5e7eb', background: '#f9fafb' }}>
-                              <td colSpan={2} style={{ padding: '8px 10px', fontWeight: 700 }}>Total</td>
-                              <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 800, color: '#dc2626' }}>{fmt(Number(inv.total_amount))}</td>
-                              <td style={{ padding: '8px 10px', textAlign: 'right', color: '#6b7280' }}>{fmt(Number(inv.total_vat || 0))}</td>
+                              <td colSpan={2} style={{ padding: '8px 10px', fontWeight: 800 }}>Total (incl. VAT)</td>
+                              <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 800, color: '#dc2626', fontSize: 14 }}>{fmt(Number(inv.total_amount))}</td>
+                              <td style={{ padding: '8px 10px', textAlign: 'right', color: '#6b7280' }}></td>
                             </tr>
                           </tbody>
                         </table>
