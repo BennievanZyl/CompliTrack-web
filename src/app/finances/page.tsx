@@ -217,10 +217,12 @@ export default function FinancesPage() {
       supabase.from('stock_items')
         .select('id, description, unit, supplier')
         .eq('store_id', STORE_ID).eq('is_active', true).order('description'),
-      supabase.from('wage_payments')
-        .select('gross_pay,uif_employer')
+      // Payroll: periods overlapping this month, any status
+      supabase.from('payroll_periods')
+        .select('id')
         .eq('store_id', STORE_ID)
-        .gte('paid_date', monthStart).lte('paid_date', monthEnd),
+        .lte('period_start', monthEnd)
+        .gte('period_end', monthStart),
     ])
     setCashUps(cuRes.data || [])
     setInvoices(invRes.data || [])
@@ -229,7 +231,18 @@ export default function FinancesPage() {
     setSuppliers(suppRes?.data || [])
     setQuickExp(qRes.data || [])
     setAllStockItems(stockRes?.data || [])
-    setWages(wageRes?.data || [])
+    // Fetch payroll runs for those periods
+    const periodIds = (wageRes?.data || []).map((p: any) => p.id)
+    if (periodIds.length) {
+      const { data: runData } = await supabase
+        .from('payroll_runs')
+        .select('gross_pay,uif_employer')
+        .eq('store_id', STORE_ID)
+        .in('payroll_period_id', periodIds)
+      setWages(runData || [])
+    } else {
+      setWages([])
+    }
     } catch(e) { console.error('[finances] load error', e) }
     finally { setLoading(false) }
   }, [month, STORE_ID, ORG_ID])
@@ -1011,7 +1024,7 @@ export default function FinancesPage() {
                   { label: 'Total Sales', value: fmt(totalSales), color: '#16a34a', icon: '📈', sub: `${cashUps.length} cash-ups` },
                   { label: 'Supplier Bills', value: fmt(totalInvoices), color: '#dc2626', icon: '🧾', sub: `${invoices.length} invoices` },
                   { label: 'Quick Expenses', value: fmt(totalQuick), color: '#f97316', icon: '💵', sub: `${quickExp.length} entries` },
-                  { label: 'Wages & UIF', value: fmt(totalWages), color: '#7c3aed', icon: '👷', sub: `${wages.length} payment${wages.length !== 1 ? 's' : ''}` },
+                  { label: 'Wages & UIF', value: fmt(totalWages), color: '#7c3aed', icon: '👷', sub: `${wages.length} employee${wages.length !== 1 ? 's' : ''}` },
                   { label: netProfit >= 0 ? 'Net Profit' : 'Net Loss', value: fmt(netProfit), color: netProfit >= 0 ? '#1a5c38' : '#ef4444', icon: netProfit >= 0 ? '✅' : '⚠️', sub: totalSales > 0 ? `${((netProfit / totalSales) * 100).toFixed(1)}% margin` : '' },
                   { label: 'Variance', value: fmt(totalVariance), color: Math.abs(totalVariance) > 500 ? '#dc2626' : '#6b7280', icon: '⚖️', sub: `${totalCustomers} customers` },
                 ].map(k => (
