@@ -117,6 +117,7 @@ export default function FinancesPage() {
   const [cashUps, setCashUps] = useState<CashUp[]>([])
   const [invoices, setInvoices] = useState<Invoice[]>([])
   const [quickExp, setQuickExp] = useState<QuickExpense[]>([])
+  const [wages, setWages] = useState<{gross_pay: number; uif_employer: number}[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [showGRV, setShowGRV] = useState(false)
@@ -195,7 +196,7 @@ export default function FinancesPage() {
     const monthStart = `${month}-01`
     const [mYear, mMonth] = month.split('-').map(Number)
     const monthEnd = new Date(mYear, mMonth, 0).toISOString().split('T')[0]
-    const [cuRes, invRes, catRes, suppRes, qRes, stockRes] = await Promise.all([
+    const [cuRes, invRes, catRes, suppRes, qRes, stockRes, wageRes] = await Promise.all([
       supabase.from('cash_ups')
         .select('id,cash_up_date,cash_up_total,total_cash,eft_total,payouts,variance,customer_count,average_spend,status,notes')
         .eq('store_id', STORE_ID)
@@ -216,6 +217,10 @@ export default function FinancesPage() {
       supabase.from('stock_items')
         .select('id, description, unit, supplier')
         .eq('store_id', STORE_ID).eq('is_active', true).order('description'),
+      supabase.from('wage_payments')
+        .select('gross_pay,uif_employer')
+        .eq('store_id', STORE_ID)
+        .gte('paid_date', monthStart).lte('paid_date', monthEnd),
     ])
     setCashUps(cuRes.data || [])
     setInvoices(invRes.data || [])
@@ -224,6 +229,7 @@ export default function FinancesPage() {
     setSuppliers(suppRes?.data || [])
     setQuickExp(qRes.data || [])
     setAllStockItems(stockRes?.data || [])
+    setWages(wageRes?.data || [])
     } catch(e) { console.error('[finances] load error', e) }
     finally { setLoading(false) }
   }, [month, STORE_ID, ORG_ID])
@@ -458,12 +464,13 @@ export default function FinancesPage() {
   const totalSales = cashUps.reduce((s, r) => s + Number(r.cash_up_total || 0), 0)
   const totalInvoices = invoices.reduce((s, r) => s + Number(r.total_amount || 0), 0)
   const totalQuick = quickExp.reduce((s, r) => s + Number(r.amount || 0), 0)
-  const totalExpenses = totalInvoices + totalQuick
+  const totalWages = wages.reduce((s, r) => s + Number(r.gross_pay || 0) + Number(r.uif_employer || 0), 0)
+  const totalExpenses = totalInvoices + totalQuick + totalWages
   const netProfit = totalSales - totalExpenses
   const totalVariance = cashUps.reduce((s, r) => s + Number(r.variance || 0), 0)
   const totalCustomers = cashUps.reduce((s, r) => s + Number(r.customer_count || 0), 0)
 
-  // Category breakdown across invoices + quick
+  // Category breakdown across invoices + quick + wages
   const expByCategory: Record<string, number> = {}
   invoices.forEach(inv => {
     (inv.invoice_lines || []).forEach(line => {
@@ -475,6 +482,9 @@ export default function FinancesPage() {
     const k = CAT_MAP[e.category_key]?.name || e.category_name || 'Other'
     expByCategory[k] = (expByCategory[k] || 0) + Number(e.amount)
   })
+  if (totalWages > 0) {
+    expByCategory['Wages & UIF'] = (expByCategory['Wages & UIF'] || 0) + totalWages
+  }
 
   // ── Invoice CRUD ──
   function openNewInvoice() {
@@ -996,11 +1006,12 @@ export default function FinancesPage() {
           {/* ── SUMMARY ── */}
           {tab === 0 && (
             <div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 16, marginBottom: 24 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6,1fr)', gap: 16, marginBottom: 24 }}>
                 {[
                   { label: 'Total Sales', value: fmt(totalSales), color: '#16a34a', icon: '📈', sub: `${cashUps.length} cash-ups` },
                   { label: 'Supplier Bills', value: fmt(totalInvoices), color: '#dc2626', icon: '🧾', sub: `${invoices.length} invoices` },
                   { label: 'Quick Expenses', value: fmt(totalQuick), color: '#f97316', icon: '💵', sub: `${quickExp.length} entries` },
+                  { label: 'Wages & UIF', value: fmt(totalWages), color: '#7c3aed', icon: '👷', sub: `${wages.length} payment${wages.length !== 1 ? 's' : ''}` },
                   { label: netProfit >= 0 ? 'Net Profit' : 'Net Loss', value: fmt(netProfit), color: netProfit >= 0 ? '#1a5c38' : '#ef4444', icon: netProfit >= 0 ? '✅' : '⚠️', sub: totalSales > 0 ? `${((netProfit / totalSales) * 100).toFixed(1)}% margin` : '' },
                   { label: 'Variance', value: fmt(totalVariance), color: Math.abs(totalVariance) > 500 ? '#dc2626' : '#6b7280', icon: '⚖️', sub: `${totalCustomers} customers` },
                 ].map(k => (
@@ -1040,6 +1051,7 @@ export default function FinancesPage() {
                     { label: 'Total Sales', value: totalSales, color: '#16a34a', pct: 100 },
                     { label: 'Supplier Bills', value: totalInvoices, color: '#dc2626', pct: totalSales > 0 ? (totalInvoices / totalSales) * 100 : 0 },
                     { label: 'Quick Expenses', value: totalQuick, color: '#f97316', pct: totalSales > 0 ? (totalQuick / totalSales) * 100 : 0 },
+                    { label: 'Wages & UIF', value: totalWages, color: '#7c3aed', pct: totalSales > 0 ? (totalWages / totalSales) * 100 : 0 },
                   ].map(row => (
                     <div key={row.label} style={{ marginBottom: 16 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, marginBottom: 4 }}>
