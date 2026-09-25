@@ -114,13 +114,13 @@ export default function AnalyticsPage(){
       supabase.from('cash_ups').select('cash_up_date,cash_up_total').eq('store_id',STORE_ID).neq('status','draft').gte('cash_up_date',start).lte('cash_up_date',end).order('cash_up_date'),
       supabase.from('expenses').select('amount,category_key,category_name').eq('store_id',STORE_ID).gte('expense_date',start).lte('expense_date',end),
       invIds.length?supabase.from('invoice_lines').select('amount,vat_amount,category_key').in('invoice_id',invIds):Promise.resolve({data:[]}),
-      supabase.from('wage_payments').select('net_pay,gross_pay,uif_employer').eq('store_id',STORE_ID).gte('paid_date',start).lte('paid_date',end),
+      supabase.from('payroll_periods').select('id').eq('store_id',STORE_ID).lte('period_start',end).gte('period_end',start),
       supabase.from('stock_purchases').select('total_cost').eq('store_id',STORE_ID).gte('purchase_date',start).lte('purchase_date',end),
       supabase.from('stock_wastage').select('total_cost').eq('store_id',STORE_ID).gte('wastage_date',start).lte('wastage_date',end),
       supabase.from('stock_counts').select('id,count_date').eq('store_id',STORE_ID).eq('status','completed').order('count_date',{ascending:false}).limit(20),
       supabase.from('expenses').select('amount,category_key').eq('store_id',STORE_ID).gte('expense_date',lmStart).lte('expense_date',lmEnd),
       lmInvIds.length?supabase.from('invoice_lines').select('amount,vat_amount,category_key').in('invoice_id',lmInvIds):Promise.resolve({data:[]}),
-      supabase.from('wage_payments').select('gross_pay').eq('store_id',STORE_ID).gte('paid_date',lmStart).lte('paid_date',lmEnd),
+      supabase.from('payroll_periods').select('id').eq('store_id',STORE_ID).lte('period_start',lmEnd).gte('period_end',lmStart),
       // Compliance: fetch last 14 daily sessions regardless of selected period (rolling window)
       supabase.from('daily_sessions').select('session_date,id').eq('store_id',STORE_ID).eq('session_type','daily').order('session_date',{ascending:false}).limit(14),
       // Estimated wages: employee hourly rates for this store only
@@ -137,8 +137,16 @@ export default function AnalyticsPage(){
 
     const purchases=(purchRes.data||[]).reduce((s:number,r:any)=>s+Number(r.total_cost||0),0)
     const wastage=(wastRes.data||[]).reduce((s:number,r:any)=>s+Number(r.total_cost||0),0)
-    const wagesGross=(wagesRes.data||[]).reduce((s:number,r:any)=>s+Number(r.gross_pay||0),0)
-    const uifEmployer=(wagesRes.data||[]).reduce((s:number,r:any)=>s+Number(r.uif_employer||0),0)
+
+    // Fetch actual payroll runs for current + last month periods
+    const wagePeriodIds=(wagesRes.data||[]).map((p:any)=>p.id)
+    const lmWagePeriodIds=(lmWagesRes.data||[]).map((p:any)=>p.id)
+    const[wageRunsRes,lmWageRunsRes]=await Promise.all([
+      wagePeriodIds.length?supabase.from('payroll_runs').select('gross_pay,uif_employer').eq('store_id',STORE_ID).in('payroll_period_id',wagePeriodIds):Promise.resolve({data:[]}),
+      lmWagePeriodIds.length?supabase.from('payroll_runs').select('gross_pay').eq('store_id',STORE_ID).in('payroll_period_id',lmWagePeriodIds):Promise.resolve({data:[]}),
+    ])
+    const wagesGross=(wageRunsRes.data||[]).reduce((s:number,r:any)=>s+Number(r.gross_pay||0),0)
+    const uifEmployer=(wageRunsRes.data||[]).reduce((s:number,r:any)=>s+Number(r.uif_employer||0),0)
     // Estimated wages from current hours × hourly rate (used when payroll not yet marked paid)
     const empRateMap:Record<string,number>={}
     const empIds:string[]=[]
@@ -191,7 +199,7 @@ export default function AnalyticsPage(){
     const otherExpenses=Object.values(expByCat).reduce((s,c)=>s+c.total,0)
     const totalOperatingCosts=displayWages+otherExpenses
 
-    const lmWages=(lmWagesRes.data||[]).reduce((s:number,r:any)=>s+Number(r.gross_pay||0),0)
+    const lmWages=(lmWageRunsRes.data||[]).reduce((s:number,r:any)=>s+Number(r.gross_pay||0),0)
     let lmOpExp=0
     for(const e of lmExpRes.data||[]){if(!isFoodCostKey(e.category_key||'other'))lmOpExp+=Number(e.amount||0)}
     for(const l of lmInvLinesRes.data||[]){

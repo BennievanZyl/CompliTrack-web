@@ -475,11 +475,15 @@ export default function FinancesPage() {
 
   // ── Summary calcs ──
   const totalSales = cashUps.reduce((s, r) => s + Number(r.cash_up_total || 0), 0)
+  const totalSalesExcl = totalSales / (1 + VAT_RATE)   // ex-VAT for P&L
   const totalInvoices = invoices.reduce((s, r) => s + Number(r.total_amount || 0), 0)
+  const totalInvoicesExcl = invoices.reduce((s, r) => s + Number(r.total_amount || 0) - Number(r.total_vat || 0), 0) // ex-VAT
   const totalQuick = quickExp.reduce((s, r) => s + Number(r.amount || 0), 0)
   const totalWages = wages.reduce((s, r) => s + Number(r.gross_pay || 0) + Number(r.uif_employer || 0), 0)
-  const totalExpenses = totalInvoices + totalQuick + totalWages
-  const netProfit = totalSales - totalExpenses
+  // P&L on ex-VAT basis: output VAT is a SARS liability, input VAT is reclaimable
+  const totalExpenses = totalInvoicesExcl + totalQuick + totalWages
+  const totalExpensesDisplay = totalInvoices + totalQuick + totalWages  // incl-VAT total for category % display
+  const netProfit = totalSalesExcl - totalExpenses
   const totalVariance = cashUps.reduce((s, r) => s + Number(r.variance || 0), 0)
   const totalCustomers = cashUps.reduce((s, r) => s + Number(r.customer_count || 0), 0)
 
@@ -1021,11 +1025,11 @@ export default function FinancesPage() {
             <div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6,1fr)', gap: 16, marginBottom: 24 }}>
                 {[
-                  { label: 'Total Sales', value: fmt(totalSales), color: '#16a34a', icon: '📈', sub: `${cashUps.length} cash-ups` },
+                  { label: 'Total Sales', value: fmt(totalSales), color: '#16a34a', icon: '📈', sub: `${cashUps.length} cash-ups · ex-VAT ${fmt(totalSalesExcl)}` },
                   { label: 'Supplier Bills', value: fmt(totalInvoices), color: '#dc2626', icon: '🧾', sub: `${invoices.length} invoices` },
                   { label: 'Quick Expenses', value: fmt(totalQuick), color: '#f97316', icon: '💵', sub: `${quickExp.length} entries` },
                   { label: 'Wages & UIF', value: fmt(totalWages), color: '#7c3aed', icon: '👷', sub: `${wages.length} employee${wages.length !== 1 ? 's' : ''}` },
-                  { label: netProfit >= 0 ? 'Net Profit' : 'Net Loss', value: fmt(netProfit), color: netProfit >= 0 ? '#1a5c38' : '#ef4444', icon: netProfit >= 0 ? '✅' : '⚠️', sub: totalSales > 0 ? `${((netProfit / totalSales) * 100).toFixed(1)}% margin` : '' },
+                  { label: netProfit >= 0 ? 'Net Profit' : 'Net Loss', value: fmt(netProfit), color: netProfit >= 0 ? '#1a5c38' : '#ef4444', icon: netProfit >= 0 ? '✅' : '⚠️', sub: totalSalesExcl > 0 ? `${((netProfit / totalSalesExcl) * 100).toFixed(1)}% margin` : '' },
                   { label: 'Variance', value: fmt(totalVariance), color: Math.abs(totalVariance) > 500 ? '#dc2626' : '#6b7280', icon: '⚖️', sub: `${totalCustomers} customers` },
                 ].map(k => (
                   <div key={k.label} style={{ ...card, marginBottom: 0, textAlign: 'center', padding: 18 }}>
@@ -1043,7 +1047,7 @@ export default function FinancesPage() {
                   {Object.keys(expByCategory).length === 0
                     ? <p style={{ color: '#6b7280', fontSize: 14 }}>No expenses recorded this month.</p>
                     : Object.entries(expByCategory).sort((a, b) => b[1] - a[1]).map(([cat, amt]) => {
-                      const pct = totalExpenses > 0 ? (amt / totalExpenses) * 100 : 0
+                      const pct = totalExpensesDisplay > 0 ? (amt / totalExpensesDisplay) * 100 : 0
                       const catEntry = categories.find(c => c.name === cat)
                       return (
                         <div key={cat} style={{ marginBottom: 12 }}>
@@ -1061,10 +1065,10 @@ export default function FinancesPage() {
                 <div style={card}>
                   <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 700 }}>Sales vs Expenses {'—'} {month}</h3>
                   {[
-                    { label: 'Total Sales', value: totalSales, color: '#16a34a', pct: 100 },
-                    { label: 'Supplier Bills', value: totalInvoices, color: '#dc2626', pct: totalSales > 0 ? (totalInvoices / totalSales) * 100 : 0 },
-                    { label: 'Quick Expenses', value: totalQuick, color: '#f97316', pct: totalSales > 0 ? (totalQuick / totalSales) * 100 : 0 },
-                    { label: 'Wages & UIF', value: totalWages, color: '#7c3aed', pct: totalSales > 0 ? (totalWages / totalSales) * 100 : 0 },
+                    { label: 'Total Sales', value: totalSalesExcl, color: '#16a34a', pct: 100 },
+                    { label: 'Supplier Bills', value: totalInvoicesExcl, color: '#dc2626', pct: totalSalesExcl > 0 ? (totalInvoicesExcl / totalSalesExcl) * 100 : 0 },
+                    { label: 'Quick Expenses', value: totalQuick, color: '#f97316', pct: totalSalesExcl > 0 ? (totalQuick / totalSalesExcl) * 100 : 0 },
+                    { label: 'Wages & UIF', value: totalWages, color: '#7c3aed', pct: totalSalesExcl > 0 ? (totalWages / totalSalesExcl) * 100 : 0 },
                   ].map(row => (
                     <div key={row.label} style={{ marginBottom: 16 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, marginBottom: 4 }}>

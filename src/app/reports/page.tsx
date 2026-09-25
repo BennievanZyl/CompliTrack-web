@@ -311,8 +311,9 @@ ${supRows.length ? `<table style="width:100%;border-collapse:collapse;margin-bot
         : Promise.resolve({ data: [] }),
       supabase.from('expenses').select('expense_date,category_name,category_key,amount')
         .eq('store_id', STORE_ID).gte('expense_date', startDate).lte('expense_date', endDate),
-      supabase.from('wage_payments').select('gross_pay,uif_employer,net_pay')
-        .eq('store_id', STORE_ID).gte('paid_date', startDate).lte('paid_date', endDate),
+      supabase.from('payroll_periods').select('id')
+        .eq('store_id', STORE_ID)
+        .lte('period_start', endDate).gte('period_end', startDate),
       supabase.from('stores').select('name,city').eq('id', STORE_ID).single(),
       supabase.from('employees').select('id,hourly_rate').eq('store_id', STORE_ID).eq('is_active', true),
     ])
@@ -366,9 +367,17 @@ ${supRows.length ? `<table style="width:100%;border-collapse:collapse;margin-bot
     })
     const quickTotal = Object.values(quickByCategory).reduce((s, v) => s + v, 0)
 
-    // Wages from wage_payments; if none paid yet estimate from attendance (same as analytics)
-    const wagesGross = (wages || []).reduce((s: number, r: any) => s + Number(r.gross_pay || 0), 0)
-    const uifEmployer = (wages || []).reduce((s: number, r: any) => s + Number(r.uif_employer || 0), 0)
+    // Wages from payroll_runs (via period IDs)
+    const wagePeriodIds = (wages || []).map((p: any) => p.id)
+    let wageRuns: any[] = []
+    if (wagePeriodIds.length) {
+      const { data: runData } = await supabase
+        .from('payroll_runs').select('gross_pay,uif_employer,net_pay')
+        .eq('store_id', STORE_ID).in('payroll_period_id', wagePeriodIds)
+      wageRuns = runData || []
+    }
+    const wagesGross = wageRuns.reduce((s: number, r: any) => s + Number(r.gross_pay || 0), 0)
+    const uifEmployer = wageRuns.reduce((s: number, r: any) => s + Number(r.uif_employer || 0), 0)
     let estimatedWages = 0
     let isWageEstimate = false
     if (wagesGross === 0 && (empRates || []).length > 0) {
