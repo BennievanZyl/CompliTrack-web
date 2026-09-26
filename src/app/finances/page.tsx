@@ -95,6 +95,7 @@ export default function FinancesPage() {
   const [historySupplier, setHistorySupplier] = useState('All')
   const [historySearch, setHistorySearch] = useState('')
   const [historyStatus, setHistoryStatus] = useState('All')
+  const [invSearch, setInvSearch] = useState('')
   const [month, setMonth] = useState(thisMonth())
   const [fcMode, setFcMode] = useState<'month' | 'week'>('month')
   const [fcWeekStart, setFcWeekStart] = useState(() => {
@@ -1165,6 +1166,19 @@ export default function FinancesPage() {
                 </div>
               </div>
 
+              {/* Invoice search bar */}
+              {!showInvForm && (
+                <div style={{ marginBottom: 16 }}>
+                  <input
+                    type="text"
+                    placeholder="🔍 Search by invoice #, supplier or notes…"
+                    value={invSearch}
+                    onChange={e => setInvSearch(e.target.value)}
+                    style={{ ...inp, width: '100%', maxWidth: 400, boxSizing: 'border-box' }}
+                  />
+                </div>
+              )}
+
               {scanError && (
                 <div style={{ background: '#fef2f2', color: '#dc2626', padding: '10px 14px', borderRadius: 8, marginBottom: 16, fontSize: 13, fontWeight: 600, border: '1px solid #fecaca' }}>
                   ⚠️ Scan failed: {scanError}
@@ -1445,9 +1459,21 @@ export default function FinancesPage() {
                   <p>No supplier invoices for {month}.</p>
                   <button style={{ ...btn(), marginTop: 12 }} onClick={openNewInvoice}>+ New Invoice</button>
                 </div>
+                : invSearch.trim() && invoices.filter(inv => `${inv.invoice_number} ${inv.supplier} ${inv.notes || ''}`.toLowerCase().includes(invSearch.trim().toLowerCase())).length === 0 && !showInvForm
+                ? <div style={{ ...card, textAlign: 'center', padding: 48, color: '#6b7280' }}>
+                  <div style={{ fontSize: 32, marginBottom: 8 }}>🔍</div>
+                  <p>No invoices match <strong>"{invSearch}"</strong></p>
+                  <button style={{ ...smBtn('#f3f4f6', '#374151'), marginTop: 8 }} onClick={() => setInvSearch('')}>Clear search</button>
+                </div>
                 : (() => {
-                  const drafts = invoices.filter(i => i.status === 'draft')
-                  const submitted = invoices.filter(i => i.status !== 'draft')
+                  const searchedInvoices = invSearch.trim()
+                    ? invoices.filter(inv => {
+                        const q = invSearch.trim().toLowerCase()
+                        return `${inv.invoice_number} ${inv.supplier} ${inv.notes || ''}`.toLowerCase().includes(q)
+                      })
+                    : invoices
+                  const drafts = searchedInvoices.filter(i => i.status === 'draft')
+                  const submitted = searchedInvoices.filter(i => i.status !== 'draft')
                   const renderInvoiceCard = (inv: Invoice) => (
                   <div key={inv.id} style={card}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
