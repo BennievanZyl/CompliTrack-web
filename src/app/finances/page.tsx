@@ -483,21 +483,24 @@ export default function FinancesPage() {
   const totalWages = wages.reduce((s, r) => s + Number(r.gross_pay || 0) + Number(r.uif_employer || 0), 0)
   // P&L on ex-VAT basis: output VAT is a SARS liability, input VAT is reclaimable
   const totalExpenses = totalInvoicesExcl + totalQuick + totalWages
-  const totalExpensesDisplay = totalInvoices + totalQuick + totalWages  // incl-VAT total for category % display
+  const totalExpensesDisplay = totalInvoicesExcl + totalQuick + totalWages  // ex-VAT total for category % display
   const netProfit = totalSalesExcl - totalExpenses
   const totalVariance = cashUps.reduce((s, r) => s + Number(r.variance || 0), 0)
   const totalCustomers = cashUps.reduce((s, r) => s + Number(r.customer_count || 0), 0)
 
-  // Category breakdown across invoices + quick + wages
+  // Category breakdown across invoices + quick + wages — all on ex-VAT basis
   const expByCategory: Record<string, number> = {}
   invoices.forEach(inv => {
     (inv.invoice_lines || []).forEach(line => {
       const k = CAT_MAP[line.category_key]?.name || line.category_key
-      expByCategory[k] = (expByCategory[k] || 0) + Number(line.amount)
+      // line.amount is incl-VAT; subtract vat_amount to get ex-VAT cost
+      const exclAmt = Number(line.amount) - Number(line.vat_amount || 0)
+      expByCategory[k] = (expByCategory[k] || 0) + exclAmt
     })
   })
   quickExp.forEach(e => {
     const k = CAT_MAP[e.category_key]?.name || e.category_name || 'Other'
+    // Quick expenses have no VAT split tracked — amount used as entered (ex-VAT intent)
     expByCategory[k] = (expByCategory[k] || 0) + Number(e.amount)
   })
   if (totalWages > 0) {
