@@ -603,11 +603,9 @@ export default function WagesPage() {
                           </td>
                           <td style={{ padding: '14px 20px' }}>
                             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' as const }}>
-                              {(empSaving?.balance || 0) > 0 && (
-                                <button onClick={() => { setWithdrawId(emp.id); setWithdrawInput(''); setWithdrawDate(new Date().toISOString().split('T')[0]); setWithdrawNotes('') }} style={{ fontSize: '12px', color: '#dc2626', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '8px', padding: '5px 12px', cursor: 'pointer', fontWeight: '700' }}>
-                                  Withdraw
-                                </button>
-                              )}
+                              <button onClick={() => { setWithdrawId(emp.id); setWithdrawInput(''); setWithdrawDate(new Date().toISOString().split('T')[0]); setWithdrawNotes('') }} style={{ fontSize: '12px', color: '#dc2626', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '8px', padding: '5px 12px', cursor: 'pointer', fontWeight: '700' }}>
+                                Withdraw
+                              </button>
                               <button onClick={() => { setHistoryId(emp.id); loadLedger(emp.id) }} style={{ fontSize: '12px', color: '#1d4ed8', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '8px', padding: '5px 12px', cursor: 'pointer', fontWeight: '700' }}>
                                 History
                               </button>
@@ -791,8 +789,11 @@ export default function WagesPage() {
                   <label style={LABEL_STYLE}>Reason / Notes</label>
                   <input type="text" value={withdrawNotes} onChange={e => setWithdrawNotes(e.target.value)} placeholder="e.g. Emergency, school fees, personal request…" style={INPUT_STYLE} />
                 </div>
-                {parseFloat(withdrawInput) > (empSaving?.balance || 0) && (
-                  <div style={{ fontSize: '12px', color: '#dc2626', fontWeight: '600' }}>⚠ Amount exceeds available balance</div>
+                {(empSaving?.balance || 0) === 0 && (
+                  <div style={{ fontSize: '12px', color: '#d97706', fontWeight: '600', background: '#fef9c3', borderRadius: '8px', padding: '8px 12px' }}>⚠ This employee has no savings balance yet. Once payroll is marked as <strong>Paid</strong>, deductions will credit their balance and withdrawals can be processed.</div>
+                )}
+                {parseFloat(withdrawInput) > (empSaving?.balance || 0) && (empSaving?.balance || 0) > 0 && (
+                  <div style={{ fontSize: '12px', color: '#dc2626', fontWeight: '600' }}>⚠ Amount exceeds available balance of {formatCurrency(empSaving?.balance || 0)}</div>
                 )}
               </div>
               <div style={{ padding: '16px 28px 24px', display: 'flex', gap: '12px' }}>
