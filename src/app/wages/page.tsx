@@ -8,8 +8,9 @@ import { useRouter } from 'next/navigation'
 type Employee = { id: string; full_name: string; role: string }
 type EmployeeWage = { id: string; employee_id: string; hourly_rate: number; uif_employee: number; uif_employer: number; tax_rate: number; pay_frequency: string; bank_name?: string; bank_account?: string; bank_branch?: string; id_number?: string }
 type PayrollPeriod = { id: string; period_start: string; period_end: string; pay_frequency: string; status: string }
-type PayrollRun = { id: string; payroll_period_id: string; employee_id: string; hours_worked: number; hourly_rate: number; gross_pay: number; uif_employee: number; uif_employer: number; paye_tax: number; advances_deducted: number; net_pay: number; status: string }
+type PayrollRun = { id: string; payroll_period_id: string; employee_id: string; hours_worked: number; hourly_rate: number; gross_pay: number; uif_employee: number; uif_employer: number; paye_tax: number; advances_deducted: number; savings_deducted: number; net_pay: number; status: string }
 type EmployeeAdvance = { id: string; employee_id: string; amount: number; reason?: string; advance_date: string; repayment_status: string; deduct_from_wages: boolean }
+type EmployeeSavings = { id: string; employee_id: string; store_id: string; deduction_per_payroll: number; balance: number }
 
 const TAB_STYLE = (active: boolean) => ({ padding: '10px 20px', borderRadius: '10px', fontSize: '13px', fontWeight: '700', cursor: 'pointer', border: 'none', background: active ? '#1a5c38' : 'transparent', color: active ? '#fff' : '#6b7280' })
 const INPUT_STYLE = { width: '100%', border: '1.5px solid #e5e7eb', borderRadius: '10px', padding: '10px 12px', fontSize: '14px', outline: 'none', boxSizing: 'border-box' as const }
@@ -21,12 +22,17 @@ function formatHours(val: number) { return `${Math.floor(val)}h ${Math.round((va
 export default function WagesPage() {
   const { storeId: STORE_ID, ready: ctxReady } = useStoreContext()
   const router = useRouter()
-  const [tab, setTab] = useState<'payroll' | 'advances' | 'settings'>('payroll')
+  const [tab, setTab] = useState<'payroll' | 'advances' | 'savings' | 'settings'>('payroll')
   const [employees, setEmployees] = useState<Employee[]>([])
   const [wages, setWages] = useState<EmployeeWage[]>([])
   const [periods, setPeriods] = useState<PayrollPeriod[]>([])
   const [runs, setRuns] = useState<PayrollRun[]>([])
   const [advances, setAdvances] = useState<EmployeeAdvance[]>([])
+  const [savings, setSavings] = useState<EmployeeSavings[]>([])
+  const [savingsEditId, setSavingsEditId] = useState<string | null>(null)
+  const [savingsInput, setSavingsInput] = useState('')
+  const [withdrawId, setWithdrawId] = useState<string | null>(null)
+  const [withdrawInput, setWithdrawInput] = useState('')
   const [loading, setLoading] = useState(true)
   const [selectedPeriod, setSelectedPeriod] = useState<PayrollPeriod | null>(null)
   const [showNewPeriod, setShowNewPeriod] = useState(false)
@@ -51,18 +57,20 @@ export default function WagesPage() {
 
   async function loadAll() {
     setLoading(true)
-    const [empRes, wageRes, periodRes, runRes, advRes] = await Promise.all([
+    const [empRes, wageRes, periodRes, runRes, advRes, savRes] = await Promise.all([
       supabase.from('employees').select('id, full_name, role, hourly_rate, night_allowance_rate, pay_frequency, id_number').eq('store_id', STORE_ID).eq('is_active', true).order('full_name'),
       supabase.from('employee_wages').select('*').eq('store_id', STORE_ID),
       supabase.from('payroll_periods').select('*').eq('store_id', STORE_ID).order('period_start', { ascending: false }),
       supabase.from('payroll_runs').select('*').eq('store_id', STORE_ID),
       supabase.from('employee_advances').select('*').eq('store_id', STORE_ID).order('advance_date', { ascending: false }),
+      supabase.from('employee_savings').select('*').eq('store_id', STORE_ID),
     ])
     setEmployees(empRes.data || [])
     setWages(wageRes.data || [])
     setPeriods(periodRes.data || [])
     setRuns(runRes.data || [])
     setAdvances(advRes.data || [])
+    setSavings(savRes.data || [])
     if (periodRes.data?.length) setSelectedPeriod(periodRes.data[0])
     setLoading(false)
   }
@@ -105,21 +113,23 @@ export default function WagesPage() {
         a.deduct_from_wages === true
       )
       const advTotal = empAdvances.reduce((sum, a) => sum + a.amount, 0)
-      const net = gross - uif_emp - paye - advTotal
+      const empSaving = savings.find(s => s.employee_id === emp.id)
+      const savingsAmt = empSaving?.deduction_per_payroll || 0
+      const net = gross - uif_emp - paye - advTotal - savingsAmt
 
       const existing = runs.find(r => r.payroll_period_id === selectedPeriod.id && r.employee_id === emp.id)
       if (existing) {
         await supabase.from('payroll_runs').update({
           hours_worked: hours, hourly_rate: wage.hourly_rate, gross_pay: gross,
           uif_employee: uif_emp, uif_employer: uif_emr, paye_tax: paye,
-          advances_deducted: advTotal, net_pay: net,
+          advances_deducted: advTotal, savings_deducted: savingsAmt, net_pay: net,
         }).eq('id', existing.id)
       } else {
         await supabase.from('payroll_runs').insert({
           payroll_period_id: selectedPeriod.id, employee_id: emp.id, store_id: STORE_ID,
           hours_worked: hours, hourly_rate: wage.hourly_rate, gross_pay: gross,
           uif_employee: uif_emp, uif_employer: uif_emr, paye_tax: paye,
-          advances_deducted: advTotal, net_pay: net, status: 'draft',
+          advances_deducted: advTotal, savings_deducted: savingsAmt, net_pay: net, status: 'draft',
         })
       }
 
@@ -156,6 +166,22 @@ export default function WagesPage() {
           repayment_status: 'paid',
           payroll_period_id: selectedPeriod.id,
         }).eq('id', adv.id)
+      }
+    }
+
+    // Step 3: Update savings balances and record ledger entries
+    const savingsRuns = runs.filter(r => r.payroll_period_id === selectedPeriod.id && (r.savings_deducted || 0) > 0)
+    for (const run of savingsRuns) {
+      const empSaving = savings.find(s => s.employee_id === run.employee_id)
+      if (empSaving) {
+        const newBalance = empSaving.balance + (run.savings_deducted || 0)
+        await supabase.from('employee_savings').update({ balance: newBalance, updated_at: new Date().toISOString() }).eq('id', empSaving.id)
+        await supabase.from('employee_savings_ledger').insert({
+          employee_id: run.employee_id, store_id: STORE_ID,
+          amount: run.savings_deducted, transaction_type: 'payroll_deduction',
+          payroll_period_id: selectedPeriod.id,
+          notes: `Payroll deduction for ${selectedPeriod.period_start} – ${selectedPeriod.period_end}`,
+        })
       }
     }
     await loadAll()
@@ -214,11 +240,36 @@ export default function WagesPage() {
     setSaving(false)
   }
 
+  async function upsertSavings(employeeId: string, deductionPerPayroll: number) {
+    const existing = savings.find(s => s.employee_id === employeeId)
+    if (existing) {
+      await supabase.from('employee_savings').update({ deduction_per_payroll: deductionPerPayroll, updated_at: new Date().toISOString() }).eq('id', existing.id)
+    } else {
+      await supabase.from('employee_savings').insert({ employee_id: employeeId, store_id: STORE_ID, deduction_per_payroll: deductionPerPayroll, balance: 0 })
+    }
+    setSavingsEditId(null); setSavingsInput('')
+    await loadAll()
+  }
+
+  async function withdrawSavings(employeeId: string, amount: number) {
+    const empSaving = savings.find(s => s.employee_id === employeeId)
+    if (!empSaving || amount <= 0 || amount > empSaving.balance) return
+    await supabase.from('employee_savings').update({ balance: empSaving.balance - amount, updated_at: new Date().toISOString() }).eq('id', empSaving.id)
+    await supabase.from('employee_savings_ledger').insert({
+      employee_id: employeeId, store_id: STORE_ID,
+      amount: -amount, transaction_type: 'withdrawal',
+      notes: 'Manual withdrawal',
+    })
+    setWithdrawId(null); setWithdrawInput('')
+    await loadAll()
+  }
+
   const periodRuns = runs.filter(r => r.payroll_period_id === selectedPeriod?.id)
   const totalGross = periodRuns.reduce((s, r) => s + r.gross_pay, 0)
   const totalNet = periodRuns.reduce((s, r) => s + r.net_pay, 0)
   const totalUIF = periodRuns.reduce((s, r) => s + r.uif_employee + r.uif_employer, 0)
   const totalAdvances = periodRuns.reduce((s, r) => s + (r.advances_deducted || 0), 0)
+  const totalSavings = periodRuns.reduce((s, r) => s + (r.savings_deducted || 0), 0)
   const unpaidAdvances = advances.filter(a => a.repayment_status === 'outstanding' && a.deduct_from_wages)
   const sc = (s: string) => s === 'paid' ? { bg: '#dcfce7', color: '#166534' } : s === 'approved' ? { bg: '#dbeafe', color: '#1e40af' } : { bg: '#f3f4f6', color: '#6b7280' }
 
@@ -248,9 +299,9 @@ export default function WagesPage() {
 
       <main style={{ maxWidth: '1200px', margin: '-60px auto 0', padding: '0 40px 60px', position: 'relative', zIndex: 1 }}>
         <div style={{ background: 'white', borderRadius: '16px', padding: '6px', display: 'inline-flex', gap: '4px', marginBottom: '24px', boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}>
-          {(['payroll', 'advances', 'settings'] as const).map(t => (
+          {(['payroll', 'advances', 'savings', 'settings'] as const).map(t => (
             <button key={t} onClick={() => setTab(t)} style={TAB_STYLE(tab === t)}>
-              {t === 'payroll' ? '📊 Payroll' : t === 'advances' ? '💵 Advances' : '⚙️ Settings'}
+              {t === 'payroll' ? '📊 Payroll' : t === 'advances' ? '💵 Advances' : t === 'savings' ? '🐷 Savings' : '⚙️ Settings'}
             </button>
           ))}
         </div>
@@ -308,7 +359,7 @@ export default function WagesPage() {
                     <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                       <thead>
                         <tr style={{ background: '#f9fafb' }}>
-                          {['Employee', 'Hours', 'Rate', 'Gross', 'UIF', 'PAYE', 'Advances', 'Net Pay', 'Status', ''].map(h => (
+                          {['Employee', 'Hours', 'Rate', 'Gross', 'UIF', 'PAYE', 'Advances', 'Savings', 'Net Pay', 'Status', ''].map(h => (
                             <th key={h} style={{ padding: '12px 16px', textAlign: 'left', fontSize: '11px', fontWeight: '700', color: '#9ca3af', textTransform: 'uppercase' as const, letterSpacing: '0.5px', whiteSpace: 'nowrap' as const }}>{h}</th>
                           ))}
                         </tr>
@@ -329,6 +380,7 @@ export default function WagesPage() {
                               <td style={{ padding: '14px 16px', fontSize: '14px', color: '#d97706' }}>{formatCurrency(run.uif_employee)}</td>
                               <td style={{ padding: '14px 16px', fontSize: '14px', color: '#dc2626' }}>{formatCurrency(run.paye_tax)}</td>
                               <td style={{ padding: '14px 16px', fontSize: '14px', color: '#7c3aed' }}>{formatCurrency(run.advances_deducted)}</td>
+                              <td style={{ padding: '14px 16px', fontSize: '14px', color: '#0891b2' }}>{formatCurrency(run.savings_deducted || 0)}</td>
                               <td style={{ padding: '14px 16px', fontSize: '15px', color: '#1a5c38', fontWeight: '800' }}>{formatCurrency(run.net_pay)}</td>
                               <td style={{ padding: '14px 16px' }}><span style={{ fontSize: '11px', fontWeight: '700', padding: '3px 10px', borderRadius: '100px', background: s.bg, color: s.color }}>{run.status}</span></td>
                               <td style={{ padding: '14px 16px' }}><button onClick={async () => {
@@ -446,9 +498,12 @@ export default function WagesPage() {
                             <td style={{ padding: '14px 20px', fontSize: '13px', color: '#6b7280' }}>{new Date(adv.advance_date).toLocaleDateString('en-ZA')}</td>
                             <td style={{ padding: '14px 20px', fontSize: '13px', color: '#374151' }}>{adv.reason || '—'}</td>
                             <td style={{ padding: '14px 20px' }}>
-                              <span style={{ fontSize: '11px', fontWeight: '700', padding: '3px 10px', borderRadius: '100px', background: adv.deduct_from_wages ? '#dcfce7' : '#f3f4f6', color: adv.deduct_from_wages ? '#166534' : '#6b7280' }}>
+                              <span style={{ fontSize: '11px', fontWeight: '700', padding: '3px 10px', borderRadius: '100px', background: adv.deduct_from_wages ? '#dcfce7' : '#fef2f2', color: adv.deduct_from_wages ? '#166534' : '#dc2626' }}>
                                 {adv.deduct_from_wages ? '✓ Yes' : 'No'}
                               </span>
+                              {!adv.deduct_from_wages && adv.repayment_status === 'outstanding' && (
+                                <button onClick={async () => { await supabase.from('employee_advances').update({ deduct_from_wages: true }).eq('id', adv.id); await loadAll() }} style={{ fontSize: '11px', fontWeight: '700', color: '#166534', background: '#dcfce7', border: '1px solid #bbf7d0', borderRadius: '6px', padding: '2px 8px', cursor: 'pointer', marginLeft: '6px' }}>Enable</button>
+                              )}
                             </td>
                             <td style={{ padding: '14px 20px' }}>
                               <span style={{ fontSize: '11px', fontWeight: '700', padding: '3px 10px', borderRadius: '100px', background: adv.repayment_status === 'paid' ? '#dcfce7' : '#fef3c7', color: adv.repayment_status === 'paid' ? '#166634' : '#92400e' }}>
@@ -469,6 +524,80 @@ export default function WagesPage() {
           )}
 
           {/* SLIPS TAB */}
+
+          {/* SAVINGS TAB */}
+          {tab === 'savings' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              <div>
+                <div style={{ fontSize: '18px', fontWeight: '800', color: '#111' }}>Employee Savings</div>
+                <div style={{ fontSize: '13px', color: '#9ca3af', marginTop: '2px' }}>Set how much to deduct per payroll for each employee&apos;s savings. Savings are held by you and can be withdrawn at any time.</div>
+              </div>
+              {totalSavings > 0 && (
+                <div style={{ background: 'white', border: '1.5px solid #a5f3fc', borderRadius: '16px', padding: '16px 24px', display: 'flex', alignItems: 'center', gap: '14px', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
+                  <div style={{ width: '38px', height: '38px', borderRadius: '10px', background: '#e0f2fe', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px', flexShrink: 0 }}>🐷</div>
+                  <div>
+                    <div style={{ fontWeight: '700', color: '#0e7490', fontSize: '14px' }}>Total savings held across all employees</div>
+                    <div style={{ fontSize: '12px', color: '#0891b2' }}>{formatCurrency(savings.reduce((s, e) => s + e.balance, 0))} in savings balances · {formatCurrency(totalSavings)} deducted this period</div>
+                  </div>
+                </div>
+              )}
+              <div style={{ background: 'white', borderRadius: '20px', border: '1.5px solid #eef2ee', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ background: '#f9fafb' }}>
+                      {['Employee', 'Deduction / Payroll', 'Current Balance', ''].map(h => (
+                        <th key={h} style={{ padding: '12px 20px', textAlign: 'left', fontSize: '11px', fontWeight: '700', color: '#9ca3af', textTransform: 'uppercase' as const, letterSpacing: '0.5px' }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {employees.map(emp => {
+                      const empSaving = savings.find(s => s.employee_id === emp.id)
+                      const isEditing = savingsEditId === emp.id
+                      return (
+                        <tr key={emp.id} style={{ borderTop: '1px solid #f3f4f6' }}>
+                          <td style={{ padding: '14px 20px' }}>
+                            <div style={{ fontWeight: '700', fontSize: '14px', color: '#111' }}>{emp.full_name}</div>
+                            <div style={{ fontSize: '12px', color: '#9ca3af' }}>{emp.role}</div>
+                          </td>
+                          <td style={{ padding: '14px 20px' }}>
+                            {isEditing ? (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <input type="number" step="0.01" min="0" value={savingsInput} onChange={e => setSavingsInput(e.target.value)} placeholder="0.00" style={{ ...INPUT_STYLE, width: 110 }} />
+                                <button onClick={() => upsertSavings(emp.id, parseFloat(savingsInput) || 0)} style={{ padding: '6px 14px', background: '#1a5c38', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '700' }}>Save</button>
+                                <button onClick={() => { setSavingsEditId(null); setSavingsInput('') }} style={{ padding: '6px 10px', background: '#f3f4f6', color: '#6b7280', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '14px' }}>✕</button>
+                              </div>
+                            ) : (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <span style={{ fontWeight: '700', color: empSaving?.deduction_per_payroll ? '#0891b2' : '#9ca3af' }}>
+                                  {empSaving?.deduction_per_payroll ? formatCurrency(empSaving.deduction_per_payroll) : 'Not set'}
+                                </span>
+                                <button onClick={() => { setSavingsEditId(emp.id); setSavingsInput(empSaving?.deduction_per_payroll?.toString() || '') }} style={{ fontSize: '11px', color: '#1d4ed8', background: '#eff6ff', border: 'none', borderRadius: '6px', padding: '3px 8px', cursor: 'pointer', fontWeight: '600' }}>
+                                  {empSaving?.deduction_per_payroll ? 'Edit' : 'Set up'}
+                                </button>
+                              </div>
+                            )}
+                          </td>
+                          <td style={{ padding: '14px 20px' }}>
+                            <span style={{ fontWeight: '800', fontSize: '15px', color: (empSaving?.balance || 0) > 0 ? '#1a5c38' : '#9ca3af' }}>
+                              {formatCurrency(empSaving?.balance || 0)}
+                            </span>
+                          </td>
+                          <td style={{ padding: '14px 20px' }}>
+                            {(empSaving?.balance || 0) > 0 && (
+                              <button onClick={() => { setWithdrawId(emp.id); setWithdrawInput('') }} style={{ fontSize: '12px', color: '#dc2626', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '8px', padding: '5px 12px', cursor: 'pointer', fontWeight: '700' }}>
+                                Withdraw
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
           {/* SETTINGS TAB */}
           {tab === 'settings' && (
@@ -608,6 +737,39 @@ export default function WagesPage() {
         </div>
       )}
 
+      {/* Withdrawal Modal */}
+      {withdrawId && (() => {
+        const emp = employees.find(e => e.id === withdrawId)
+        const empSaving = savings.find(s => s.employee_id === withdrawId)
+        return (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: '16px' }}>
+            <div style={{ background: 'white', borderRadius: '24px', width: '100%', maxWidth: '400px', boxShadow: '0 24px 60px rgba(0,0,0,0.2)' }}>
+              <div style={{ padding: '24px 28px 16px', borderBottom: '1px solid #f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <h2 style={{ fontSize: '18px', fontWeight: '800', color: '#111', margin: 0 }}>Withdraw Savings</h2>
+                <button onClick={() => { setWithdrawId(null); setWithdrawInput('') }} style={{ background: '#f3f4f6', border: 'none', borderRadius: '8px', width: '32px', height: '32px', cursor: 'pointer', fontSize: '16px' }}>✕</button>
+              </div>
+              <div style={{ padding: '20px 28px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                <div style={{ background: '#f0fdf4', borderRadius: '10px', padding: '12px 16px' }}>
+                  <div style={{ fontSize: '12px', color: '#166534', fontWeight: '700' }}>{emp?.full_name}</div>
+                  <div style={{ fontSize: '20px', fontWeight: '800', color: '#1a5c38' }}>{formatCurrency(empSaving?.balance || 0)} available</div>
+                </div>
+                <div>
+                  <label style={LABEL_STYLE}>Withdraw Amount (R)</label>
+                  <input type="number" step="0.01" min="0" max={empSaving?.balance || 0} value={withdrawInput} onChange={e => setWithdrawInput(e.target.value)} placeholder="Enter amount" style={INPUT_STYLE} />
+                </div>
+                {parseFloat(withdrawInput) > (empSaving?.balance || 0) && (
+                  <div style={{ fontSize: '12px', color: '#dc2626', fontWeight: '600' }}>⚠ Amount exceeds available balance</div>
+                )}
+              </div>
+              <div style={{ padding: '16px 28px 24px', display: 'flex', gap: '12px' }}>
+                <button onClick={() => { setWithdrawId(null); setWithdrawInput('') }} style={{ flex: 1, border: '1.5px solid #e5e7eb', color: '#374151', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: '700', cursor: 'pointer', background: 'white' }}>Cancel</button>
+                <button onClick={() => withdrawSavings(withdrawId, parseFloat(withdrawInput) || 0)} disabled={!withdrawInput || parseFloat(withdrawInput) <= 0 || parseFloat(withdrawInput) > (empSaving?.balance || 0)} style={{ flex: 1, background: '#dc2626', color: 'white', border: 'none', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: '800', cursor: 'pointer' }}>Withdraw</button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
       {/* Wage Slip Modal */}
       {showSlip && (() => {
         const emp = employees.find(e => e.id === showSlip.employee_id)
@@ -659,6 +821,7 @@ export default function WagesPage() {
                       { label: 'UIF (Employee 1%)', value: showSlip.uif_employee },
                       { label: 'PAYE Tax', value: showSlip.paye_tax },
                       { label: 'Advances Deducted', value: showSlip.advances_deducted },
+                      ...(showSlip.savings_deducted > 0 ? [{ label: 'Savings Deducted', value: showSlip.savings_deducted }] : []),
                     ].map((row, i) => (
                       <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 16px', borderBottom: '1px solid #e5e7eb' }}>
                         <span style={{ fontSize: '14px', color: '#374151' }}>{row.label}</span>
@@ -667,7 +830,7 @@ export default function WagesPage() {
                     ))}
                     <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 16px', background: '#fef2f2' }}>
                       <span style={{ fontSize: '14px', fontWeight: '700', color: '#991b1b' }}>Total Deductions</span>
-                      <span style={{ fontSize: '15px', fontWeight: '800', color: '#991b1b' }}>- {formatCurrency(showSlip.uif_employee + showSlip.paye_tax + showSlip.advances_deducted)}</span>
+                      <span style={{ fontSize: '15px', fontWeight: '800', color: '#991b1b' }}>- {formatCurrency(showSlip.uif_employee + showSlip.paye_tax + showSlip.advances_deducted + (showSlip.savings_deducted || 0))}</span>
                     </div>
                   </div>
                 </div>
@@ -711,7 +874,7 @@ export default function WagesPage() {
                     <div class="head"><div><h1>Mochachos Hartswater (Pty) Ltd</h1><div style="font-size:12px;color:#666">Payslip · ${monthLabel}</div></div><div class="badge">PAYSLIP</div></div>
                     <div class="grid"><div><span class="lbl">Employee: </span><b>${emp.full_name}</b></div><div><span class="lbl">ID Number: </span>${wage?.id_number || '—'}</div><div><span class="lbl">Role: </span>${emp.role}</div><div><span class="lbl">Pay Frequency: </span>Monthly</div></div>
                     <table><thead><tr><th>Description</th><th>Hours</th><th>Rate</th><th>Amount</th></tr></thead><tbody>${rows}</tbody></table>
-                    <div class="totals"><div class="row"><span>Gross Pay</span><b>R${showSlip.gross_pay.toFixed(2)}</b></div><div class="row" style="color:#c2410c"><span>UIF (1%)</span><span>-R${showSlip.uif_employee.toFixed(2)}</span></div>${showSlip.advances_deducted > 0 ? `<div class="row" style="color:#c2410c"><span>Advance Deduction</span><span>-R${showSlip.advances_deducted.toFixed(2)}</span></div>` : ''}<div class="row net"><span>Net Pay</span><span>R${showSlip.net_pay.toFixed(2)}</span></div></div>
+                    <div class="totals"><div class="row"><span>Gross Pay</span><b>R${showSlip.gross_pay.toFixed(2)}</b></div><div class="row" style="color:#c2410c"><span>UIF (1%)</span><span>-R${showSlip.uif_employee.toFixed(2)}</span></div>${showSlip.advances_deducted > 0 ? `<div class="row" style="color:#c2410c"><span>Advance Deduction</span><span>-R${showSlip.advances_deducted.toFixed(2)}</span></div>` : ''}${(showSlip.savings_deducted || 0) > 0 ? `<div class="row" style="color:#0891b2"><span>Savings Deduction</span><span>-R${(showSlip.savings_deducted || 0).toFixed(2)}</span></div>` : ''}<div class="row net"><span>Net Pay</span><span>R${showSlip.net_pay.toFixed(2)}</span></div></div>
                     <div class="sign"><div>Employee Signature</div><div>Employer Signature</div></div>
                     <div class="footer">Generated by CompliTrack · complitrack.co.za · ${new Date().toLocaleString('en-ZA')}</div>
                     <script>window.onload=()=>{window.print()}<\/script></body></html>`)

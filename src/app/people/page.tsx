@@ -202,7 +202,7 @@ export default function PeoplePage() {
   const [leaveForm, setLeaveForm] = useState({ leave_type: 'Annual', start_date: '', end_date: '', days_taken: '', status: 'approved', reason: '', notes: '', paid_hours_per_day: '' });
   const [warningForm, setWarningForm] = useState({ warning_type: 'Written Warning', reason: '', incident_date: '', issued_by: '', notes: '' });
   const [warningFile, setWarningFile] = useState<File | null>(null);
-  const [advanceForm, setAdvanceForm] = useState({ amount: '', reason: '', advance_date: new Date().toISOString().split('T')[0], repayment_status: 'outstanding', deduct_from_wages: false, notes: '' });
+  const [advanceForm, setAdvanceForm] = useState({ amount: '', reason: '', advance_date: new Date().toISOString().split('T')[0], repayment_status: 'outstanding', deduct_from_wages: true, notes: '' });
   const [attendanceForm, setAttendanceForm] = useState({ work_date: new Date().toISOString().split('T')[0], clock_in: '', clock_out: '', is_late: false, notes: '' });
   const [editingAttendance, setEditingAttendance] = useState<Attendance | null>(null);
   const [editAttendForm, setEditAttendForm] = useState({ clock_in: '', clock_out: '', is_late: false, notes: '' });
@@ -304,7 +304,7 @@ export default function PeoplePage() {
     setSaving(true); setSaveError(null);
     try {
       await supabase.from('employee_advances').insert({ employee_id: selectedEmployee.id, store_id: STORE_ID, amount: parseFloat(advanceForm.amount), reason: advanceForm.reason || null, advance_date: advanceForm.advance_date, repayment_status: advanceForm.repayment_status, deduct_from_wages: advanceForm.deduct_from_wages, notes: advanceForm.notes || null });
-      await loadEmployeeProfile(selectedEmployee); setShowAdvanceModal(false); setAdvanceForm({ amount: '', reason: '', advance_date: new Date().toISOString().split('T')[0], repayment_status: 'outstanding', deduct_from_wages: false, notes: '' });
+      await loadEmployeeProfile(selectedEmployee); setShowAdvanceModal(false); setAdvanceForm({ amount: '', reason: '', advance_date: new Date().toISOString().split('T')[0], repayment_status: 'outstanding', deduct_from_wages: true, notes: '' });
     } catch (e: unknown) { setSaveError(e instanceof Error ? e.message : 'Failed to save'); }
     setSaving(false);
   }
