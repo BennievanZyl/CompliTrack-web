@@ -33,6 +33,11 @@ export default function WagesPage() {
   const [savingsInput, setSavingsInput] = useState('')
   const [withdrawId, setWithdrawId] = useState<string | null>(null)
   const [withdrawInput, setWithdrawInput] = useState('')
+  const [withdrawDate, setWithdrawDate] = useState(new Date().toISOString().split('T')[0])
+  const [withdrawNotes, setWithdrawNotes] = useState('')
+  const [historyId, setHistoryId] = useState<string | null>(null)
+  const [ledger, setLedger] = useState<{ id: string; amount: number; transaction_type: string; notes?: string; created_at: string }[]>([])
+  const [ledgerLoading, setLedgerLoading] = useState(false)
   const [loading, setLoading] = useState(true)
   const [selectedPeriod, setSelectedPeriod] = useState<PayrollPeriod | null>(null)
   const [showNewPeriod, setShowNewPeriod] = useState(false)
@@ -251,17 +256,30 @@ export default function WagesPage() {
     await loadAll()
   }
 
-  async function withdrawSavings(employeeId: string, amount: number) {
+  async function withdrawSavings(employeeId: string, amount: number, date: string, notes: string) {
     const empSaving = savings.find(s => s.employee_id === employeeId)
     if (!empSaving || amount <= 0 || amount > empSaving.balance) return
     await supabase.from('employee_savings').update({ balance: empSaving.balance - amount, updated_at: new Date().toISOString() }).eq('id', empSaving.id)
     await supabase.from('employee_savings_ledger').insert({
       employee_id: employeeId, store_id: STORE_ID,
       amount: -amount, transaction_type: 'withdrawal',
-      notes: 'Manual withdrawal',
+      notes: notes || null,
+      created_at: date ? `${date}T00:00:00.000Z` : undefined,
     })
-    setWithdrawId(null); setWithdrawInput('')
+    setWithdrawId(null); setWithdrawInput(''); setWithdrawDate(new Date().toISOString().split('T')[0]); setWithdrawNotes('')
     await loadAll()
+  }
+
+  async function loadLedger(employeeId: string) {
+    setLedgerLoading(true)
+    const { data } = await supabase
+      .from('employee_savings_ledger')
+      .select('*')
+      .eq('employee_id', employeeId)
+      .eq('store_id', STORE_ID)
+      .order('created_at', { ascending: false })
+    setLedger(data || [])
+    setLedgerLoading(false)
   }
 
   const periodRuns = runs.filter(r => r.payroll_period_id === selectedPeriod?.id)
@@ -584,11 +602,16 @@ export default function WagesPage() {
                             </span>
                           </td>
                           <td style={{ padding: '14px 20px' }}>
-                            {(empSaving?.balance || 0) > 0 && (
-                              <button onClick={() => { setWithdrawId(emp.id); setWithdrawInput('') }} style={{ fontSize: '12px', color: '#dc2626', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '8px', padding: '5px 12px', cursor: 'pointer', fontWeight: '700' }}>
-                                Withdraw
+                            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' as const }}>
+                              {(empSaving?.balance || 0) > 0 && (
+                                <button onClick={() => { setWithdrawId(emp.id); setWithdrawInput(''); setWithdrawDate(new Date().toISOString().split('T')[0]); setWithdrawNotes('') }} style={{ fontSize: '12px', color: '#dc2626', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '8px', padding: '5px 12px', cursor: 'pointer', fontWeight: '700' }}>
+                                  Withdraw
+                                </button>
+                              )}
+                              <button onClick={() => { setHistoryId(emp.id); loadLedger(emp.id) }} style={{ fontSize: '12px', color: '#1d4ed8', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '8px', padding: '5px 12px', cursor: 'pointer', fontWeight: '700' }}>
+                                History
                               </button>
-                            )}
+                            </div>
                           </td>
                         </tr>
                       )
@@ -749,21 +772,87 @@ export default function WagesPage() {
                 <button onClick={() => { setWithdrawId(null); setWithdrawInput('') }} style={{ background: '#f3f4f6', border: 'none', borderRadius: '8px', width: '32px', height: '32px', cursor: 'pointer', fontSize: '16px' }}>✕</button>
               </div>
               <div style={{ padding: '20px 28px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-                <div style={{ background: '#f0fdf4', borderRadius: '10px', padding: '12px 16px' }}>
-                  <div style={{ fontSize: '12px', color: '#166534', fontWeight: '700' }}>{emp?.full_name}</div>
-                  <div style={{ fontSize: '20px', fontWeight: '800', color: '#1a5c38' }}>{formatCurrency(empSaving?.balance || 0)} available</div>
+                <div style={{ background: '#f0fdf4', borderRadius: '10px', padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <div style={{ fontSize: '12px', color: '#166534', fontWeight: '700' }}>{emp?.full_name}</div>
+                    <div style={{ fontSize: '11px', color: '#4ade80' }}>Current savings balance</div>
+                  </div>
+                  <div style={{ fontSize: '22px', fontWeight: '900', color: '#1a5c38' }}>{formatCurrency(empSaving?.balance || 0)}</div>
                 </div>
                 <div>
-                  <label style={LABEL_STYLE}>Withdraw Amount (R)</label>
-                  <input type="number" step="0.01" min="0" max={empSaving?.balance || 0} value={withdrawInput} onChange={e => setWithdrawInput(e.target.value)} placeholder="Enter amount" style={INPUT_STYLE} />
+                  <label style={LABEL_STYLE}>Withdrawal Amount (R) *</label>
+                  <input type="number" step="0.01" min="0" max={empSaving?.balance || 0} value={withdrawInput} onChange={e => setWithdrawInput(e.target.value)} placeholder="0.00" style={INPUT_STYLE} />
+                </div>
+                <div>
+                  <label style={LABEL_STYLE}>Date *</label>
+                  <input type="date" value={withdrawDate} onChange={e => setWithdrawDate(e.target.value)} style={INPUT_STYLE} />
+                </div>
+                <div>
+                  <label style={LABEL_STYLE}>Reason / Notes</label>
+                  <input type="text" value={withdrawNotes} onChange={e => setWithdrawNotes(e.target.value)} placeholder="e.g. Emergency, school fees, personal request…" style={INPUT_STYLE} />
                 </div>
                 {parseFloat(withdrawInput) > (empSaving?.balance || 0) && (
                   <div style={{ fontSize: '12px', color: '#dc2626', fontWeight: '600' }}>⚠ Amount exceeds available balance</div>
                 )}
               </div>
               <div style={{ padding: '16px 28px 24px', display: 'flex', gap: '12px' }}>
-                <button onClick={() => { setWithdrawId(null); setWithdrawInput('') }} style={{ flex: 1, border: '1.5px solid #e5e7eb', color: '#374151', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: '700', cursor: 'pointer', background: 'white' }}>Cancel</button>
-                <button onClick={() => withdrawSavings(withdrawId, parseFloat(withdrawInput) || 0)} disabled={!withdrawInput || parseFloat(withdrawInput) <= 0 || parseFloat(withdrawInput) > (empSaving?.balance || 0)} style={{ flex: 1, background: '#dc2626', color: 'white', border: 'none', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: '800', cursor: 'pointer' }}>Withdraw</button>
+                <button onClick={() => { setWithdrawId(null); setWithdrawInput(''); setWithdrawDate(new Date().toISOString().split('T')[0]); setWithdrawNotes('') }} style={{ flex: 1, border: '1.5px solid #e5e7eb', color: '#374151', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: '700', cursor: 'pointer', background: 'white' }}>Cancel</button>
+                <button onClick={() => withdrawSavings(withdrawId, parseFloat(withdrawInput) || 0, withdrawDate, withdrawNotes)} disabled={!withdrawInput || parseFloat(withdrawInput) <= 0 || parseFloat(withdrawInput) > (empSaving?.balance || 0)} style={{ flex: 1, background: '#dc2626', color: 'white', border: 'none', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: '800', cursor: 'pointer' }}>Record Withdrawal</button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* Savings History Modal */}
+      {historyId && (() => {
+        const emp = employees.find(e => e.id === historyId)
+        const empSaving = savings.find(s => s.employee_id === historyId)
+        return (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 60, padding: '16px' }}>
+            <div style={{ background: 'white', borderRadius: '20px', width: '100%', maxWidth: '560px', boxShadow: '0 24px 60px rgba(0,0,0,0.3)', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}>
+              <div style={{ background: 'linear-gradient(135deg, #1e3a5f, #2563eb)', padding: '24px 28px', borderRadius: '20px 20px 0 0', flexShrink: 0 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div>
+                    <div style={{ fontSize: '11px', fontWeight: '700', color: 'rgba(255,255,255,0.6)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '4px' }}>Savings Ledger</div>
+                    <div style={{ fontSize: '20px', fontWeight: '900', color: 'white' }}>{emp?.full_name}</div>
+                    <div style={{ fontSize: '13px', color: 'rgba(255,255,255,0.7)', marginTop: '4px' }}>Balance: <strong style={{ color: '#86efac' }}>{formatCurrency(empSaving?.balance || 0)}</strong></div>
+                  </div>
+                  <button onClick={() => setHistoryId(null)} style={{ background: 'rgba(255,255,255,0.2)', border: 'none', color: 'white', borderRadius: '50%', width: '32px', height: '32px', cursor: 'pointer', fontSize: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
+                </div>
+              </div>
+              <div style={{ overflowY: 'auto', flex: 1, padding: '20px 28px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                {ledgerLoading ? (
+                  <div style={{ textAlign: 'center', padding: '40px', color: '#9ca3af', fontSize: '14px' }}>Loading transactions…</div>
+                ) : ledger.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '40px', color: '#9ca3af', fontSize: '14px' }}>No transactions recorded yet.</div>
+                ) : (
+                  <>
+                    {ledger.map((entry) => {
+                      const isDeduction = entry.transaction_type === 'payroll_deduction'
+                      const isWithdrawal = entry.transaction_type === 'withdrawal'
+                      const isAdjust = entry.transaction_type === 'manual_adjustment'
+                      const positive = entry.amount > 0
+                      return (
+                        <div key={entry.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '14px 16px', borderRadius: '12px', background: isWithdrawal ? '#fef2f2' : isDeduction ? '#f0fdf4' : '#f5f3ff', border: `1px solid ${isWithdrawal ? '#fecaca' : isDeduction ? '#bbf7d0' : '#ddd6fe'}` }}>
+                          <div>
+                            <div style={{ fontSize: '13px', fontWeight: '700', color: isWithdrawal ? '#991b1b' : isDeduction ? '#166534' : '#5b21b6' }}>
+                              {isDeduction ? '⬇ Payroll Deduction' : isWithdrawal ? '⬆ Withdrawal' : '⚙ Adjustment'}
+                            </div>
+                            <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '2px' }}>{new Date(entry.created_at).toLocaleDateString('en-ZA', { day: '2-digit', month: 'long', year: 'numeric' })}</div>
+                            {entry.notes && <div style={{ fontSize: '11px', color: '#374151', marginTop: '4px', fontStyle: 'italic' }}>{entry.notes}</div>}
+                          </div>
+                          <div style={{ fontSize: '16px', fontWeight: '900', color: positive ? '#166534' : '#dc2626', whiteSpace: 'nowrap', marginLeft: '12px' }}>
+                            {positive ? '+' : ''}{formatCurrency(Math.abs(entry.amount))}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </>
+                )}
+              </div>
+              <div style={{ padding: '16px 28px 24px', borderTop: '1px solid #e5e7eb', flexShrink: 0 }}>
+                <button onClick={() => setHistoryId(null)} style={{ width: '100%', border: '1.5px solid #e5e7eb', color: '#374151', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: '700', cursor: 'pointer', background: 'white' }}>Close</button>
               </div>
             </div>
           </div>
@@ -841,6 +930,19 @@ export default function WagesPage() {
                   <span style={{ fontSize: '16px', fontWeight: '800', color: 'white' }}>NET PAY</span>
                   <span style={{ fontSize: '28px', fontWeight: '900', color: 'white' }}>{formatCurrency(showSlip.net_pay)}</span>
                 </div>
+                {(() => {
+                  const empSaving = savings.find(s => s.employee_id === showSlip.employee_id)
+                  if (!empSaving || empSaving.balance <= 0) return null
+                  return (
+                    <div style={{ background: '#f0fdf4', border: '2px solid #bbf7d0', borderRadius: '12px', padding: '14px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div>
+                        <div style={{ fontSize: '12px', fontWeight: '700', color: '#166534', textTransform: 'uppercase' as const, letterSpacing: '0.5px' }}>🐷 Savings Balance Held by Employer</div>
+                        <div style={{ fontSize: '11px', color: '#4ade80', marginTop: '2px' }}>Accumulated savings — not deducted this period</div>
+                      </div>
+                      <div style={{ fontSize: '18px', fontWeight: '900', color: '#166534' }}>{formatCurrency(empSaving.balance)}</div>
+                    </div>
+                  )
+                })()}
                 {(wage?.bank_name || wage?.bank_account) && (
                   <div style={{ background: '#f9fafb', borderRadius: '12px', padding: '14px 16px' }}>
                     <div style={{ fontSize: '11px', fontWeight: '700', color: '#9ca3af', textTransform: 'uppercase' as const, letterSpacing: '0.5px', marginBottom: '8px' }}>Banking Details</div>
@@ -874,7 +976,7 @@ export default function WagesPage() {
                     <div class="head"><div><h1>Mochachos Hartswater (Pty) Ltd</h1><div style="font-size:12px;color:#666">Payslip · ${monthLabel}</div></div><div class="badge">PAYSLIP</div></div>
                     <div class="grid"><div><span class="lbl">Employee: </span><b>${emp.full_name}</b></div><div><span class="lbl">ID Number: </span>${wage?.id_number || '—'}</div><div><span class="lbl">Role: </span>${emp.role}</div><div><span class="lbl">Pay Frequency: </span>Monthly</div></div>
                     <table><thead><tr><th>Description</th><th>Hours</th><th>Rate</th><th>Amount</th></tr></thead><tbody>${rows}</tbody></table>
-                    <div class="totals"><div class="row"><span>Gross Pay</span><b>R${showSlip.gross_pay.toFixed(2)}</b></div><div class="row" style="color:#c2410c"><span>UIF (1%)</span><span>-R${showSlip.uif_employee.toFixed(2)}</span></div>${showSlip.advances_deducted > 0 ? `<div class="row" style="color:#c2410c"><span>Advance Deduction</span><span>-R${showSlip.advances_deducted.toFixed(2)}</span></div>` : ''}${(showSlip.savings_deducted || 0) > 0 ? `<div class="row" style="color:#0891b2"><span>Savings Deduction</span><span>-R${(showSlip.savings_deducted || 0).toFixed(2)}</span></div>` : ''}<div class="row net"><span>Net Pay</span><span>R${showSlip.net_pay.toFixed(2)}</span></div></div>
+                    <div class="totals"><div class="row"><span>Gross Pay</span><b>R${showSlip.gross_pay.toFixed(2)}</b></div><div class="row" style="color:#c2410c"><span>UIF (1%)</span><span>-R${showSlip.uif_employee.toFixed(2)}</span></div>${showSlip.advances_deducted > 0 ? `<div class="row" style="color:#c2410c"><span>Advance Deduction</span><span>-R${showSlip.advances_deducted.toFixed(2)}</span></div>` : ''}${(showSlip.savings_deducted || 0) > 0 ? `<div class="row" style="color:#0891b2"><span>Savings Deduction</span><span>-R${(showSlip.savings_deducted || 0).toFixed(2)}</span></div>` : ''}<div class="row net"><span>Net Pay</span><span>R${showSlip.net_pay.toFixed(2)}</span></div>${(() => { const es = savings.find(s => s.employee_id === showSlip.employee_id); return es && es.balance > 0 ? `<div class="row" style="background:#f0fdf4;color:#166534;border-top:2px solid #bbf7d0;margin-top:8px;border-radius:8px;padding:10px 12px"><span>🐷 Savings Balance Held by Employer</span><b>R${es.balance.toFixed(2)}</b></div>` : '' })()} </div>
                     <div class="sign"><div>Employee Signature</div><div>Employer Signature</div></div>
                     <div class="footer">Generated by CompliTrack · complitrack.co.za · ${new Date().toLocaleString('en-ZA')}</div>
                     <script>window.onload=()=>{window.print()}<\/script></body></html>`)
