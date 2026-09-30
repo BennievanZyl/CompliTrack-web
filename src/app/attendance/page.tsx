@@ -82,6 +82,8 @@ export default function AttendancePage() {
   const [editingRate, setEditingRate] = useState<string | null>(null);
   const [rateInput, setRateInput] = useState('');
   const [nightRateInput, setNightRateInput] = useState('');
+  const [excludedFromPayroll, setExcludedFromPayroll] = useState<Set<string>>(new Set());
+  const togglePayrollExclusion = (empId: string) => setExcludedFromPayroll(prev => { const next = new Set(prev); next.has(empId) ? next.delete(empId) : next.add(empId); return next; });
   const [payFreqInput, setPayFreqInput] = useState('monthly');
   const [showLeaveModal, setShowLeaveModal] = useState(false);
   const [leaveForm, setLeaveForm] = useState({ leave_type: 'Sick', start_date: '', end_date: '', days_taken: '1', status: 'approved', reason: '', paid_hours_per_day: '' });
@@ -595,7 +597,7 @@ export default function AttendancePage() {
       [],
       ['Employee', 'ID Number', 'Role', 'Pay Frequency', 'Rate (R/hr)', 'Normal Hrs', 'Normal Pay', 'OT Hrs', 'OT Pay', 'Sunday/Holiday Hrs', 'Sunday/Holiday Pay', 'Night Hrs', 'Night Pay', 'Leave Hrs', 'Leave Pay', 'Gross Pay', 'UIF Employee', 'UIF Employer', 'Advances', 'Net Pay'],
     ];
-    for (const emp of employees) {
+    for (const emp of employees.filter(e => !excludedFromPayroll.has(e.id))) {
       const s = employeeMonthSummary(emp.id);
       rows.push([
         emp.full_name, emp.id_number || '', emp.role, emp.pay_frequency || 'monthly', (emp.hourly_rate || 0).toFixed(2),
@@ -615,13 +617,14 @@ export default function AttendancePage() {
 
   function printAllPayroll() {
     const monthLabel = new Date(payrollMonth + '-01').toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' });
-    const rowsHtml = employees.map(emp => {
+    const included = employees.filter(emp => !excludedFromPayroll.has(emp.id));
+    const rowsHtml = included.map(emp => {
       const s = employeeMonthSummary(emp.id);
       return `<tr><td>${emp.full_name}</td><td>${emp.id_number || '—'}</td><td>${emp.role}</td><td style="text-align:right">${formatHM(s.totalHours)}</td><td style="text-align:right">R${s.totalPay.toFixed(2)}</td><td style="text-align:right">R${s.uifEmployee.toFixed(2)}</td><td style="text-align:right">R${s.uifEmployer.toFixed(2)}</td><td style="text-align:right">${s.outstandingAdvances > 0 ? '-R' + s.outstandingAdvances.toFixed(2) : '—'}</td><td style="text-align:right"><b>R${s.netPay.toFixed(2)}</b></td></tr>`;
     }).join('');
-    const grandTotal = employees.reduce((sum, emp) => sum + employeeMonthSummary(emp.id).netPay, 0);
-    const grandUifEmployee = employees.reduce((sum, emp) => sum + employeeMonthSummary(emp.id).uifEmployee, 0);
-    const grandUifEmployer = employees.reduce((sum, emp) => sum + employeeMonthSummary(emp.id).uifEmployer, 0);
+    const grandTotal = included.reduce((sum, emp) => sum + employeeMonthSummary(emp.id).netPay, 0);
+    const grandUifEmployee = included.reduce((sum, emp) => sum + employeeMonthSummary(emp.id).uifEmployee, 0);
+    const grandUifEmployer = included.reduce((sum, emp) => sum + employeeMonthSummary(emp.id).uifEmployer, 0);
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Payroll — ${monthLabel}</title>
       <style>
         body{font-family:Arial,sans-serif;color:#111;margin:0}
@@ -1185,8 +1188,13 @@ export default function AttendancePage() {
                     <input type="month" value={payrollMonth} onChange={e => setPayrollMonth(e.target.value)} style={{ ...inp, width: 160 }} />
                   </div>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                    <button onClick={exportAllPayrollCSV} style={{ padding: '8px 14px', background: '#f0f4f0', border: 'none', borderRadius: 10, fontWeight: 600, cursor: 'pointer', fontSize: 13 }}>⬇ Export All (CSV)</button>
-                    <button onClick={printAllPayroll} style={{ padding: '8px 14px', background: '#f0f4f0', border: 'none', borderRadius: 10, fontWeight: 600, cursor: 'pointer', fontSize: 13 }}>🖨 Print All</button>
+                    {excludedFromPayroll.size > 0 && (
+                      <span style={{ fontSize: 12, fontWeight: 700, color: '#92400e', background: '#fef3c7', border: '1px solid #fde68a', borderRadius: 8, padding: '4px 10px' }}>
+                        {excludedFromPayroll.size} excluded · {employees.length - excludedFromPayroll.size} included
+                      </span>
+                    )}
+                    <button onClick={exportAllPayrollCSV} style={{ padding: '8px 14px', background: '#f0f4f0', border: 'none', borderRadius: 10, fontWeight: 600, cursor: 'pointer', fontSize: 13 }}>⬇ Export (CSV)</button>
+                    <button onClick={printAllPayroll} style={{ padding: '8px 14px', background: '#f0f4f0', border: 'none', borderRadius: 10, fontWeight: 600, cursor: 'pointer', fontSize: 13 }}>🖨 Print Summary</button>
                     <button onClick={() => setShowSettingsModal(true)} style={{ padding: '8px 16px', background: '#f0f4f0', border: 'none', borderRadius: 10, fontWeight: 600, cursor: 'pointer', fontSize: 13 }}>⚙️ Pay Rules</button>
                   </div>
                 </div>
@@ -1198,7 +1206,7 @@ export default function AttendancePage() {
                       const summary = employeeMonthSummary(emp.id);
                       const colors = ROLE_COLORS[emp.role] || ROLE_COLORS['Other'];
                       return (
-                        <div key={emp.id} style={{ background: '#fff', borderRadius: 18, padding: 20, border: '1px solid #eef2ee', boxShadow: '0 2px 8px rgba(0,0,0,0.04)', cursor: 'pointer' }} onClick={() => setSelectedPayrollEmployee(emp)}>
+                        <div key={emp.id} style={{ background: excludedFromPayroll.has(emp.id) ? '#fafafa' : '#fff', borderRadius: 18, padding: 20, border: excludedFromPayroll.has(emp.id) ? '1px solid #e5e7eb' : '1px solid #eef2ee', boxShadow: '0 2px 8px rgba(0,0,0,0.04)', cursor: 'pointer', opacity: excludedFromPayroll.has(emp.id) ? 0.55 : 1 }} onClick={() => setSelectedPayrollEmployee(emp)}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
                             <div style={{ width: 48, height: 48, borderRadius: '50%', background: colors.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, color: colors.color, fontSize: 16, flexShrink: 0 }}>{initials(emp.full_name)}</div>
                             <div style={{ flex: 1, minWidth: 0 }}>
@@ -1206,6 +1214,10 @@ export default function AttendancePage() {
                               <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: colors.bg, color: colors.color }}>{emp.role}</span>
                             </div>
                             {isEmployeePaid(emp.id) && <span style={{ fontSize: 10, fontWeight: 700, color: '#16a34a', background: '#dcfce7', padding: '3px 8px', borderRadius: 20 }}>✓ PAID</span>}
+                            <label onClick={e => e.stopPropagation()} style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', fontSize: 11, fontWeight: 700, color: excludedFromPayroll.has(emp.id) ? '#dc2626' : '#6b7280', flexShrink: 0 }} title={excludedFromPayroll.has(emp.id) ? 'Click to include in payroll' : 'Click to exclude from payroll'}>
+                              <input type="checkbox" checked={!excludedFromPayroll.has(emp.id)} onChange={() => togglePayrollExclusion(emp.id)} style={{ width: 15, height: 15, cursor: 'pointer', accentColor: '#1a5c38' }} />
+                              {excludedFromPayroll.has(emp.id) ? 'Excluded' : 'Include'}
+                            </label>
                           </div>
                           <div style={{ marginBottom: 10 }}>
                             {editingRate === emp.id ? (
