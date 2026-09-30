@@ -92,21 +92,46 @@ export default function WagesPage() {
   async function calculatePayroll() {
     if (!selectedPeriod) return
     setCalculating(true)
+
+    // Fetch public holidays for the period once (shared across all employees)
+    const { data: holidays } = await supabase
+      .from('public_holidays')
+      .select('holiday_date')
+      .gte('holiday_date', selectedPeriod.period_start)
+      .lte('holiday_date', selectedPeriod.period_end)
+    const holidaySet = new Set((holidays || []).map((h: any) => h.holiday_date))
+
     for (const emp of employees) {
       const wage = wages.find(w => w.employee_id === emp.id)
       if (!wage) continue
 
       const { data: att } = await supabase
         .from('attendance')
-        .select('hours_worked')
+        .select('work_date, hours_worked, clock_in, clock_out')
         .eq('store_id', STORE_ID)
         .eq('employee_id', emp.id)
         .gte('work_date', selectedPeriod.period_start)
         .lte('work_date', selectedPeriod.period_end)
         .not('clock_out', 'is', null)
 
-      const hours = att?.reduce((sum, r) => sum + (r.hours_worked || 0), 0) || 0
-      const gross = hours * wage.hourly_rate
+      // Break hours into normal / Sunday / public holiday / night — same logic as the payslip breakdown
+      let normalH = 0, sunH = 0, holH = 0, nightH = 0
+      for (const r of (att || [])) {
+        const dow = new Date(r.work_date + 'T00:00:00').getDay()
+        const h = r.hours_worked || 0
+        if (holidaySet.has(r.work_date)) holH += h
+        else if (dow === 0) sunH += h
+        else normalH += h
+        // Night allowance: clock-in at 18:00+ or before 06:00
+        if (r.clock_in && r.clock_out) {
+          const inH = parseInt(r.clock_in.split('T')[1]?.split(':')[0] || r.clock_in.split(':')[0] || '0')
+          if (inH >= 18 || inH < 6) nightH += Math.min(h, 2)
+        }
+      }
+
+      const rate = wage.hourly_rate
+      const hours = normalH + sunH + holH
+      const gross = (normalH * rate) + (sunH * rate * 1.5) + (holH * rate * 2) + (nightH * 0.5)
       const uif_emp = gross * wage.uif_employee
       const uif_emr = gross * wage.uif_employer
       const paye = gross * wage.tax_rate
