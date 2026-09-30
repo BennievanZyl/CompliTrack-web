@@ -122,10 +122,26 @@ export default function WagesPage() {
         if (holidaySet.has(r.work_date)) holH += h
         else if (dow === 0) sunH += h
         else normalH += h
-        // Night allowance: clock-in at 18:00+ or before 06:00
+        // Night allowance: actual overlap with 18:00–06:00 SAST window (capped 2h/shift)
         if (r.clock_in && r.clock_out) {
-          const inH = parseInt(r.clock_in.split('T')[1]?.split(':')[0] || r.clock_in.split(':')[0] || '0')
-          if (inH >= 18 || inH < 6) nightH += Math.min(h, 2)
+          const toTs = (s: string) => {
+            // Handle "2026-09-30 13:00:00+00" (space) or ISO with T; ensure +HH → +HH:00
+            return new Date(s.replace(' ', 'T').replace(/([+-]\d{2})$/, '$1:00'))
+          }
+          const inTs = toTs(r.clock_in)
+          const outTs = toTs(r.clock_out)
+          if (!isNaN(inTs.getTime()) && !isNaN(outTs.getTime()) && outTs > inTs) {
+            const SAST_MS = 2 * 3600 * 1000 // UTC+2
+            const STEP_MS = 5 * 60 * 1000   // 5-min steps
+            let overlapH = 0
+            for (let t = inTs.getTime(); t < outTs.getTime(); t += STEP_MS) {
+              const stepEnd = Math.min(t + STEP_MS, outTs.getTime())
+              const midSAST = new Date((t + stepEnd) / 2 + SAST_MS)
+              const hh = midSAST.getUTCHours()
+              if (hh >= 18 || hh < 6) overlapH += (stepEnd - t) / 3600000
+            }
+            nightH += Math.min(overlapH, 2)
+          }
         }
       }
 
