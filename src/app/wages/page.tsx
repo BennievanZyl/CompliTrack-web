@@ -8,7 +8,7 @@ import { useRouter } from 'next/navigation'
 type Employee = { id: string; full_name: string; role: string }
 type EmployeeWage = { id: string; employee_id: string; hourly_rate: number; uif_employee: number; uif_employer: number; tax_rate: number; pay_frequency: string; bank_name?: string; bank_account?: string; bank_branch?: string; id_number?: string }
 type PayrollPeriod = { id: string; period_start: string; period_end: string; pay_frequency: string; status: string }
-type PayrollRun = { id: string; payroll_period_id: string; employee_id: string; hours_worked: number; hourly_rate: number; gross_pay: number; uif_employee: number; uif_employer: number; paye_tax: number; advances_deducted: number; savings_deducted: number; net_pay: number; status: string }
+type PayrollRun = { id: string; payroll_period_id: string; employee_id: string; hours_worked: number; hourly_rate: number; gross_pay: number; uif_employee: number; uif_employer: number; paye_tax: number; advances_deducted: number; savings_deducted: number; net_pay: number; status: string; normal_hours?: number; sunday_hours?: number; holiday_hours?: number; night_hours?: number }
 type EmployeeAdvance = { id: string; employee_id: string; amount: number; reason?: string; advance_date: string; repayment_status: string; deduct_from_wages: boolean }
 type EmployeeSavings = { id: string; employee_id: string; store_id: string; deduction_per_payroll: number; balance: number }
 
@@ -147,12 +147,14 @@ export default function WagesPage() {
       const savingsAmt = empSaving?.deduction_per_payroll || 0
       const net = gross - uif_emp - paye - advTotal - savingsAmt
 
+      const breakdown = { normal_hours: normalH, sunday_hours: sunH, holiday_hours: holH, night_hours: nightH }
       const existing = runs.find(r => r.payroll_period_id === selectedPeriod.id && r.employee_id === emp.id)
       if (existing) {
         await supabase.from('payroll_runs').update({
           hours_worked: hours, hourly_rate: wage.hourly_rate, gross_pay: gross,
           uif_employee: uif_emp, uif_employer: uif_emr, paye_tax: paye,
           advances_deducted: advTotal, savings_deducted: savingsAmt, net_pay: net,
+          ...breakdown,
         }).eq('id', existing.id)
       } else {
         await supabase.from('payroll_runs').insert({
@@ -160,6 +162,7 @@ export default function WagesPage() {
           hours_worked: hours, hourly_rate: wage.hourly_rate, gross_pay: gross,
           uif_employee: uif_emp, uif_employer: uif_emr, paye_tax: paye,
           advances_deducted: advTotal, savings_deducted: savingsAmt, net_pay: net, status: 'draft',
+          ...breakdown,
         })
       }
 
@@ -417,7 +420,17 @@ export default function WagesPage() {
                                 <div style={{ fontWeight: '700', fontSize: '14px', color: '#111' }}>{emp?.full_name || '—'}</div>
                                 <div style={{ fontSize: '12px', color: '#9ca3af' }}>{emp?.role}</div>
                               </td>
-                              <td style={{ padding: '14px 16px', fontSize: '14px', color: '#374151', fontWeight: '600' }}>{formatHours(run.hours_worked)}</td>
+                              <td style={{ padding: '10px 16px' }}>
+                                <div style={{ fontSize: '14px', fontWeight: '700', color: '#111' }}>{formatHours(run.hours_worked)}</div>
+                                {((run.sunday_hours || 0) > 0 || (run.holiday_hours || 0) > 0 || (run.night_hours || 0) > 0) && (
+                                  <div style={{ marginTop: '4px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                    {(run.normal_hours || 0) > 0 && <div style={{ fontSize: '11px', color: '#6b7280' }}>📋 {formatHours(run.normal_hours || 0)} normal</div>}
+                                    {(run.sunday_hours || 0) > 0 && <div style={{ fontSize: '11px', color: '#7c3aed', fontWeight: '600' }}>☀ {formatHours(run.sunday_hours || 0)} Sun 1.5×</div>}
+                                    {(run.holiday_hours || 0) > 0 && <div style={{ fontSize: '11px', color: '#dc2626', fontWeight: '600' }}>🎉 {formatHours(run.holiday_hours || 0)} holiday 2×</div>}
+                                    {(run.night_hours || 0) > 0 && <div style={{ fontSize: '11px', color: '#1d4ed8', fontWeight: '600' }}>🌙 {formatHours(run.night_hours || 0)} night +R0.50</div>}
+                                  </div>
+                                )}
+                              </td>
                               <td style={{ padding: '14px 16px', fontSize: '14px', color: '#374151' }}>R {run.hourly_rate.toFixed(2)}/h</td>
                               <td style={{ padding: '14px 16px', fontSize: '14px', color: '#111', fontWeight: '700' }}>{formatCurrency(run.gross_pay)}</td>
                               <td style={{ padding: '14px 16px', fontSize: '14px', color: '#d97706' }}>{formatCurrency(run.uif_employee)}</td>
