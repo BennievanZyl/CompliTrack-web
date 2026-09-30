@@ -196,7 +196,9 @@ export default function FinancesPage() {
     try {
     const monthStart = `${month}-01`
     const [mYear, mMonth] = month.split('-').map(Number)
-    const monthEnd = new Date(mYear, mMonth, 0).toISOString().split('T')[0]
+    // Use local date components to avoid UTC offset stripping the last day (SAST is UTC+2)
+    const _lastDay = new Date(mYear, mMonth, 0)
+    const monthEnd = `${_lastDay.getFullYear()}-${String(_lastDay.getMonth() + 1).padStart(2, '0')}-${String(_lastDay.getDate()).padStart(2, '0')}`
     const [cuRes, invRes, catRes, suppRes, qRes, stockRes, wageRes] = await Promise.all([
       supabase.from('cash_ups')
         .select('id,cash_up_date,cash_up_total,total_cash,eft_total,payouts,variance,customer_count,average_spend,status,notes')
