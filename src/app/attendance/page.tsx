@@ -15,6 +15,7 @@ type Shift = { id: string; shift_name: string; day_type: string; start_time: str
 type Leave = { id: string; employee_id: string; leave_type: string; start_date: string; end_date: string; days_taken: number; status: string; reason: string | null; paid_hours_per_day: number | null };
 type Advance = { id: string; employee_id: string; amount: number; advance_date: string; repayment_status: string; deduct_from_wages: boolean; reason: string | null };
 type Holiday = { id: string; holiday_date: string; name: string };
+type EmployeeSavings = { id: string; employee_id: string; store_id: string; deduction_per_payroll: number; balance: number };
 type WagePayment = { id: string; employee_id: string; period: string; paid_date: string; net_pay: number; payment_method: string | null };
 type PayrollSettings = { sunday_multiplier: number; holiday_multiplier: number; overtime_multiplier: number; weekly_ot_threshold: number; monthly_ot_threshold: number; night_allowance_start_hour: number; default_night_rate: number; uif_employee_rate: number; uif_employer_rate: number; uif_ceiling: number; uif_reference_number: string };
 
@@ -71,6 +72,7 @@ export default function AttendancePage() {
   const [monthAttendance, setMonthAttendance] = useState<AttendanceRecord[]>([]);
   const [monthLeave, setMonthLeave] = useState<Leave[]>([]);
   const [advances, setAdvances] = useState<Advance[]>([]);
+  const [savings, setSavings] = useState<EmployeeSavings[]>([]);
   const [holidays, setHolidays] = useState<Holiday[]>([]);
   const [wagePayments, setWagePayments] = useState<WagePayment[]>([]);
   const [showPayModal, setShowPayModal] = useState(false);
@@ -100,7 +102,7 @@ export default function AttendancePage() {
       .eq('store_id', STORE_ID).eq('is_active', true).order('full_name');
     if (empRes.data) setEmployees(empRes.data);
 
-    const [attRes, leaveRes, advRes, holRes, setRes, payRes] = await Promise.all([
+    const [attRes, leaveRes, advRes, holRes, setRes, payRes, savRes] = await Promise.all([
       supabase.from('attendance').select('*').eq('store_id', STORE_ID)
         .gte('work_date', payrollMonth + '-01').lte('work_date', monthEnd),
       supabase.from('employee_leave').select('*').eq('store_id', STORE_ID)
@@ -109,10 +111,12 @@ export default function AttendancePage() {
       supabase.from('public_holidays').select('*').eq('store_id', STORE_ID),
       supabase.from('payroll_settings').select('*').eq('store_id', STORE_ID).maybeSingle(),
       supabase.from('wage_payments').select('*').eq('store_id', STORE_ID).eq('period', payrollMonth),
+      supabase.from('employee_savings').select('*').eq('store_id', STORE_ID),
     ]);
     setMonthAttendance(attRes.data || []);
     setMonthLeave(leaveRes.data || []);
     setAdvances(advRes.data || []);
+    setSavings(savRes.data || []);
     setHolidays(holRes.data || []);
     setWagePayments(payRes.data || []);
     if (setRes.data) {
@@ -261,8 +265,10 @@ export default function AttendancePage() {
     const uifEmployee = uifBase * (payrollSettings.uif_employee_rate / 100);
     const uifEmployer = uifBase * (payrollSettings.uif_employer_rate / 100);
     const outstandingAdvances = advances.filter(a => a.employee_id === employeeId && a.deduct_from_wages && a.repayment_status === 'outstanding').reduce((s, a) => s + Number(a.amount), 0);
+    const empSaving = savings.find(s => s.employee_id === employeeId);
+    const savingsDeduction = empSaving?.deduction_per_payroll || 0;
     return {
-      totalHours, totalPay, netPay: totalPay - outstandingAdvances - uifEmployee, outstandingAdvances,
+      totalHours, totalPay, netPay: totalPay - outstandingAdvances - uifEmployee - savingsDeduction, outstandingAdvances, savingsDeduction, empSaving,
       normalHours, normalPay, otHours, otPay,
       sundayHours, sundayPay, holidayHours, holidayPay,
       sundayHolidayHours, sundayHolidayPay,
@@ -553,8 +559,10 @@ export default function AttendancePage() {
         <div class="row"><span>Gross Pay</span><b>R${summary.totalPay.toFixed(2)}</b></div>
         <div class="row" style="color:#c2410c"><span>Less: UIF (${payrollSettings.uif_employee_rate}%)</span><b>-R${summary.uifEmployee.toFixed(2)}</b></div>
         ${summary.outstandingAdvances > 0 ? `<div class="row" style="color:#c2410c"><span>Less: Advance Deduction</span><b>-R${summary.outstandingAdvances.toFixed(2)}</b></div>` : ''}
+        ${summary.savingsDeduction > 0 ? `<div class="row" style="color:#0891b2"><span>Less: Savings Deduction</span><b>-R${summary.savingsDeduction.toFixed(2)}</b></div>` : ''}
         <div class="row net"><span>Net Pay</span><span>R${summary.netPay.toFixed(2)}</span></div>
       </div>
+      ${summary.empSaving ? `<div style="background:#f0fdf4;color:#166534;border:1.5px solid #bbf7d0;margin-top:10px;border-radius:8px;padding:10px 12px;display:flex;justify-content:space-between;align-items:center"><div><b style="font-size:11px">🐷 Savings Balance Held by Employer</b><div style="font-size:9px;color:#6b7280;margin-top:2px">R${summary.empSaving.deduction_per_payroll.toFixed(2)}/payroll deduction · cumulative savings</div></div><b style="font-size:13px">R${summary.empSaving.balance.toFixed(2)}</b></div>` : ''}
       <div style="font-size:11px;color:#999;margin-top:6px">Employer UIF Contribution (${payrollSettings.uif_employer_rate}%): R${summary.uifEmployer.toFixed(2)} — not deducted from employee, shown for payroll records.</div>
       <div class="sign"><div>Employer Signature</div><div>Employee Signature</div></div>
       ${lateCount > 0
