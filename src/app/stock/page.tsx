@@ -384,45 +384,50 @@ export default function StockPage() {
           const item = items.find(i => i.id === line.stock_item_id)
           if (!item) return ''
           const filled = line.actual_qty != null && line.actual_qty !== 0
-          return `<tr>
-            <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;font-size:13px">${item.description || item.name}</td>
-            <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;font-size:12px;color:#6b7280;text-align:center">${item.unit || ''}</td>
-            <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;font-size:13px;text-align:center">${line.expected_qty ?? 0}</td>
-            <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;text-align:center">
-              ${filled
-                ? `<span style="font-size:14px;font-weight:700;color:#1a5c38">${line.actual_qty}</span>`
-                : `<div style="width:60px;height:28px;border:1.5px solid #d1d5db;border-radius:6px;margin:0 auto"></div>`}
-            </td>
-          </tr>`
+          return `<div class="row">
+            <span class="name">${item.description || item.name}</span>
+            <span class="unit">${item.unit || ''}</span>
+            <span class="exp">${line.expected_qty ?? 0}</span>
+            <span class="actual">${filled ? `<b style="color:#1a5c38">${line.actual_qty}</b>` : `<span class="box"></span>`}</span>
+          </div>`
         }).join('')
-        return `<tr><td colspan="4" style="padding:8px 12px;background:#f0f5f0;font-weight:700;font-size:12px;color:#1a5c38;border-bottom:1px solid #d1fae5">
-          <span style="display:inline-block;width:8px;height:8px;background:#1a5c38;border-radius:50%;margin-right:6px;vertical-align:middle"></span>${supplier} (${lines.length} items)</td></tr>${rows}`
+        return `<div class="section">
+          <div class="sup-header">● ${supplier} <span style="font-weight:400;color:#6b7280">(${lines.length})</span></div>
+          ${rows}
+        </div>`
       })
       .join('')
 
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Stock Sheet — ${dateLabel}</title>
       <style>
-        @page { margin: 15mm 12mm; }
-        body { font-family: Arial, sans-serif; color: #111; margin: 0; }
-        h1 { font-size: 20px; font-weight: 800; color: #1a5c38; margin: 0 0 2px }
-        .sub { font-size: 12px; color: #6b7280; margin-bottom: 16px }
-        table { width: 100%; border-collapse: collapse; }
-        th { background: #1a5c38; color: white; font-size: 12px; font-weight: 700; padding: 8px 10px; text-align: left }
-        th:nth-child(3), th:nth-child(4) { text-align: center }
-        tr:last-child td { border-bottom: none }
-        .footer { margin-top: 16px; font-size: 10px; color: #9ca3af; display: flex; justify-content: space-between }
+        @page { margin: 10mm 8mm; size: A4 portrait; }
+        body { font-family: Arial, sans-serif; color: #111; margin: 0; font-size: 9px; }
+        .header { margin-bottom: 6px; border-bottom: 2px solid #1a5c38; padding-bottom: 4px; }
+        .header h1 { font-size: 13px; font-weight: 800; color: #1a5c38; margin: 0; }
+        .header .sub { font-size: 8px; color: #6b7280; }
+        .col-headers { display: flex; font-size: 8px; font-weight: 700; color: #fff; background: #1a5c38;
+          padding: 3px 4px; border-radius: 3px; margin-bottom: 3px; }
+        .col-headers .cn { flex: 1 }
+        .col-headers .cu, .col-headers .ce, .col-headers .ca { width: 30px; text-align: center; }
+        .cols { column-count: 2; column-gap: 6mm; column-fill: auto; }
+        .section { break-inside: avoid-column; margin-bottom: 2px; }
+        .sup-header { font-size: 8px; font-weight: 700; color: #1a5c38; background: #f0f5f0;
+          padding: 2px 4px; margin-bottom: 1px; break-after: avoid; }
+        .row { display: flex; align-items: center; padding: 1px 4px; border-bottom: 0.5px solid #f0f0f0; break-inside: avoid; }
+        .name { flex: 1; font-size: 8.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .unit { width: 28px; font-size: 7.5px; color: #9ca3af; text-align: center; }
+        .exp { width: 26px; font-size: 8px; text-align: center; color: #555; }
+        .actual { width: 30px; text-align: center; }
+        .box { display: inline-block; width: 26px; height: 13px; border: 1px solid #bbb; border-radius: 2px; }
+        .footer { margin-top: 6px; font-size: 7.5px; color: #9ca3af; display: flex; justify-content: space-between; border-top: 0.5px solid #e5e7eb; padding-top: 3px; }
       </style>
     </head><body>
-      <h1>Mochachos Hartswater (Pty) Ltd</h1>
-      <div class="sub">${countLabel} Stock Count · ${dateLabel} · ${countLines.length} items</div>
-      <table>
-        <thead><tr>
-          <th>Item</th><th style="width:70px">Unit</th>
-          <th style="width:90px;text-align:center">Expected</th>
-          <th style="width:90px;text-align:center">Actual</th>
-        </tr></thead>
-        <tbody>${supplierSections}</tbody>
-      </table>
+      <div class="header">
+        <h1>Mochachos Hartswater (Pty) Ltd</h1>
+        <div class="sub">${countLabel} Stock Count · ${dateLabel} · ${countLines.length} items</div>
+      </div>
+      <div class="col-headers"><span class="cn">Item</span><span class="cu">Unit</span><span class="ce">Exp</span><span class="ca">Actual</span></div>
+      <div class="cols">${supplierSections}</div>
       <div class="footer"><span>Generated by <b>CompliTrack</b> · complitrack.co.za</span><span>${now}</span></div>
     </body></html>`
 
