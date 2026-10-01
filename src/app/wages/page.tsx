@@ -961,21 +961,32 @@ export default function WagesPage() {
                 <div>
                   <div style={{ fontSize: '12px', fontWeight: '700', color: '#9ca3af', textTransform: 'uppercase' as const, letterSpacing: '0.5px', marginBottom: '10px' }}>Deductions</div>
                   <div style={{ background: '#f9fafb', borderRadius: '12px', overflow: 'hidden' }}>
-                    {[
-                      { label: 'UIF (Employee 1%)', value: showSlip.uif_employee },
-                      { label: 'PAYE Tax', value: showSlip.paye_tax },
-                      { label: 'Advances Deducted', value: showSlip.advances_deducted },
-                      ...(showSlip.savings_deducted > 0 ? [{ label: 'Savings Deducted', value: showSlip.savings_deducted }] : []),
-                    ].map((row, i) => (
-                      <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 16px', borderBottom: '1px solid #e5e7eb' }}>
-                        <span style={{ fontSize: '14px', color: '#374151' }}>{row.label}</span>
-                        <span style={{ fontSize: '14px', fontWeight: '700', color: '#dc2626' }}>- {formatCurrency(row.value)}</span>
-                      </div>
-                    ))}
-                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 16px', background: '#fef2f2' }}>
-                      <span style={{ fontSize: '14px', fontWeight: '700', color: '#991b1b' }}>Total Deductions</span>
-                      <span style={{ fontSize: '15px', fontWeight: '800', color: '#991b1b' }}>- {formatCurrency(showSlip.uif_employee + showSlip.paye_tax + showSlip.advances_deducted + (showSlip.savings_deducted || 0))}</span>
-                    </div>
+                    {(() => {
+                      const liveAdvs = advances.filter(a => a.employee_id === showSlip.employee_id && a.repayment_status === 'outstanding' && a.deduct_from_wages)
+                      const liveAdvTotal = liveAdvs.reduce((sum, a) => sum + a.amount, 0)
+                      const savAmt = showSlip.savings_deducted || 0
+                      const hasUnmatched = liveAdvTotal > 0 && showSlip.advances_deducted === 0
+                      const deductionRows = [
+                        { label: 'UIF (Employee 1%)', value: showSlip.uif_employee },
+                        { label: 'PAYE Tax', value: showSlip.paye_tax },
+                        { label: 'Advances Deducted', value: liveAdvTotal },
+                        { label: 'Savings Deducted', value: savAmt },
+                      ]
+                      const totalDed = showSlip.uif_employee + showSlip.paye_tax + liveAdvTotal + savAmt
+                      return <>
+                        {hasUnmatched && <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', padding: '8px 12px', fontSize: '12px', color: '#c2410c', borderRadius: '6px', marginBottom: '4px' }}>⚠️ Outstanding advance of {formatCurrency(liveAdvTotal)} entered — recalculate payroll to apply to net pay</div>}
+                        {deductionRows.map((row, i) => (
+                          <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 16px', borderBottom: '1px solid #e5e7eb' }}>
+                            <span style={{ fontSize: '14px', color: '#374151' }}>{row.label}</span>
+                            <span style={{ fontSize: '14px', fontWeight: '700', color: '#dc2626' }}>- {formatCurrency(row.value)}</span>
+                          </div>
+                        ))}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 16px', background: '#fef2f2' }}>
+                          <span style={{ fontSize: '14px', fontWeight: '700', color: '#991b1b' }}>Total Deductions</span>
+                          <span style={{ fontSize: '15px', fontWeight: '800', color: '#991b1b' }}>- {formatCurrency(totalDed)}</span>
+                        </div>
+                      </>
+                    })()}
                   </div>
                 </div>
                 <div style={{ background: '#eff6ff', borderRadius: '10px', padding: '12px 16px', fontSize: '12px', color: '#1e40af' }}>
@@ -987,12 +998,12 @@ export default function WagesPage() {
                 </div>
                 {(() => {
                   const empSaving = savings.find(s => s.employee_id === showSlip.employee_id)
-                  if (!empSaving || empSaving.balance <= 0) return null
+                  if (!empSaving) return null
                   return (
                     <div style={{ background: '#f0fdf4', border: '2px solid #bbf7d0', borderRadius: '12px', padding: '14px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <div>
                         <div style={{ fontSize: '12px', fontWeight: '700', color: '#166534', textTransform: 'uppercase' as const, letterSpacing: '0.5px' }}>🐷 Savings Balance Held by Employer</div>
-                        <div style={{ fontSize: '11px', color: '#4ade80', marginTop: '2px' }}>Accumulated savings — not deducted this period</div>
+                        <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '2px' }}>R{empSaving.deduction_per_payroll.toFixed(2)}/payroll · cumulative savings balance</div>
                       </div>
                       <div style={{ fontSize: '18px', fontWeight: '900', color: '#166534' }}>{formatCurrency(empSaving.balance)}</div>
                     </div>
@@ -1025,13 +1036,20 @@ export default function WagesPage() {
                       slipBreakdown.holidayHours > 0 ? `<tr><td>Public Holiday</td><td>${formatHours(slipBreakdown.holidayHours)}h</td><td>R${(showSlip.hourly_rate*2).toFixed(2)}/hr</td><td>R${slipBreakdown.holidayPay.toFixed(2)}</td></tr>` : '',
                       slipBreakdown.nightHours > 0 ? `<tr><td>Night Allowance</td><td>${formatHours(slipBreakdown.nightHours)}h</td><td>R0.50/hr</td><td>R${slipBreakdown.nightPay.toFixed(2)}</td></tr>` : '',
                     ].join('') : `<tr><td>Basic Pay</td><td>${formatHours(showSlip.hours_worked)}h</td><td>R${showSlip.hourly_rate.toFixed(2)}/hr</td><td>R${showSlip.gross_pay.toFixed(2)}</td></tr>`
+                    // Live advances — picks up advances entered after last calculate
+                    const liveAdvances = advances.filter(a => a.employee_id === showSlip.employee_id && a.repayment_status === 'outstanding' && a.deduct_from_wages)
+                    const liveAdvTotal = liveAdvances.reduce((sum, a) => sum + a.amount, 0)
+                    const empSav = savings.find(s => s.employee_id === showSlip.employee_id)
+                    const savAmt = showSlip.savings_deducted || 0
+                    const liveNetPay = showSlip.gross_pay - showSlip.uif_employee - showSlip.paye_tax - liveAdvTotal - savAmt
+                    const advHtml = liveAdvances.map(a => `<div class="row" style="color:#c2410c"><span>Advance${a.reason ? ': ' + a.reason : ''} (${a.advance_date})</span><span>-R${a.amount.toFixed(2)}</span></div>`).join('')
                     win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Payslip — ${emp.full_name}</title>
                     <style>body{font-family:Arial,sans-serif;padding:24px;color:#111;font-size:13px}h1{color:#1a5c38;margin:0 0 4px;font-size:18px}.badge{background:#1a5c38;color:#fff;padding:4px 12px;border-radius:20px;font-size:11px;font-weight:700}.head{display:flex;justify-content:space-between;border-bottom:2px solid #1a5c38;padding-bottom:12px;margin-bottom:16px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:4px 24px;margin-bottom:16px;font-size:12px}.grid .lbl{color:#888}table{width:100%;border-collapse:collapse;margin-bottom:16px;font-size:13px}th{background:#f3f4f6;padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase}th:last-child,th:nth-child(3){text-align:right}td{padding:8px 10px;border-bottom:1px solid #f0f0f0}td:last-child,td:nth-child(3){text-align:right}.totals{border-top:2px solid #111;padding-top:10px}.row{display:flex;justify-content:space-between;padding:4px 0}.net{font-size:17px;font-weight:800;color:#1a5c38;border-top:1px solid #ddd;margin-top:6px;padding-top:6px}.sign{margin-top:50px;display:grid;grid-template-columns:1fr 1fr;gap:40px;font-size:11px}.sign div{border-top:1px solid #999;padding-top:6px;color:#666;text-align:center}.footer{margin-top:20px;font-size:10px;color:#aaa;text-align:center;border-top:1px solid #eee;padding-top:12px}</style>
                     </head><body>
                     <div class="head"><div><h1>Mochachos Hartswater (Pty) Ltd</h1><div style="font-size:12px;color:#666">Payslip · ${monthLabel}</div></div><div class="badge">PAYSLIP</div></div>
                     <div class="grid"><div><span class="lbl">Employee: </span><b>${emp.full_name}</b></div><div><span class="lbl">ID Number: </span>${wage?.id_number || '—'}</div><div><span class="lbl">Role: </span>${emp.role}</div><div><span class="lbl">Pay Frequency: </span>Monthly</div></div>
                     <table><thead><tr><th>Description</th><th>Hours</th><th>Rate</th><th>Amount</th></tr></thead><tbody>${rows}</tbody></table>
-                    <div class="totals"><div class="row"><span>Gross Pay</span><b>R${showSlip.gross_pay.toFixed(2)}</b></div><div class="row" style="color:#c2410c"><span>UIF (1%)</span><span>-R${showSlip.uif_employee.toFixed(2)}</span></div>${showSlip.advances_deducted > 0 ? `<div class="row" style="color:#c2410c"><span>Advance Deduction</span><span>-R${showSlip.advances_deducted.toFixed(2)}</span></div>` : ''}${(showSlip.savings_deducted || 0) > 0 ? `<div class="row" style="color:#0891b2"><span>Savings Deduction</span><span>-R${(showSlip.savings_deducted || 0).toFixed(2)}</span></div>` : ''}<div class="row net"><span>Net Pay</span><span>R${showSlip.net_pay.toFixed(2)}</span></div>${(() => { const es = savings.find(s => s.employee_id === showSlip.employee_id); return es && es.balance > 0 ? `<div class="row" style="background:#f0fdf4;color:#166534;border-top:2px solid #bbf7d0;margin-top:8px;border-radius:8px;padding:10px 12px"><span>🐷 Savings Balance Held by Employer</span><b>R${es.balance.toFixed(2)}</b></div>` : '' })()} </div>
+                    <div class="totals"><div class="row"><span>Gross Pay</span><b>R${showSlip.gross_pay.toFixed(2)}</b></div><div class="row" style="color:#c2410c"><span>UIF (1%)</span><span>-R${showSlip.uif_employee.toFixed(2)}</span></div>${advHtml}${savAmt > 0 ? `<div class="row" style="color:#0891b2"><span>Savings Deduction</span><span>-R${savAmt.toFixed(2)}</span></div>` : ''}<div class="row net"><span>Net Pay</span><span>R${liveNetPay.toFixed(2)}</span></div>${empSav ? `<div style="background:#f0fdf4;color:#166534;border:1.5px solid #bbf7d0;margin-top:10px;border-radius:8px;padding:10px 12px;display:flex;justify-content:space-between;align-items:center"><div><b style="font-size:11px">🐷 Savings Balance Held by Employer</b><div style="font-size:9px;color:#4ade80;margin-top:2px">R${empSav.deduction_per_payroll.toFixed(2)}/payroll deduction · cumulative savings</div></div><b style="font-size:13px">R${empSav.balance.toFixed(2)}</b></div>` : ''} </div>
                     <div class="sign"><div>Employee Signature</div><div>Employer Signature</div></div>
                     <div class="footer">Generated by CompliTrack · complitrack.co.za · ${new Date().toLocaleString('en-ZA')}</div>
                     <script>window.onload=()=>{window.print()}<\/script></body></html>`)
