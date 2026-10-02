@@ -23,8 +23,9 @@ const MAPS_TO_OPTIONS = [
   { value: 'total_incl', label: 'Line Total (incl VAT)' },
 ]
 
+type StockSection = { id: string; store_id: string; name: string; color: string; icon: string; sort_order: number; is_active: boolean }
 type StockCount = { id: string; count_type: string; count_date: string; status: string; notes: string | null }
-type StockCountLine = { id: string; stock_count_id: string; stock_item_id: string; expected_qty: number; actual_qty: number; unit_cost: number }
+type StockCountLine = { id: string; stock_count_id: string; stock_item_id: string; expected_qty: number; actual_qty: number; unit_cost: number; section_id?: string | null }
 type StockPurchase = { id: string; purchase_date: string; supplier_name: string | null; item_name: string | null; quantity: number; unit: string | null; unit_cost: number; total_cost: number; invoice_number: string | null }
 type StockWastage = { id: string; wastage_date: string; item_name: string | null; quantity: number; unit: string | null; unit_cost: number; total_cost: number; reason: string | null }
 type StockIssue = { id: string; issue_date: string; item_name: string | null; quantity: number; unit: string | null; issued_to: string | null; notes: string | null }
@@ -113,6 +114,13 @@ export default function StockPage() {
   const [activeCount, setActiveCount] = useState<StockCount | null>(null)
   const [countLines, setCountLines] = useState<StockCountLine[]>([])
   const [countInputs, setCountInputs] = useState<Record<string, string>>({})
+  const [sections, setSections] = useState<StockSection[]>([])
+  const [itemSections, setItemSections] = useState<Record<string, string[]>>({}) // itemId → sectionId[]
+  const [activeSection, setActiveSection] = useState<StockSection | null>(null) // null = All
+  const [itemFormSections, setItemFormSections] = useState<string[]>([])
+  const [showSectionManager, setShowSectionManager] = useState(false)
+  const [sectionForm, setSectionForm] = useState({ name: '', color: '#1a5c38', icon: '📦' })
+  const [editSection, setEditSection] = useState<StockSection | null>(null)
   const [countTypeFilter, setCountTypeFilter] = useState('daily')
   const [showMonthPicker, setShowMonthPicker] = useState(false)
   // Default to previous month so September is pre-selected when opening in October
@@ -168,7 +176,7 @@ export default function StockPage() {
   async function loadAll() {
     setLoading(true)
     try {
-    const [catRes, itemRes, countRes, purchRes, wastRes, ordRes, suppRes, issueRes] = await Promise.all([
+    const [catRes, itemRes, countRes, purchRes, wastRes, ordRes, suppRes, issueRes, sectRes] = await Promise.all([
       supabase.from('stock_categories').select('*').eq('store_id', STORE_ID).order('sort_order'),
       supabase.from('stock_items').select('*').eq('store_id', STORE_ID).eq('is_active', true).order('sort_order', { nullsFirst: false }),
       supabase.from('stock_counts').select('*').eq('store_id', STORE_ID).order('count_date', { ascending: false }).limit(30),
@@ -177,7 +185,13 @@ export default function StockPage() {
       supabase.from('stock_orders').select('*').eq('store_id', STORE_ID).order('order_date', { ascending: false }).limit(30),
       supabase.from('stock_suppliers').select('*').eq('store_id', STORE_ID).eq('is_active', true).order('sort_order'),
       supabase.from('stock_issues').select('*').eq('store_id', STORE_ID).order('issue_date', { ascending: false }).limit(50),
+      supabase.from('stock_sections').select('*').eq('store_id', STORE_ID).eq('is_active', true).order('sort_order'),
     ])
+    // Fetch item-section assignments via join to filter by store
+    const iSecRes = await supabase
+      .from('stock_item_sections')
+      .select('stock_item_id, section_id, stock_sections!inner(store_id)')
+      .eq('stock_sections.store_id', STORE_ID)
     setCategories(catRes.data || [])
     setItems(itemRes.data || [])
     setCounts(countRes.data || [])
@@ -187,6 +201,15 @@ export default function StockPage() {
     if (suppRes?.error) console.error('suppliers error:', suppRes.error.message)
     setOrders(ordRes.data || [])
     setSuppliers(suppRes?.data || [])
+    setSections(sectRes.data || [])
+    // Build itemId → sectionId[] map
+    const iSectMap: Record<string, string[]> = {}
+    for (const row of (iSecRes.data || [])) {
+      const r = row as { stock_item_id: string; section_id: string }
+      if (!iSectMap[r.stock_item_id]) iSectMap[r.stock_item_id] = []
+      iSectMap[r.stock_item_id].push(r.section_id)
+    }
+    setItemSections(iSectMap)
     } catch(e) { console.error('loadAll error:', e) }
     setLoading(false)
   }
@@ -215,6 +238,24 @@ export default function StockPage() {
   async function deleteSupplier(id: string) {
     if (!confirm('Delete this supplier? Items linked to them will lose their supplier assignment.')) return
     await supabase.from('stock_suppliers').update({ is_active: false }).eq('id', id)
+    await loadAll()
+  }
+
+  async function saveSection() {
+    if (!sectionForm.name.trim()) return
+    setSaving(true)
+    const payload = { store_id: STORE_ID, name: sectionForm.name.trim(), color: sectionForm.color, icon: sectionForm.icon || '📦', sort_order: editSection ? editSection.sort_order : sections.length + 1, is_active: true }
+    if (editSection) {
+      await supabase.from('stock_sections').update(payload).eq('id', editSection.id)
+    } else {
+      await supabase.from('stock_sections').insert(payload)
+    }
+    setSectionForm({ name: '', color: '#1a5c38', icon: '📦' }); setEditSection(null); setSaving(false); await loadAll()
+  }
+
+  async function deleteSection(id: string) {
+    if (!confirm('Delete this section? Items will be unassigned from it.')) return
+    await supabase.from('stock_sections').update({ is_active: false }).eq('id', id)
     await loadAll()
   }
 
@@ -256,13 +297,20 @@ export default function StockPage() {
         setSaving(false)
         return
       }
-      const lines = countItems.map(i => ({
-        stock_count_id: session.id,
-        stock_item_id: i.id,
-        expected_qty: Number(i.current_qty) || 0,
-        actual_qty: 0,
-        unit_cost: Number(i.cost_price) || Number(i.price) || 0
-      }))
+      // Build count lines: items with section assignments get one line per section;
+      // items with no sections get a single line (section_id = null)
+      const lines: { stock_count_id: string; stock_item_id: string; expected_qty: number; actual_qty: number; unit_cost: number; section_id: string | null }[] = []
+      for (const i of countItems) {
+        const assignedSections = itemSections[i.id] || []
+        const baseLine = { stock_count_id: session.id, stock_item_id: i.id, expected_qty: Number(i.current_qty) || 0, actual_qty: 0, unit_cost: Number(i.cost_price) || Number(i.price) || 0 }
+        if (assignedSections.length > 0) {
+          for (const sectionId of assignedSections) {
+            lines.push({ ...baseLine, section_id: sectionId })
+          }
+        } else {
+          lines.push({ ...baseLine, section_id: null })
+        }
+      }
       const { error: linesErr } = await supabase.from('stock_count_lines').insert(lines)
       if (linesErr) { alert('Could not create count lines: ' + linesErr.message); setSaving(false); return }
       const { data: freshLines } = await supabase
@@ -284,13 +332,14 @@ export default function StockPage() {
   async function completeCount() {
     if (!activeCount) return
     await supabase.from('stock_counts').update({ status: 'completed' }).eq('id', activeCount.id)
-    // Physical count is the source of truth — reconcile running stock balances to what was actually counted.
-    await Promise.all(
-      countLines
-        .filter(l => l.stock_item_id)
-        .map(l => supabase.from('stock_items').update({ current_qty: Number(l.actual_qty) || 0 }).eq('id', l.stock_item_id))
-    )
-    setActiveCount(null); setCountLines([]); await loadAll()
+    // Aggregate actual_qty across all sections per item (items counted in multiple sections sum up)
+    const totals: Record<string, number> = {}
+    for (const l of countLines) {
+      if (!l.stock_item_id) continue
+      totals[l.stock_item_id] = (totals[l.stock_item_id] || 0) + (Number(l.actual_qty) || 0)
+    }
+    await Promise.all(Object.entries(totals).map(([itemId, qty]) => supabase.from('stock_items').update({ current_qty: qty }).eq('id', itemId)))
+    setActiveCount(null); setCountLines([]); setActiveSection(null); await loadAll()
   }
 
   async function resumeCount(count: StockCount) {
@@ -579,11 +628,26 @@ export default function StockPage() {
       parent_item_id: itemForm.is_prepped_item ? (itemForm.parent_item_id || null) : null,
       portion_size: itemForm.is_prepped_item ? parseFloat(itemForm.portion_size || '0') : null
     }
-    let error = null
-    if (editItem) { const res = await supabase.from('stock_items').update(payload).eq('id', editItem.id); error = res.error }
-    else { const res = await supabase.from('stock_items').insert(payload); error = res.error }
-    if (error) { alert('Error saving item: ' + error.message); setSaving(false); return }
+    let savedId: string | null = null
+    if (editItem) {
+      const res = await supabase.from('stock_items').update(payload).eq('id', editItem.id)
+      if (res.error) { alert('Error saving item: ' + res.error.message); setSaving(false); return }
+      savedId = editItem.id
+    } else {
+      const res = await supabase.from('stock_items').insert(payload).select().single()
+      if (res.error) { alert('Error saving item: ' + res.error.message); setSaving(false); return }
+      savedId = res.data?.id || null
+    }
+    // Sync section assignments
+    if (savedId) {
+      const theId = savedId
+      await supabase.from('stock_item_sections').delete().eq('stock_item_id', theId)
+      if (itemFormSections.length > 0) {
+        await supabase.from('stock_item_sections').insert(itemFormSections.map(sid => ({ stock_item_id: theId, section_id: sid })))
+      }
+    }
     setItemForm({ name: '', description: '', category_id: categories[0]?.id || '', unit: 'each', cost_price: '', par_level: '', supplier: 'Other', on_daily_sheet: false, is_catch_weight: false, kg_price: '', avg_weight_kg: '', is_prepped_item: false, parent_item_id: '', portion_size: '' })
+    setItemFormSections([])
     setShowAddItem(false); setEditItem(null); setShowInlineCat(false); await loadAll(); setSaving(false)
   }
 
@@ -698,8 +762,8 @@ export default function StockPage() {
                 <div style={{ background: 'white', borderRadius: '20px', border: '1.5px solid #eef2ee', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
                   <div style={{ background: COUNT_TYPES.find(c => c.key === activeCount.count_type)?.bg, padding: '20px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                     <div>
-                      <div style={{ fontWeight: 800, fontSize: '18px', color: COUNT_TYPES.find(c => c.key === activeCount.count_type)?.color }}>{COUNT_TYPES.find(c => c.key === activeCount.count_type)?.label} Count — {formatDate(activeCount.count_date)}</div>
-                      <div style={{ fontSize: '13px', color: '#6b7280', marginTop: '2px' }}>{countLines.length} items • Enter actual quantities</div>
+                      <div style={{ fontWeight: 800, fontSize: '18px', color: COUNT_TYPES.find(c => c.key === activeCount.count_type)?.color }}>{COUNT_TYPES.find(c => c.key === activeCount.count_type)?.label} Count — {activeSection ? `${activeSection.icon} ${activeSection.name}` : formatDate(activeCount.count_date)}</div>
+                      <div style={{ fontSize: '13px', color: '#6b7280', marginTop: '2px' }}>{activeSection ? countLines.filter(l => activeSection.id === '__unassigned__' ? !l.section_id : l.section_id === activeSection.id).length : countLines.length} items{activeSection ? ` in this section` : ''} • Enter actual quantities{activeSection && sections.length > 0 ? ' · tap 🌐 All to see totals' : ''}</div>
                     </div>
                     <div style={{ display: 'flex', gap: '10px' }}>
                       <button onClick={() => setShowAIImport(true)} style={{ padding: '8px 16px', background: '#7c3aed', color: 'white', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>🤖 AI Import</button>
@@ -708,10 +772,46 @@ export default function StockPage() {
                       <button onClick={completeCount} style={{ padding: '8px 16px', background: '#1a5c38', color: 'white', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>✅ Finalise</button>
                     </div>
                   </div>
+                  {/* Section tabs — only shown when sections exist and count has section lines */}
+                  {(() => {
+                    const sectionIdsInCount = [...new Set(countLines.map(l => l.section_id).filter(Boolean))] as string[]
+                    const sectionsInCount = sections.filter(s => sectionIdsInCount.includes(s.id))
+                    if (sectionsInCount.length === 0) return null
+                    const unassignedLines = countLines.filter(l => !l.section_id)
+                    return (
+                      <div style={{ display: 'flex', gap: '8px', padding: '12px 24px', background: '#f9fafb', borderTop: '1px solid #e5e7eb', flexWrap: 'wrap' }}>
+                        <button onClick={() => setActiveSection(null)}
+                          style={{ padding: '7px 16px', borderRadius: '20px', border: 'none', cursor: 'pointer', fontWeight: 700, fontSize: '13px', background: activeSection === null ? '#1a5c38' : '#e5e7eb', color: activeSection === null ? 'white' : '#374151' }}>
+                          🌐 All ({countLines.length})
+                        </button>
+                        {sectionsInCount.map(sec => {
+                          const secLines = countLines.filter(l => l.section_id === sec.id)
+                          const filled = secLines.filter(l => (countInputs[l.id] ?? '') !== '').length
+                          return (
+                            <button key={sec.id} onClick={() => setActiveSection(activeSection?.id === sec.id ? null : sec)}
+                              style={{ padding: '7px 16px', borderRadius: '20px', border: `2px solid ${sec.color}`, cursor: 'pointer', fontWeight: 700, fontSize: '13px', background: activeSection?.id === sec.id ? sec.color : 'white', color: activeSection?.id === sec.id ? 'white' : sec.color }}>
+                              {sec.icon} {sec.name} ({filled}/{secLines.length})
+                            </button>
+                          )
+                        })}
+                        {unassignedLines.length > 0 && (
+                          <button onClick={() => setActiveSection({ id: '__unassigned__', store_id: '', name: 'General', color: '#6b7280', icon: '📦', sort_order: 999, is_active: true })}
+                            style={{ padding: '7px 16px', borderRadius: '20px', border: '2px solid #6b7280', cursor: 'pointer', fontWeight: 700, fontSize: '13px', background: activeSection?.id === '__unassigned__' ? '#6b7280' : 'white', color: activeSection?.id === '__unassigned__' ? 'white' : '#6b7280' }}>
+                            📦 General ({unassignedLines.length})
+                          </button>
+                        )}
+                      </div>
+                    )
+                  })()}
                   {/* Group by supplier in count screen */}
                   {suppliers.map(s => s.name).map(supplier => {
                     const supplierLines = countLines.filter(l => {
                       const item = items.find(i => i.id === l.stock_item_id)
+                      // When a section tab is active, filter to that section's lines only
+                      if (activeSection) {
+                        if (activeSection.id === '__unassigned__' && l.section_id) return false
+                        if (activeSection.id !== '__unassigned__' && l.section_id !== activeSection.id) return false
+                      }
                       return (item?.supplier || 'Other') === supplier
                     })
                     if (!supplierLines.length) return null
@@ -727,9 +827,10 @@ export default function StockPage() {
                       return (
                         <div key={line.id} style={{ display: 'flex', alignItems: 'center', gap: '16px', padding: '12px 24px', borderTop: '1px solid #f3f4f6' }}>
                           <div style={{ flex: 1 }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                               <span style={{ fontWeight: 600, fontSize: '14px', color: item.is_food_cost === false ? '#9ca3af' : '#111' }}>{item.description || item.name}</span>
                               {item.is_food_cost === false && <span style={{ fontSize: '10px', fontWeight: 700, background: '#fee2e2', color: '#dc2626', padding: '2px 6px', borderRadius: '100px', whiteSpace: 'nowrap' }}>🚫 excl. food cost</span>}
+                              {!activeSection && line.section_id && (() => { const sec = sections.find(s => s.id === line.section_id); return sec ? <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '100px', background: sec.color + '20', color: sec.color, whiteSpace: 'nowrap' }}>{sec.icon} {sec.name}</span> : null })()}
                             </div>
                             <div style={{ fontSize: '12px', color: '#9ca3af' }}>{item.unit}</div>
                           </div>
@@ -857,6 +958,44 @@ export default function StockPage() {
                     })}
                   </div>
                 )}
+                {/* Counting Sections Management */}
+                <div style={{ background: 'white', borderRadius: '20px', border: '1.5px solid #eef2ee', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
+                  <div onClick={() => setShowSectionManager(v => !v)} style={{ padding: '16px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', userSelect: 'none' }}>
+                    <div>
+                      <span style={{ fontWeight: 800, fontSize: '15px', color: '#111' }}>📍 Counting Sections</span>
+                      <span style={{ fontSize: '13px', color: '#9ca3af', marginLeft: '10px' }}>{sections.length > 0 ? `${sections.length} section${sections.length !== 1 ? 's' : ''} — cashier counts front, manager counts cooler, etc.` : 'Divide stock counting by area'}</span>
+                    </div>
+                    <span style={{ fontSize: '18px', color: '#9ca3af' }}>{showSectionManager ? '▲' : '▼'}</span>
+                  </div>
+                  {showSectionManager && (
+                    <div style={{ borderTop: '1px solid #f3f4f6', padding: '16px 24px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                      {sections.map(sec => (
+                        <div key={sec.id} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 14px', background: '#f9fafb', borderRadius: '10px', border: `1.5px solid ${sec.color}30` }}>
+                          <span style={{ fontSize: '20px' }}>{sec.icon}</span>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontWeight: 700, fontSize: '14px', color: '#111' }}>{sec.name}</div>
+                            <div style={{ fontSize: '12px', color: '#9ca3af' }}>{(Object.values(itemSections) as string[][]).filter(sids => sids.includes(sec.id)).length} items assigned</div>
+                          </div>
+                          <div style={{ width: '16px', height: '16px', borderRadius: '50%', background: sec.color, flexShrink: 0 }} />
+                          <button onClick={() => { setEditSection(sec); setSectionForm({ name: sec.name, color: sec.color, icon: sec.icon }) }} style={{ fontSize: '12px', padding: '5px 10px', borderRadius: '8px', border: '1.5px solid #e5e7eb', background: 'white', cursor: 'pointer', fontWeight: 600 }}>Edit</button>
+                          <button onClick={() => deleteSection(sec.id)} style={{ fontSize: '12px', padding: '5px 10px', borderRadius: '8px', border: 'none', background: '#fee2e2', color: '#dc2626', cursor: 'pointer', fontWeight: 600 }}>Delete</button>
+                        </div>
+                      ))}
+                      {/* Add / Edit form */}
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr auto auto auto', gap: '8px', alignItems: 'center', paddingTop: '4px' }}>
+                        <input value={sectionForm.name} onChange={e => setSectionForm(f => ({ ...f, name: e.target.value }))} placeholder="Section name (e.g. Front Counter, Cooler, Kitchen)" style={{ padding: '9px 12px', border: '1.5px solid #e5e7eb', borderRadius: '10px', fontSize: '14px', outline: 'none' }} onKeyDown={e => e.key === 'Enter' && saveSection()} />
+                        <input value={sectionForm.icon} onChange={e => setSectionForm(f => ({ ...f, icon: e.target.value }))} placeholder="📦" style={{ padding: '9px 10px', border: '1.5px solid #e5e7eb', borderRadius: '10px', fontSize: '18px', width: '52px', textAlign: 'center', outline: 'none' }} />
+                        <input type="color" value={sectionForm.color} onChange={e => setSectionForm(f => ({ ...f, color: e.target.value }))} style={{ width: '40px', height: '40px', border: 'none', borderRadius: '8px', cursor: 'pointer', padding: '2px' }} />
+                        <button onClick={saveSection} disabled={saving || !sectionForm.name.trim()} style={{ padding: '9px 16px', background: !sectionForm.name.trim() ? '#d1d5db' : '#1a5c38', color: 'white', border: 'none', borderRadius: '10px', fontWeight: 700, fontSize: '13px', cursor: 'pointer', whiteSpace: 'nowrap' }}>{editSection ? 'Update' : '+ Add'}</button>
+                      </div>
+                      {editSection && <button onClick={() => { setEditSection(null); setSectionForm({ name: '', color: '#1a5c38', icon: '📦' }) }} style={{ alignSelf: 'flex-start', fontSize: '12px', padding: '5px 12px', border: '1.5px solid #e5e7eb', borderRadius: '8px', background: 'white', cursor: 'pointer', color: '#6b7280', fontWeight: 600 }}>✕ Cancel edit</button>}
+                      <div style={{ fontSize: '12px', color: '#9ca3af', background: '#f9fafb', padding: '10px 12px', borderRadius: '8px' }}>
+                        💡 <strong>How sections work:</strong> Assign items to one or more sections in Stock Items. When counting, each person opens their section tab and only sees their items. Finalising automatically adds up all sections for the total stock count.
+                      </div>
+                    </div>
+                  )}
+                </div>
+
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px' }}>
                   {COUNT_TYPES.map(ct => (
                     <button key={ct.key} onClick={() => ct.key === 'monthly' ? setShowMonthPicker(true) : startCount(ct.key)} style={{ background: 'white', borderRadius: '20px', border: `2px solid ${ct.color}30`, padding: '24px', textAlign: 'left', cursor: 'pointer', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
@@ -1209,6 +1348,7 @@ export default function StockPage() {
                                 <div style={{ display: 'flex', gap: '6px', marginTop: '4px', flexWrap: 'wrap' as const }}>
                                   {parent && <span style={{ fontSize: '11px', fontWeight: 600, background: '#f3e8ff', color: '#7c3aed', padding: '2px 8px', borderRadius: '20px' }}>🔗 from {parent.description || parent.name}</span>}
                                   {item.on_daily_sheet && <span style={{ fontSize: '11px', fontWeight: 600, background: '#f0fdf4', color: '#16a34a', padding: '2px 8px', borderRadius: '20px' }}>📋 Daily</span>}
+                                  {(itemSections[item.id] || []).map(sid => { const sec = sections.find(s => s.id === sid); return sec ? <span key={sid} style={{ fontSize: '11px', fontWeight: 600, padding: '2px 8px', borderRadius: '20px', background: sec.color + '20', color: sec.color }}>{sec.icon} {sec.name}</span> : null })}
                                 </div>
                               </td>
                               <td style={{ padding: '12px 16px', fontSize: '13px', color: '#6b7280' }}>{item.unit}</td>
@@ -1242,6 +1382,7 @@ export default function StockPage() {
                                       parent_item_id: item.parent_item_id || '',
                                       portion_size: item.portion_size != null ? String(item.portion_size) : ''
                                     })
+                                    setItemFormSections(itemSections[item.id] || [])
                                     setShowAddItem(true)
                                   }} style={{ fontSize: '12px', color: '#1d4ed8', background: '#eff6ff', border: 'none', borderRadius: '8px', padding: '5px 10px', cursor: 'pointer', fontWeight: 600 }}>Edit</button>
                                   <button onClick={() => { setAdjustItem(item); setAdjustQty(''); setAdjustMode('set'); setAdjustReason(''); setAdjustNotes(''); loadAdjustHistory(item.id) }} style={{ fontSize: '12px', color: '#7c3aed', background: '#ede9fe', border: 'none', borderRadius: '8px', padding: '5px 10px', cursor: 'pointer', fontWeight: 600 }}>Adjust</button>
@@ -1333,6 +1474,7 @@ export default function StockPage() {
                                     parent_item_id: item.parent_item_id || '',
                                     portion_size: item.portion_size != null ? String(item.portion_size) : ''
                                   })
+                                  setItemFormSections(itemSections[item.id] || [])
                                   setShowAddItem(true)
                                 }} style={{ fontSize: '12px', color: '#1d4ed8', background: '#eff6ff', border: 'none', borderRadius: '8px', padding: '5px 10px', cursor: 'pointer', fontWeight: 600 }}>Edit</button>
                                 <button onClick={() => { setAdjustItem(item); setAdjustQty(''); setAdjustMode('set'); setAdjustReason(''); setAdjustNotes(''); loadAdjustHistory(item.id) }} style={{ fontSize: '12px', color: '#7c3aed', background: '#ede9fe', border: 'none', borderRadius: '8px', padding: '5px 10px', cursor: 'pointer', fontWeight: 600 }}>Adjust</button>
@@ -1496,11 +1638,29 @@ export default function StockPage() {
               </div>
             )
           })()}
+          {/* Counting Sections multi-select */}
+          {sections.length > 0 && (
+            <div style={{ padding: '14px 16px', background: '#f0f9f4', borderRadius: '10px', border: '1.5px solid #bbf7d0' }}>
+              <div style={{ fontWeight: 700, fontSize: '13px', color: '#1a5c38', marginBottom: '10px' }}>📍 Count in Sections</div>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                {sections.map(sec => {
+                  const selected = itemFormSections.includes(sec.id)
+                  return (
+                    <button key={sec.id} type="button" onClick={() => setItemFormSections(prev => selected ? prev.filter(id => id !== sec.id) : [...prev, sec.id])}
+                      style={{ padding: '6px 14px', borderRadius: '20px', border: `2px solid ${sec.color}`, cursor: 'pointer', fontWeight: 700, fontSize: '13px', background: selected ? sec.color : 'white', color: selected ? 'white' : sec.color, transition: 'all 0.15s' }}>
+                      {sec.icon} {sec.name}
+                    </button>
+                  )
+                })}
+              </div>
+              <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '8px' }}>Select every area where this item is counted (e.g. Coke: Front Fridge + Cooler). Leave blank to always show in all sections.</div>
+            </div>
+          )}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
           </div>
         </div>
         <div style={{ padding: '16px 28px 24px', display: 'flex', gap: '12px' }}>
-          <button onClick={() => { setShowAddItem(false); setEditItem(null); setParentItemSearch('') }} style={{ flex: 1, border: '1.5px solid #e5e7eb', color: '#374151', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: 700, cursor: 'pointer', background: 'white' }}>Cancel</button>
+          <button onClick={() => { setShowAddItem(false); setEditItem(null); setParentItemSearch(''); setItemFormSections([]) }} style={{ flex: 1, border: '1.5px solid #e5e7eb', color: '#374151', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: 700, cursor: 'pointer', background: 'white' }}>Cancel</button>
           <button onClick={saveItem} disabled={saving || !itemForm.name} style={{ flex: 1, background: !itemForm.name ? '#d1d5db' : '#1a5c38', color: 'white', border: 'none', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: 800, cursor: 'pointer' }}>{editItem ? 'Save Changes' : 'Add Item'}</button>
         </div>
       </Modal>
