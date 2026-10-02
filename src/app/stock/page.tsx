@@ -112,6 +112,7 @@ export default function StockPage() {
   const [saving, setSaving] = useState(false)
   const [activeCount, setActiveCount] = useState<StockCount | null>(null)
   const [countLines, setCountLines] = useState<StockCountLine[]>([])
+  const [countInputs, setCountInputs] = useState<Record<string, string>>({})
   const [countTypeFilter, setCountTypeFilter] = useState('daily')
   const [showMonthPicker, setShowMonthPicker] = useState(false)
   // Default to previous month so September is pre-selected when opening in October
@@ -155,6 +156,14 @@ export default function StockPage() {
   const [categoryForm, setCategoryForm] = useState({ name: '', color: '#1a5c38' })
 
   useEffect(() => { if (ctxReady && STORE_ID) loadAll() }, [ctxReady, STORE_ID])
+
+  // When a count is opened or changed, seed countInputs with non-zero quantities (blank otherwise)
+  useEffect(() => {
+    if (!activeCount) { setCountInputs({}); return }
+    const inputs: Record<string, string> = {}
+    countLines.forEach(l => { if (Number(l.actual_qty) > 0) inputs[l.id] = String(l.actual_qty) })
+    setCountInputs(inputs)
+  }, [activeCount?.id])
 
   async function loadAll() {
     setLoading(true)
@@ -398,7 +407,7 @@ export default function StockPage() {
       .map(supplier => {
         const lines = countLines.filter(l => {
           const item = items.find(i => i.id === l.stock_item_id)
-          return (item?.supplier || 'Other') === supplier
+          return (item?.supplier || 'Other') === supplier && item?.is_food_cost !== false
         })
         if (!lines.length) return ''
         const rows = lines.map(line => {
@@ -445,7 +454,7 @@ export default function StockPage() {
     </head><body>
       <div class="header">
         <h1>Mochachos Hartswater (Pty) Ltd</h1>
-        <div class="sub">${countLabel} Stock Count · ${dateLabel} · ${countLines.length} items</div>
+        <div class="sub">${countLabel} Stock Count · ${dateLabel} · ${countLines.filter(l => items.find(i => i.id === l.stock_item_id)?.is_food_cost !== false).length} items (food cost only)</div>
       </div>
       <div class="col-headers"><span class="cn">Item</span><span class="cu">Unit</span><span class="ce">Exp</span><span class="ca">Actual</span></div>
       <div class="cols">${supplierSections}</div>
@@ -725,7 +734,14 @@ export default function StockPage() {
                             <div style={{ fontSize: '12px', color: '#9ca3af' }}>{item.unit}</div>
                           </div>
                           <div style={{ fontSize: '12px', color: '#9ca3af', minWidth: '80px', textAlign: 'right' }}>Expected: <strong>{line.expected_qty || 0}</strong></div>
-                          <input type="number" min="0" step="0.1" value={line.actual_qty || ''} onChange={e => updateCountLine(line.id, parseFloat(e.target.value) || 0)}
+                          <input type="number" min="0" step="0.1"
+                            value={countInputs[line.id] ?? ''}
+                            onChange={e => {
+                              const val = e.target.value
+                              setCountInputs(prev => ({ ...prev, [line.id]: val }))
+                              updateCountLine(line.id, val === '' ? 0 : (parseFloat(val) || 0))
+                            }}
+                            placeholder="0"
                             style={{ width: '90px', padding: '8px 10px', border: `1.5px solid ${item.is_food_cost === false ? '#fca5a5' : '#e5e7eb'}`, borderRadius: '10px', fontSize: '16px', textAlign: 'center', outline: 'none', background: item.is_food_cost === false ? '#fff7f7' : 'white' }} />
                           <div style={{ minWidth: '70px', textAlign: 'right', fontSize: '13px', fontWeight: 700, color: variance < 0 ? '#dc2626' : variance > 0 ? '#16a34a' : '#9ca3af' }}>
                             {variance > 0 ? '+' : ''}{variance.toFixed(1)}
