@@ -507,6 +507,18 @@ export default function AttendancePage() {
     const monthLabel = new Date(payrollMonth + '-01').toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' });
     const rate = emp.hourly_rate || 0;
     const daysWorked = days.filter(d => d.hours > 0 || (d.leave && d.leaveHours > 0)).length;
+    // Payslip advance deductions: include advances from THIS month regardless of repayment_status
+    // (saveWagePayment marks them 'paid' when wages are saved, so 'outstanding' filter would miss them)
+    // Also catches any still-outstanding advances from prior months that carry over.
+    const [psYear, psMonth] = payrollMonth.split('-').map(Number);
+    const psMonthEnd = `${payrollMonth}-${String(new Date(psYear, psMonth, 0).getDate()).padStart(2, '0')}`;
+    const psAdvances = advances.filter(a =>
+      a.employee_id === emp.id &&
+      a.deduct_from_wages &&
+      (a.repayment_status === 'outstanding' || (a.advance_date >= payrollMonth + '-01' && a.advance_date <= psMonthEnd))
+    );
+    const psAdvTotal = psAdvances.reduce((s, a) => s + Number(a.amount), 0);
+    const psNetPay = summary.totalPay - summary.uifEmployee - psAdvTotal - summary.savingsDeduction;
     // Count late sessions from attendance records for this employee in this period
     const lateCount = days.filter(d => d.isLate).length;
     const totalSessions = days.filter(d => d.hours > 0).length;
@@ -558,9 +570,9 @@ export default function AttendancePage() {
       <div class="totals">
         <div class="row"><span>Gross Pay</span><b>R${summary.totalPay.toFixed(2)}</b></div>
         <div class="row" style="color:#c2410c"><span>Less: UIF (${payrollSettings.uif_employee_rate}%)</span><b>-R${summary.uifEmployee.toFixed(2)}</b></div>
-        ${summary.outstandingAdvances > 0 ? `<div class="row" style="color:#c2410c"><span>Less: Advance Deduction</span><b>-R${summary.outstandingAdvances.toFixed(2)}</b></div>` : ''}
+        ${psAdvTotal > 0 ? `<div class="row" style="color:#c2410c"><span>Less: Advance Deduction</span><b>-R${psAdvTotal.toFixed(2)}</b></div>` : ''}
         ${summary.savingsDeduction > 0 ? `<div class="row" style="color:#0891b2"><span>Less: Savings Deduction</span><b>-R${summary.savingsDeduction.toFixed(2)}</b></div>` : ''}
-        <div class="row net"><span>Net Pay</span><span>R${summary.netPay.toFixed(2)}</span></div>
+        <div class="row net"><span>Net Pay</span><span>R${psNetPay.toFixed(2)}</span></div>
       </div>
       ${summary.empSaving ? `<div style="background:#f0fdf4;color:#166534;border:1.5px solid #bbf7d0;margin-top:10px;border-radius:8px;padding:10px 12px;display:flex;justify-content:space-between;align-items:center"><div><b style="font-size:11px">🐷 Savings Balance Held by Employer</b><div style="font-size:9px;color:#6b7280;margin-top:2px">R${summary.empSaving.deduction_per_payroll.toFixed(2)}/payroll deduction · cumulative savings</div></div><b style="font-size:13px">R${summary.empSaving.balance.toFixed(2)}</b></div>` : ''}
       <div style="font-size:11px;color:#999;margin-top:6px">Employer UIF Contribution (${payrollSettings.uif_employer_rate}%): R${summary.uifEmployer.toFixed(2)} — not deducted from employee, shown for payroll records.</div>
