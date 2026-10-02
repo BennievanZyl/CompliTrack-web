@@ -113,6 +113,11 @@ export default function StockPage() {
   const [activeCount, setActiveCount] = useState<StockCount | null>(null)
   const [countLines, setCountLines] = useState<StockCountLine[]>([])
   const [countTypeFilter, setCountTypeFilter] = useState('daily')
+  const [showMonthPicker, setShowMonthPicker] = useState(false)
+  // Default to previous month so September is pre-selected when opening in October
+  const [monthPickerMonth, setMonthPickerMonth] = useState(() => {
+    const d = new Date(); d.setMonth(d.getMonth() - 1); return d.toISOString().slice(0, 7)
+  })
   const [supplierFilter, setSupplierFilter] = useState('All')
   const [parentItemSearch, setParentItemSearch] = useState('')
   const [itemSearch, setItemSearch] = useState('')
@@ -204,10 +209,10 @@ export default function StockPage() {
     await loadAll()
   }
 
-  async function startCount(type: string) {
+  async function startCount(type: string, countDate?: string) {
     setSaving(true)
     try {
-      const today = new Date().toISOString().split('T')[0]
+      const today = countDate || new Date().toISOString().split('T')[0]
       // Check for existing in-progress session
       const { data: existing } = await supabase
         .from('stock_counts')
@@ -735,9 +740,52 @@ export default function StockPage() {
                   ))}
                 </div>
               ) : (<>
+                {/* Month picker modal for Monthly counts */}
+                {showMonthPicker && (
+                  <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 9000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px' }}>
+                    <div style={{ background: '#fff', borderRadius: '20px', padding: '32px', width: '100%', maxWidth: '420px', boxShadow: '0 20px 60px rgba(0,0,0,0.18)' }}>
+                      <div style={{ fontSize: '22px', fontWeight: 900, color: '#7c3aed', marginBottom: '6px' }}>📊 Monthly Stock Count</div>
+                      <div style={{ fontSize: '13px', color: '#6b7280', marginBottom: '24px' }}>Select the month you are counting for. The count date will be set to the last day of that month — this becomes your closing stock and the opening balance for the following month.</div>
+                      <label style={{ ...LABEL }}>Count Month</label>
+                      <input
+                        type="month"
+                        value={monthPickerMonth}
+                        max={new Date().toISOString().slice(0, 7)}
+                        onChange={e => setMonthPickerMonth(e.target.value)}
+                        style={{ ...INPUT, marginBottom: '20px' }}
+                      />
+                      {monthPickerMonth && (() => {
+                        const [y, m] = monthPickerMonth.split('-').map(Number)
+                        const lastDay = new Date(y, m, 0).getDate()
+                        const countDate = `${monthPickerMonth}-${String(lastDay).padStart(2, '0')}`
+                        const label = new Date(monthPickerMonth + '-01').toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' })
+                        return (
+                          <div style={{ background: '#ede9fe', borderRadius: '10px', padding: '12px 16px', marginBottom: '20px', fontSize: '13px', color: '#5b21b6' }}>
+                            Count date will be: <strong>{countDate}</strong> · Closing stock for <strong>{label}</strong>
+                          </div>
+                        )
+                      })()}
+                      <div style={{ display: 'flex', gap: '10px' }}>
+                        <button onClick={() => setShowMonthPicker(false)} style={{ flex: 1, padding: '12px', border: '1.5px solid #e5e7eb', borderRadius: '10px', background: 'white', fontSize: '14px', fontWeight: 700, cursor: 'pointer', color: '#374151' }}>Cancel</button>
+                        <button
+                          disabled={!monthPickerMonth}
+                          onClick={() => {
+                            if (!monthPickerMonth) return
+                            const [y, m] = monthPickerMonth.split('-').map(Number)
+                            const lastDay = new Date(y, m, 0).getDate()
+                            const countDate = `${monthPickerMonth}-${String(lastDay).padStart(2, '0')}`
+                            setShowMonthPicker(false)
+                            startCount('monthly', countDate)
+                          }}
+                          style={{ flex: 2, padding: '12px', border: 'none', borderRadius: '10px', background: '#7c3aed', color: 'white', fontSize: '14px', fontWeight: 800, cursor: 'pointer' }}
+                        >Start Count →</button>
+                      </div>
+                    </div>
+                  </div>
+                )}
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px' }}>
                   {COUNT_TYPES.map(ct => (
-                    <button key={ct.key} onClick={() => startCount(ct.key)} style={{ background: 'white', borderRadius: '20px', border: `2px solid ${ct.color}30`, padding: '24px', textAlign: 'left', cursor: 'pointer', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
+                    <button key={ct.key} onClick={() => ct.key === 'monthly' ? setShowMonthPicker(true) : startCount(ct.key)} style={{ background: 'white', borderRadius: '20px', border: `2px solid ${ct.color}30`, padding: '24px', textAlign: 'left', cursor: 'pointer', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
                       <div style={{ fontSize: '28px', marginBottom: '10px' }}>{ct.key === 'daily' ? '🌅' : ct.key === 'weekly' ? '📅' : '📊'}</div>
                       <div style={{ fontWeight: 800, fontSize: '16px', color: ct.color }}>{ct.label}</div>
                       <div style={{ fontSize: '13px', color: '#9ca3af', marginTop: '4px' }}>{ct.desc}</div>
