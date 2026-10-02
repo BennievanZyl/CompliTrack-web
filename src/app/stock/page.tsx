@@ -250,7 +250,7 @@ export default function StockPage() {
       const lines = countItems.map(i => ({
         stock_count_id: session.id,
         stock_item_id: i.id,
-        expected_qty: 0,
+        expected_qty: Number(i.current_qty) || 0,
         actual_qty: 0,
         unit_cost: Number(i.cost_price) || Number(i.price) || 0
       }))
@@ -730,6 +730,11 @@ export default function StockPage() {
                           <div style={{ minWidth: '70px', textAlign: 'right', fontSize: '13px', fontWeight: 700, color: variance < 0 ? '#dc2626' : variance > 0 ? '#16a34a' : '#9ca3af' }}>
                             {variance > 0 ? '+' : ''}{variance.toFixed(1)}
                           </div>
+                          <button onClick={() => toggleFoodCost(item.id, item.is_food_cost !== false)}
+                            title={item.is_food_cost === false ? 'Excluded from food cost — tap to include' : 'Included in food cost — tap to exclude'}
+                            style={{ fontSize: '11px', fontWeight: 700, padding: '5px 8px', borderRadius: '8px', border: 'none', cursor: 'pointer', flexShrink: 0, background: item.is_food_cost === false ? '#fee2e2' : '#f0fdf4', color: item.is_food_cost === false ? '#dc2626' : '#16a34a' }}>
+                            {item.is_food_cost === false ? '🚫 FC' : '🍽️ FC'}
+                          </button>
                         </div>
                       )
                     })}
@@ -819,10 +824,10 @@ export default function StockPage() {
                   </div>
                 )}
                 {/* In-progress counts banner — resume without re-entering month picker */}
-                {counts.filter(c => c.status === 'in_progress').length > 0 && (
+                {counts.filter(c => c.status === 'in_progress' && new Date(c.count_date) >= new Date(Date.now() - 14 * 24 * 60 * 60 * 1000)).length > 0 && (
                   <div style={{ background: '#fffbeb', border: '1.5px solid #fcd34d', borderRadius: '16px', padding: '16px 20px' }}>
                     <div style={{ fontWeight: 800, fontSize: '13px', color: '#92400e', marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>⏸ Counts In Progress</div>
-                    {counts.filter(c => c.status === 'in_progress').map(count => {
+                    {counts.filter(c => c.status === 'in_progress' && new Date(c.count_date) >= new Date(Date.now() - 14 * 24 * 60 * 60 * 1000)).map(count => {
                       const ct = COUNT_TYPES.find(t => t.key === count.count_type)
                       return (
                         <div key={count.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'white', borderRadius: '10px', padding: '12px 16px', marginBottom: '8px', border: '1px solid #fde68a' }}>
