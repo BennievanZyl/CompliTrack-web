@@ -7,7 +7,7 @@ import { useRouter } from 'next/navigation'
 
 
 type StockCategory = { id: string; name: string; color: string; sort_order: number }
-type StockItem = { id: string; category: string | null; name: string; description: string; unit: string; cost_price: number; price: number; par_level: number; current_qty: number; is_active: boolean; sort_order: number; supplier: string | null; on_daily_sheet: boolean; is_catch_weight: boolean; kg_price: number; avg_weight_kg: number; parent_item_id: string | null; portion_size: number | null }
+type StockItem = { id: string; category: string | null; name: string; description: string; unit: string; cost_price: number; price: number; par_level: number; current_qty: number; is_active: boolean; sort_order: number; supplier: string | null; on_daily_sheet: boolean; is_catch_weight: boolean; kg_price: number; avg_weight_kg: number; parent_item_id: string | null; portion_size: number | null; is_food_cost: boolean }
 type StockAdjustment = { id: string; store_id: string; stock_item_id: string; item_name: string; qty_before: number; qty_after: number; adjustment: number; unit: string; reason: string; notes: string; created_at: string }
 type InvoiceColumn = { name: string; maps_to: string | null }
 type StockSupplier = { id: string; name: string; contact_name: string | null; phone: string | null; email: string | null; order_day: string | null; notes: string | null; payment_terms_days: number | null; is_active: boolean; sort_order: number; invoice_columns: InvoiceColumn[] | null; invoice_vat_included: boolean | null; delivers_stock: boolean }
@@ -282,6 +282,22 @@ export default function StockPage() {
         .map(l => supabase.from('stock_items').update({ current_qty: Number(l.actual_qty) || 0 }).eq('id', l.stock_item_id))
     )
     setActiveCount(null); setCountLines([]); await loadAll()
+  }
+
+  async function resumeCount(count: StockCount) {
+    setSaving(true)
+    const { data: lines } = await supabase
+      .from('stock_count_lines')
+      .select('*')
+      .eq('stock_count_id', count.id)
+    setActiveCount(count)
+    setCountLines(lines || [])
+    setSaving(false)
+  }
+
+  async function toggleFoodCost(itemId: string, currentlyIncluded: boolean) {
+    await supabase.from('stock_items').update({ is_food_cost: !currentlyIncluded }).eq('id', itemId)
+    setItems(prev => prev.map(i => i.id === itemId ? { ...i, is_food_cost: !currentlyIncluded } : i))
   }
 
   async function savePurchase() {
@@ -679,8 +695,8 @@ export default function StockPage() {
                     <div style={{ display: 'flex', gap: '10px' }}>
                       <button onClick={() => setShowAIImport(true)} style={{ padding: '8px 16px', background: '#7c3aed', color: 'white', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>🤖 AI Import</button>
                       <button onClick={printStockSheet} style={{ padding: '8px 16px', background: '#f0f4f0', color: '#1a5c38', border: '1.5px solid #d1fae5', borderRadius: '10px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>🖨 Print Sheet</button>
-                      <button onClick={completeCount} style={{ padding: '8px 16px', background: '#1a5c38', color: 'white', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>✓ Complete</button>
-                      <button onClick={() => { setActiveCount(null); setCountLines([]) }} style={{ padding: '8px 14px', background: '#f3f4f6', color: '#6b7280', border: 'none', borderRadius: '10px', cursor: 'pointer' }}>✕</button>
+                      <button onClick={() => { setActiveCount(null); setCountLines([]); loadAll() }} style={{ padding: '8px 16px', background: '#f59e0b', color: 'white', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>💾 Save & Close</button>
+                      <button onClick={completeCount} style={{ padding: '8px 16px', background: '#1a5c38', color: 'white', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>✅ Finalise</button>
                     </div>
                   </div>
                   {/* Group by supplier in count screen */}
@@ -702,12 +718,15 @@ export default function StockPage() {
                       return (
                         <div key={line.id} style={{ display: 'flex', alignItems: 'center', gap: '16px', padding: '12px 24px', borderTop: '1px solid #f3f4f6' }}>
                           <div style={{ flex: 1 }}>
-                            <div style={{ fontWeight: 600, fontSize: '14px', color: '#111' }}>{item.description || item.name}</div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <span style={{ fontWeight: 600, fontSize: '14px', color: item.is_food_cost === false ? '#9ca3af' : '#111' }}>{item.description || item.name}</span>
+                              {item.is_food_cost === false && <span style={{ fontSize: '10px', fontWeight: 700, background: '#fee2e2', color: '#dc2626', padding: '2px 6px', borderRadius: '100px', whiteSpace: 'nowrap' }}>🚫 excl. food cost</span>}
+                            </div>
                             <div style={{ fontSize: '12px', color: '#9ca3af' }}>{item.unit}</div>
                           </div>
                           <div style={{ fontSize: '12px', color: '#9ca3af', minWidth: '80px', textAlign: 'right' }}>Expected: <strong>{line.expected_qty || 0}</strong></div>
                           <input type="number" min="0" step="0.1" value={line.actual_qty || ''} onChange={e => updateCountLine(line.id, parseFloat(e.target.value) || 0)}
-                            style={{ width: '90px', padding: '8px 10px', border: '1.5px solid #e5e7eb', borderRadius: '10px', fontSize: '16px', textAlign: 'center', outline: 'none' }} />
+                            style={{ width: '90px', padding: '8px 10px', border: `1.5px solid ${item.is_food_cost === false ? '#fca5a5' : '#e5e7eb'}`, borderRadius: '10px', fontSize: '16px', textAlign: 'center', outline: 'none', background: item.is_food_cost === false ? '#fff7f7' : 'white' }} />
                           <div style={{ minWidth: '70px', textAlign: 'right', fontSize: '13px', fontWeight: 700, color: variance < 0 ? '#dc2626' : variance > 0 ? '#16a34a' : '#9ca3af' }}>
                             {variance > 0 ? '+' : ''}{variance.toFixed(1)}
                           </div>
@@ -717,6 +736,22 @@ export default function StockPage() {
                   </div>
                     )
                   })}
+                  {/* Food cost summary strip */}
+                  {(() => {
+                    const foodLines = countLines.filter(l => items.find(i => i.id === l.stock_item_id)?.is_food_cost !== false)
+                    const nonFoodLines = countLines.filter(l => items.find(i => i.id === l.stock_item_id)?.is_food_cost === false)
+                    const foodTotal = foodLines.reduce((s, l) => s + (Number(l.actual_qty) || 0) * (Number(l.unit_cost) || 0), 0)
+                    const nonFoodTotal = nonFoodLines.reduce((s, l) => s + (Number(l.actual_qty) || 0) * (Number(l.unit_cost) || 0), 0)
+                    const grandTotal = foodTotal + nonFoodTotal
+                    if (grandTotal === 0) return null
+                    return (
+                      <div style={{ borderTop: '2px solid #e5e7eb', padding: '14px 24px', display: 'flex', gap: '24px', justifyContent: 'flex-end', alignItems: 'center', background: '#f9fafb', flexWrap: 'wrap' }}>
+                        {nonFoodTotal > 0 && <div style={{ fontSize: '13px', color: '#6b7280' }}>🚫 Non-food cost: <strong style={{ color: '#dc2626' }}>{formatCurrency(nonFoodTotal)}</strong></div>}
+                        <div style={{ fontSize: '13px', color: '#6b7280' }}>🍽️ Food Cost Value: <strong style={{ color: '#1a5c38', fontSize: '15px' }}>{formatCurrency(foodTotal)}</strong></div>
+                        {nonFoodTotal > 0 && <div style={{ fontSize: '13px', color: '#6b7280' }}>Total: <strong style={{ color: '#111' }}>{formatCurrency(grandTotal)}</strong></div>}
+                      </div>
+                    )
+                  })()}
                   {/* OLD groupedItems render replaced */}
                   {false && Object.values(groupedItems).map(({ key, label, color, items: catItems }) => (
                     <div key={key}>
@@ -783,6 +818,24 @@ export default function StockPage() {
                     </div>
                   </div>
                 )}
+                {/* In-progress counts banner — resume without re-entering month picker */}
+                {counts.filter(c => c.status === 'in_progress').length > 0 && (
+                  <div style={{ background: '#fffbeb', border: '1.5px solid #fcd34d', borderRadius: '16px', padding: '16px 20px' }}>
+                    <div style={{ fontWeight: 800, fontSize: '13px', color: '#92400e', marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>⏸ Counts In Progress</div>
+                    {counts.filter(c => c.status === 'in_progress').map(count => {
+                      const ct = COUNT_TYPES.find(t => t.key === count.count_type)
+                      return (
+                        <div key={count.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'white', borderRadius: '10px', padding: '12px 16px', marginBottom: '8px', border: '1px solid #fde68a' }}>
+                          <div>
+                            <span style={{ fontWeight: 700, fontSize: '14px', color: ct?.color }}>{ct?.label} Count</span>
+                            <span style={{ fontSize: '13px', color: '#6b7280', marginLeft: '10px' }}>{formatDate(count.count_date)}</span>
+                          </div>
+                          <button onClick={() => resumeCount(count)} disabled={saving} style={{ padding: '8px 18px', background: '#f59e0b', color: 'white', border: 'none', borderRadius: '8px', fontSize: '13px', fontWeight: 800, cursor: 'pointer' }}>▶ Resume</button>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px' }}>
                   {COUNT_TYPES.map(ct => (
                     <button key={ct.key} onClick={() => ct.key === 'monthly' ? setShowMonthPicker(true) : startCount(ct.key)} style={{ background: 'white', borderRadius: '20px', border: `2px solid ${ct.color}30`, padding: '24px', textAlign: 'left', cursor: 'pointer', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
@@ -805,7 +858,10 @@ export default function StockPage() {
                     : counts.filter(c => c.count_type === countTypeFilter).map(count => (
                       <div key={count.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 24px', borderTop: '1px solid #f3f4f6' }}>
                         <div><div style={{ fontWeight: 700, fontSize: '14px', color: '#111' }}>{formatDate(count.count_date)}</div><div style={{ fontSize: '12px', color: '#9ca3af' }}>{count.count_type}</div></div>
-                        <span style={{ fontSize: '11px', fontWeight: 700, padding: '3px 10px', borderRadius: '100px', background: count.status === 'completed' ? '#dcfce7' : '#fef3c7', color: count.status === 'completed' ? '#166534' : '#92400e' }}>{count.status}</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          {count.status === 'in_progress' && <button onClick={() => resumeCount(count)} style={{ fontSize: '12px', fontWeight: 700, padding: '4px 12px', background: '#f59e0b', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer' }}>▶ Resume</button>}
+                          <span style={{ fontSize: '11px', fontWeight: 700, padding: '3px 10px', borderRadius: '100px', background: count.status === 'completed' ? '#dcfce7' : '#fef3c7', color: count.status === 'completed' ? '#166534' : '#92400e' }}>{count.status}</span>
+                        </div>
                       </div>
                     ))}
                 </div>
@@ -1212,9 +1268,10 @@ export default function StockPage() {
                           <tr key={item.id} style={{ borderTop: '1px solid #f3f4f6' }}>
                             <td style={{ padding: '12px 16px' }}>
                               <div style={{ fontWeight: 700, fontSize: '14px', color: '#111' }}>{item.description || item.name}</div>
-                              <div style={{ display: 'flex', gap: '6px', marginTop: '4px' }}>
+                              <div style={{ display: 'flex', gap: '6px', marginTop: '4px', flexWrap: 'wrap' as const }}>
                                 {item.supplier && <span style={{ fontSize: '11px', fontWeight: 600, background: '#eff6ff', color: '#2563eb', padding: '2px 8px', borderRadius: '20px' }}>{item.supplier}</span>}
                                 {item.on_daily_sheet && <span style={{ fontSize: '11px', fontWeight: 600, background: '#f0fdf4', color: '#16a34a', padding: '2px 8px', borderRadius: '20px' }}>📋 Daily</span>}
+                                {item.is_food_cost === false && <span style={{ fontSize: '11px', fontWeight: 600, background: '#fee2e2', color: '#dc2626', padding: '2px 8px', borderRadius: '20px' }}>🚫 Excl. Food Cost</span>}
                               </div>
                             </td>
                             <td style={{ padding: '12px 16px', fontSize: '13px', color: '#6b7280' }}>{item.unit}</td>
@@ -1258,6 +1315,7 @@ export default function StockPage() {
                                   setShowAddItem(true)
                                 }} style={{ fontSize: '12px', color: '#1d4ed8', background: '#eff6ff', border: 'none', borderRadius: '8px', padding: '5px 10px', cursor: 'pointer', fontWeight: 600 }}>Edit</button>
                                 <button onClick={() => { setAdjustItem(item); setAdjustQty(''); setAdjustMode('set'); setAdjustReason(''); setAdjustNotes(''); loadAdjustHistory(item.id) }} style={{ fontSize: '12px', color: '#7c3aed', background: '#ede9fe', border: 'none', borderRadius: '8px', padding: '5px 10px', cursor: 'pointer', fontWeight: 600 }}>Adjust</button>
+                                <button onClick={() => toggleFoodCost(item.id, item.is_food_cost !== false)} title={item.is_food_cost === false ? 'Excluded from food cost — click to include' : 'Included in food cost — click to exclude'} style={{ fontSize: '11px', fontWeight: 700, padding: '5px 8px', borderRadius: '8px', border: 'none', cursor: 'pointer', background: item.is_food_cost === false ? '#fee2e2' : '#f0fdf4', color: item.is_food_cost === false ? '#dc2626' : '#16a34a' }}>{item.is_food_cost === false ? '🚫 FC' : '🍽️ FC'}</button>
                                 <button onClick={() => deleteItem(item.id)} style={{ fontSize: '12px', color: '#dc2626', background: '#fee2e2', border: 'none', borderRadius: '8px', padding: '5px 8px', cursor: 'pointer', fontWeight: 700 }}>✕</button>
                               </div>
                             </td>
