@@ -353,6 +353,17 @@ export default function StockPage() {
     setSaving(false)
   }
 
+  async function deleteCount(count: StockCount) {
+    const label = count.status === 'in_progress' ? 'incomplete' : 'completed'
+    if (!confirm(`Delete this ${label} count from ${formatDate(count.count_date)}? This cannot be undone.`)) return
+    setSaving(true)
+    await supabase.from('stock_count_lines').delete().eq('stock_count_id', count.id)
+    await supabase.from('stock_counts').delete().eq('id', count.id)
+    if (activeCount?.id === count.id) { setActiveCount(null); setCountLines([]); setActiveSection(null) }
+    await loadAll()
+    setSaving(false)
+  }
+
   async function toggleFoodCost(itemId: string, currentlyIncluded: boolean) {
     await supabase.from('stock_items').update({ is_food_cost: !currentlyIncluded }).eq('id', itemId)
     setItems(prev => prev.map(i => i.id === itemId ? { ...i, is_food_cost: !currentlyIncluded } : i))
@@ -1021,6 +1032,7 @@ export default function StockPage() {
                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                           {count.status === 'in_progress' && <button onClick={() => resumeCount(count)} style={{ fontSize: '12px', fontWeight: 700, padding: '4px 12px', background: '#f59e0b', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer' }}>▶ Resume</button>}
                           <span style={{ fontSize: '11px', fontWeight: 700, padding: '3px 10px', borderRadius: '100px', background: count.status === 'completed' ? '#dcfce7' : '#fef3c7', color: count.status === 'completed' ? '#166534' : '#92400e' }}>{count.status}</span>
+                          <button onClick={() => deleteCount(count)} title="Delete this count" style={{ fontSize: '13px', padding: '4px 8px', background: '#fee2e2', color: '#dc2626', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 700 }}>🗑️</button>
                         </div>
                       </div>
                     ))}
