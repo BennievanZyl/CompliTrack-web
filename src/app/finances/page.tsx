@@ -1,1979 +1,2350 @@
 'use client'
 import { useStoreContext } from '@/lib/store-context'
-
-import { useState, useEffect } from 'react'
-import { supabase } from '@/lib/supabase'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
+import { supabase } from '@/lib/supabase'
+
+const VAT_RATE = 0.15
+
+const TABS = ['Summary', 'Cash-Ups / Sales', 'Supplier Bills', 'Quick Expenses', 'Food Cost', 'History']
+
+const COLOUR_PALETTE = ['#10b981','#ef4444','#3b82f6','#f59e0b','#8b5cf6','#06b6d4','#f97316','#ec4899','#84cc16','#6b7280','#dc2626','#0ea5e9','#a855f7','#22c55e','#1d4ed8']
 
 
-type StockCategory = { id: string; name: string; color: string; sort_order: number }
-type StockItem = { id: string; category: string | null; name: string; description: string; unit: string; cost_price: number; price: number; par_level: number; current_qty: number; is_active: boolean; sort_order: number; supplier: string | null; on_daily_sheet: boolean; is_catch_weight: boolean; kg_price: number; avg_weight_kg: number; parent_item_id: string | null; portion_size: number | null; is_food_cost: boolean }
-type StockAdjustment = { id: string; store_id: string; stock_item_id: string; item_name: string; qty_before: number; qty_after: number; adjustment: number; unit: string; reason: string; notes: string; created_at: string }
-type InvoiceColumn = { name: string; maps_to: string | null }
-type StockSupplier = { id: string; name: string; contact_name: string | null; phone: string | null; email: string | null; order_day: string | null; notes: string | null; payment_terms_days: number | null; is_active: boolean; sort_order: number; invoice_columns: InvoiceColumn[] | null; invoice_vat_included: boolean | null; delivers_stock: boolean }
-const MAPS_TO_OPTIONS = [
-  { value: '', label: '— ignore this column —' },
-  { value: 'description', label: 'Item Description' },
-  { value: 'qty', label: 'Quantity' },
-  { value: 'uom', label: 'Unit of Measure' },
-  { value: 'unit_price_excl', label: 'Unit Price (excl VAT) ← use this for pricing' },
-  { value: 'unit_price_incl', label: 'Unit Price (incl VAT)' },
-  { value: 'total_excl', label: 'Line Total (excl VAT)' },
-  { value: 'vat_amount', label: 'VAT Amount' },
-  { value: 'total_incl', label: 'Line Total (incl VAT)' },
-]
+const PAYMENT_METHODS = ['bank_transfer', 'cash', 'credit_card', 'debit_order', 'eft', 'cheque']
+const INVOICE_STATUSES = ['draft', 'received', 'paid']
 
-type StockSection = { id: string; store_id: string; name: string; color: string; icon: string; sort_order: number; is_active: boolean }
-type StockCount = { id: string; count_type: string; count_date: string; status: string; notes: string | null }
-type StockCountLine = { id: string; stock_count_id: string; stock_item_id: string; expected_qty: number; actual_qty: number; unit_cost: number; section_id?: string | null }
-type StockPurchase = { id: string; purchase_date: string; supplier_name: string | null; item_name: string | null; quantity: number; unit: string | null; unit_cost: number; total_cost: number; invoice_number: string | null }
-type StockWastage = { id: string; wastage_date: string; item_name: string | null; quantity: number; unit: string | null; unit_cost: number; total_cost: number; reason: string | null }
-type StockIssue = { id: string; issue_date: string; item_name: string | null; quantity: number; unit: string | null; issued_to: string | null; notes: string | null }
-type StockOrder = { id: string; supplier_name: string; order_date: string; expected_delivery: string | null; status: string; notes: string | null; total_value: number }
-
-const TABS = [
-  { key: 'counts', label: '📊 Stock Counts' },
-  { key: 'purchases', label: '🛒 Purchases' },
-  { key: 'issues', label: '🍳 Issue Stock' },
-  { key: 'wastage', label: '🗑️ Wastage' },
-  { key: 'orders', label: '📦 Orders' },
-  { key: 'items', label: '⚙️ Stock Items' },
-  { key: 'suppliers', label: '🚛 Suppliers' },
-]
-
-const ISSUE_DESTINATIONS = ['Kitchen', 'Fryer Station', 'Prep', 'Front Counter', 'Bar', 'Catering Order', 'Other']
-function getCategoryIcon(name: string): string {
-  const n = (name || '').toLowerCase()
-  if (n.includes('cheese') || n.includes('dairy')) return '\u{1F9C0}'
-  if (n.includes('chip') || n.includes('fries') || n.includes('potato')) return '\u{1F35F}'
-  if (n.includes('veg') || n.includes('salad') || n.includes('lettuce')) return '\u{1F96C}'
-  if (n.includes('fruit')) return '\u{1F34E}'
-  if (n.includes('chicken') || n.includes('meat') || n.includes('beef') || n.includes('pork')) return '\u{1F357}'
-  if (n.includes('fish') || n.includes('seafood') || n.includes('prawn')) return '\u{1F41F}'
-  if (n.includes('bread') || n.includes('bun') || n.includes('bakery')) return '\u{1F35E}'
-  if (n.includes('sauce') || n.includes('condiment') || n.includes('dressing')) return '\u{1F96B}'
-  if (n.includes('spice') || n.includes('season')) return '\u{1F336}\u{FE0F}'
-  if (n.includes('drink') || n.includes('beverage') || n.includes('soda') || n.includes('cola')) return '\u{1F964}'
-  if (n.includes('frozen')) return '\u{1F9CA}'
-  if (n.includes('oil') || n.includes('fat')) return '\u{1FAD7}'
-  if (n.includes('clean')) return '\u{1F9FD}'
-  if (n.includes('packag') || n.includes('disposable') || n.includes('box')) return '\u{1F4E6}'
-  if (n.includes('dry') || n.includes('grocery') || n.includes('grain') || n.includes('rice') || n.includes('flour')) return '\u{1F33E}'
-  return '\u{1F4E6}'
+type CashUp = {
+  id: string; cash_up_date: string; cash_up_total: number; total_cash: number
+  eft_total: number; payouts: number; variance: number; customer_count: number
+  average_spend: number; status: string; notes: string
+}
+type InvoiceLine = {
+  id?: string; category_key: string; description: string
+  qty: number; uom: string; unit_price: number
+  amount: number; vat_amount: number
+  case_size?: number | null; case_uom?: string | null
+}
+type Invoice = {
+  id: string; supplier: string; invoice_number: string; invoice_date: string
+  due_date: string; status: string; payment_method: string; notes: string
+  total_amount: number; total_vat: number
+  invoice_lines?: InvoiceLine[]
+}
+type QuickExpense = {
+  id: string; expense_date: string; category_key: string; category_name: string
+  description: string; amount: number; vat_amount: number; zero_vat?: boolean
+  supplier: string; invoice_number: string; payment_method: string; notes: string
 }
 
-const COUNT_TYPES = [
-  { key: 'daily', label: 'Daily', desc: 'Quick daily check — buy for the day', color: '#16a34a', bg: '#dcfce7' },
-  { key: 'weekly', label: 'Weekly', desc: 'Weekly stocktake — calculate food cost', color: '#2563eb', bg: '#dbeafe' },
-  { key: 'monthly', label: 'Monthly', desc: 'Full month stocktake — monthly food cost', color: '#7c3aed', bg: '#ede9fe' },
-]
-
-const UNITS = ['each', 'kg', 'g', 'L', 'ml', 'pack', 'box', 'bag', 'bottle', 'tin', 'tray', 'dozen']
-const WASTAGE_REASONS = ['Expired', 'Damaged', 'Over-cooked', 'Dropped', 'Spillage', 'Wrong order', 'Other']
-
-const INPUT: React.CSSProperties = { width: '100%', border: '1.5px solid #e5e7eb', borderRadius: '10px', padding: '10px 12px', fontSize: '14px', outline: 'none', boxSizing: 'border-box', background: '#fff', fontFamily: 'system-ui' }
-const LABEL: React.CSSProperties = { display: 'block', fontSize: '12px', fontWeight: 700, color: '#374151', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.5px' }
-
-function formatCurrency(v: number) { return `R ${v.toFixed(2)}` }
-function formatDate(d: string) { return new Date(d).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' }) }
-
-function Modal({ show, onClose, title, children, maxWidth = '480px' }: { show: boolean; onClose: () => void; title: string; children: React.ReactNode; maxWidth?: string }) {
-  if (!show) return null
-  return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: '16px' }}>
-      <div style={{ background: 'white', borderRadius: '24px', width: '100%', maxWidth, maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 24px 60px rgba(0,0,0,0.2)' }}>
-        <div style={{ padding: '24px 28px 16px', borderBottom: '1px solid #f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <h2 style={{ fontSize: '18px', fontWeight: 800, color: '#111', margin: 0 }}>{title}</h2>
-          <button onClick={onClose} style={{ background: '#f3f4f6', border: 'none', borderRadius: '8px', width: '32px', height: '32px', cursor: 'pointer', fontSize: '16px' }}>✕</button>
-        </div>
-        {children}
-      </div>
-    </div>
-  )
+function fmt(n: number) {
+  return 'R ' + (n ?? 0).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+function thisMonth() {
+  const now = new Date()
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+}
+function today() { return new Date().toISOString().split('T')[0] }
+function addDays(dateStr: string, days: number) {
+  const d = new Date(dateStr + 'T00:00:00')
+  d.setDate(d.getDate() + days)
+  return d.toISOString().split('T')[0]
 }
 
-export default function StockPage() {
-  const { storeId: STORE_ID, ready: ctxReady } = useStoreContext()
+// Suggest stock items whose name/description relates to the scanned invoice description.
+// Handles both directions: "Avocado Pulp" -> "Avo" (item is a prefix/abbreviation of a word)
+// and "Avo" -> "Avocado Pulp" (typed text is a prefix of the item word).
+function matchStockItems(desc: string, items: {id:string;description:string;unit:string;supplier:string|null}[], limit = 4) {
+  const words = desc.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(w => w.length > 2)
+  if (!words.length) return []
+  const scored = items.map(item => {
+    const itemWords = item.description.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(w => w.length > 1)
+    let score = 0
+    for (const w of words) {
+      for (const iw of itemWords) {
+        if (w === iw) score += 3
+        else if (w.startsWith(iw) || iw.startsWith(w)) score += 2
+        else if (w.includes(iw) || iw.includes(w)) score += 1
+      }
+    }
+    return { item, score }
+  }).filter(s => s.score > 0)
+  scored.sort((a, b) => b.score - a.score)
+  return scored.slice(0, limit).map(s => s.item)
+}
+
+const emptyLine = (firstKey = 'cost_of_sales'): InvoiceLine => ({ category_key: firstKey, description: '', qty: 1, uom: 'each', unit_price: 0, amount: 0, vat_amount: 0 })
+const emptyInvoice = () => ({
+  supplier: '', invoice_number: '', invoice_date: today(),
+  due_date: '', status: 'draft', payment_method: 'bank_transfer', notes: ''
+})
+const emptyQLine = () => ({ category_key: 'other', description: '', amount: '' })
+const emptyQuick = () => ({
+  expense_date: today(), supplier: '', invoice_number: '',
+  payment_method: 'cash', notes: '',
+  lines: [emptyQLine()]
+})
+
+export default function FinancesPage() {
+  const { storeId: STORE_ID, orgId: ORG_ID, ready: ctxReady } = useStoreContext()
   const router = useRouter()
-  const [tab, setTab] = useState('counts')
-  const [categories, setCategories] = useState<StockCategory[]>([])
-  const [items, setItems] = useState<StockItem[]>([])
-  const [counts, setCounts] = useState<StockCount[]>([])
-  const [purchases, setPurchases] = useState<StockPurchase[]>([])
-  const [wastage, setWastage] = useState<StockWastage[]>([])
-  const [issues, setIssues] = useState<StockIssue[]>([])
-  const [orders, setOrders] = useState<StockOrder[]>([])
-  const [loading, setLoading] = useState(true)
-  const [suppliers, setSuppliers] = useState<StockSupplier[]>([])
-  const [showSupplierForm, setShowSupplierForm] = useState(false)
-  const [editSupplier, setEditSupplier] = useState<StockSupplier | null>(null)
-  const [supplierForm, setSupplierForm] = useState({ name: '', contact_name: '', phone: '', email: '', order_day: '', notes: '', payment_terms_days: '7', delivers_stock: true })
-  const [invoiceColumns, setInvoiceColumns] = useState<InvoiceColumn[]>([])
-  const [invoiceVatIncluded, setInvoiceVatIncluded] = useState(true)
-  const [saving, setSaving] = useState(false)
-  const [activeCount, setActiveCount] = useState<StockCount | null>(null)
-  const [viewMode, setViewMode] = useState(false)
-  const [countLines, setCountLines] = useState<StockCountLine[]>([])
-  const [countInputs, setCountInputs] = useState<Record<string, string>>({})
-  const [sections, setSections] = useState<StockSection[]>([])
-  const [itemSections, setItemSections] = useState<Record<string, string[]>>({}) // itemId → sectionId[]
-  const [activeSection, setActiveSection] = useState<StockSection | null>(null) // null = All
-  const [itemFormSections, setItemFormSections] = useState<string[]>([])
-  const [showSectionManager, setShowSectionManager] = useState(false)
-  const [sectionForm, setSectionForm] = useState({ name: '', color: '#1a5c38', icon: '📦' })
-  const [editSection, setEditSection] = useState<StockSection | null>(null)
-  const [countTypeFilter, setCountTypeFilter] = useState('daily')
-  const [showMonthPicker, setShowMonthPicker] = useState(false)
-  // Default to previous month so September is pre-selected when opening in October
-  const [monthPickerMonth, setMonthPickerMonth] = useState(() => {
-    const d = new Date(); d.setMonth(d.getMonth() - 1); return d.toISOString().slice(0, 7)
+  const [tab, setTab] = useState(0)
+  const [historyInvoices, setHistoryInvoices] = useState<Invoice[]>([])
+  const [historyLoading, setHistoryLoading] = useState(false)
+  const [historyLoaded, setHistoryLoaded] = useState(false)
+  const [historySupplier, setHistorySupplier] = useState('All')
+  const [historySearch, setHistorySearch] = useState('')
+  const [historyStatus, setHistoryStatus] = useState('All')
+  const [invSearch, setInvSearch] = useState('')
+  const [month, setMonth] = useState(thisMonth())
+  const [fcMode, setFcMode] = useState<'month' | 'week'>('month')
+  const [fcWeekStart, setFcWeekStart] = useState(() => {
+    const d = new Date(); const day = (d.getDay() + 6) % 7; d.setDate(d.getDate() - day)
+    return d.toISOString().split('T')[0]
   })
-  const [supplierFilter, setSupplierFilter] = useState('All')
-  const [parentItemSearch, setParentItemSearch] = useState('')
-  const [itemSearch, setItemSearch] = useState('')
-  const [showAIImport, setShowAIImport] = useState(false)
-  const [aiText, setAIText] = useState('')
-  const [aiLoading, setAILoading] = useState(false)
-  const [aiResults, setAIResults] = useState<{ name: string; qty: number; unit: string }[]>([])
-  const [showAddItem, setShowAddItem] = useState(false)
-  const [showInlineCat, setShowInlineCat] = useState(false)
-  const [storeSettings, setStoreSettings] = useState({ allow_negative_stock: true, require_pin_on_issue: false })
-  const [pinModal, setPinModal] = useState<{ mode: 'issue' | 'override'; onSuccess: () => void } | null>(null)
-  const [pinInput, setPinInput] = useState('')
-  const [pinError, setPinError] = useState('')
-  const [adjustItem, setAdjustItem] = useState<StockItem | null>(null)
-  const [adjustQty, setAdjustQty] = useState('')
-  const [adjustMode, setAdjustMode] = useState<'set' | 'add' | 'subtract'>('set')
-  const [adjustReason, setAdjustReason] = useState('')
-  const [adjustNotes, setAdjustNotes] = useState('')
-  const [adjusting, setAdjusting] = useState(false)
-  const [adjustHistory, setAdjustHistory] = useState<StockAdjustment[]>([])
-  const [newCatName, setNewCatName] = useState('')
+  const [fcLoading, setFcLoading] = useState(false)
+  const [fcLoaded, setFcLoaded] = useState(false)
+  const [fcData, setFcData] = useState<{
+    openingValue: number; openingDate: string | null; openingMissing: boolean; openingManual: boolean; openingReason: string | null
+    closingValue: number; closingDate: string | null; closingMissing: boolean; closingManual: boolean; closingReason: string | null
+    purchases: number; wastage: number; sales: number
+  } | null>(null)
+  const [fcOverrideField, setFcOverrideField] = useState<'opening' | 'closing' | null>(null)
+  const [fcOverrideForm, setFcOverrideForm] = useState({ value: '', reason: '' })
+  const [fcOverrideCountThisQuarter, setFcOverrideCountThisQuarter] = useState(0)
+
+  const [categories, setCategories] = useState<{id:string;name:string;key:string;colour:string}[]>([])
+  const [suppliers, setSuppliers] = useState<{id:string;name:string;payment_terms_days:number|null;invoice_columns:{name:string;maps_to:string|null}[]|null;invoice_vat_included:boolean|null;delivers_stock:boolean}[]>([])
+  const [cashUps, setCashUps] = useState<CashUp[]>([])
+  const [invoices, setInvoices] = useState<Invoice[]>([])
+  const [quickExp, setQuickExp] = useState<QuickExpense[]>([])
+  const [wages, setWages] = useState<{gross_pay: number; uif_employer: number}[]>([])
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [showGRV, setShowGRV] = useState(false)
+  const [grvInvoice, setGrvInvoice] = useState<Invoice | null>(null)
+  const [grvItems, setGrvItems] = useState<{id:string;description:string;unit:string;supplier:string|null}[]>([])
+  const [grvLines, setGrvLines] = useState<{stock_item_id:string;description:string;unit:string;qty_received:string;unit_cost:string;units_per_case:string;case_qty:string;case_price:string;is_catch_weight:boolean}[]>([])
+  const [savingGRV, setSavingGRV] = useState(false)
+  const [editingValues, setEditingValues] = useState<Record<string, string>>({})
+  const [scanning, setScanning] = useState(false)
+  const [scanError, setScanError] = useState('')
+  const [showScanChoice, setShowScanChoice] = useState(false)
+  const [scanSupplier, setScanSupplier] = useState('')
+  const scanSupplierRef = useRef('') // ref mirrors state n/a always readable in async closures without stale value issues
+  const [deviceScanStatus, setDeviceScanStatus] = useState<'waiting' | 'received' | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [error, setError] = useState('')
+  const [allStockItems, setAllStockItems] = useState<{id:string;description:string;unit:string;supplier:string|null}[]>([])
+
+  // Category manager state
+  const [showQuickCat, setShowQuickCat] = useState(false)
+  const [quickCatForm, setQuickCatForm] = useState({ name: '', colour: '#10b981' })
+  const [showCatManager, setShowCatManager] = useState(false)
+  const [editingCat, setEditingCat] = useState<any>(null)
+  const [catEditForm, setCatEditForm] = useState({ name: '', colour: '#10b981' })
   const [savingCat, setSavingCat] = useState(false)
-  const [showAddPurchase, setShowAddPurchase] = useState(false)
-  const [showAddWastage, setShowAddWastage] = useState(false)
-  const [showAddOrder, setShowAddOrder] = useState(false)
-  const [showAddCategory, setShowAddCategory] = useState(false)
-  const [editItem, setEditItem] = useState<StockItem | null>(null)
-  const [itemForm, setItemForm] = useState({ name: '', description: '', category_id: 'goods', unit: 'each', cost_price: '', par_level: '', supplier: 'Other', on_daily_sheet: false, is_catch_weight: false, kg_price: '', avg_weight_kg: '', is_prepped_item: false, parent_item_id: '', portion_size: '' })
-  const [purchaseForm, setPurchaseForm] = useState({ purchase_date: new Date().toISOString().split('T')[0], supplier_name: '', stock_item_id: '', item_name: '', quantity: '', unit: 'each', unit_cost: '', invoice_number: '' })
-  const [wastageForm, setWastageForm] = useState({ wastage_date: new Date().toISOString().split('T')[0], stock_item_id: '', item_name: '', quantity: '', unit: 'each', unit_cost: '', reason: 'Expired' })
-  const [issueForm, setIssueForm] = useState<{ stock_item_id: string; item_name: string; quantity: string; unit: string; issued_to: string; notes: string; preppedBreakdown: Record<string, string> }>({ stock_item_id: '', item_name: '', quantity: '', unit: 'each', issued_to: 'Kitchen', notes: '', preppedBreakdown: {} })
-  const [issueCategory, setIssueCategory] = useState<string | null>(null)
-  const [issueSearch, setIssueSearch] = useState('')
-  const [orderForm, setOrderForm] = useState({ supplier_name: '', order_date: new Date().toISOString().split('T')[0], expected_delivery: '', notes: '' })
-  const [categoryForm, setCategoryForm] = useState({ name: '', color: '#1a5c38' })
 
-  useEffect(() => { if (ctxReady && STORE_ID) loadAll() }, [ctxReady, STORE_ID])
+  // Invoice form state
+  const [showInvForm, setShowInvForm] = useState(false)
+  const [editInv, setEditInv] = useState<Invoice | null>(null)
+  const [invForm, setInvForm] = useState(emptyInvoice())
+  const [invLines, setInvLines] = useState<InvoiceLine[]>([emptyLine()])
+  const [expandedInv, setExpandedInv] = useState<string | null>(null)
+  const [expandedDates, setExpandedDates] = useState<Set<string>>(() => {
+    // Open today and yesterday by default
+    const s = new Set<string>()
+    const now = new Date()
+    s.add(now.toISOString().slice(0, 10))
+    const yest = new Date(now); yest.setDate(yest.getDate() - 1)
+    s.add(yest.toISOString().slice(0, 10))
+    return s
+  })
 
-  // When a count is opened or changed, seed countInputs with non-zero quantities (blank otherwise)
-  useEffect(() => {
-    if (!activeCount) { setCountInputs({}); return }
-    const inputs: Record<string, string> = {}
-    countLines.forEach(l => { if (Number(l.actual_qty) > 0) inputs[l.id] = String(l.actual_qty) })
-    setCountInputs(inputs)
-  }, [activeCount?.id])
+  // Quick expense form state
+  const [showQForm, setShowQForm] = useState(false)
+  const [editQ, setEditQ] = useState<QuickExpense | null>(null)
+  const [qForm, setQForm] = useState(emptyQuick())
 
-  async function loadAll() {
+  const CAT_MAP = Object.fromEntries(categories.map(c => [c.key, c]))
+  const defaultCatKey = categories.find(c => /stock|cogs/i.test(c.name))?.key || categories[0]?.key || 'cost_of_sales'
+  // Stock/COGS is used daily (deliveries, packaging, cleaning) so it should always lead the dropdown,
+  // ahead of monthly items like Rent.
+  const sortedCategories = [...categories].sort((a, b) => {
+    const aStock = /stock|cogs/i.test(a.name) ? 0 : 1
+    const bStock = /stock|cogs/i.test(b.name) ? 0 : 1
+    return aStock - bStock
+  })
+
+  async function saveQuickCategory() {
+    if (!quickCatForm.name) return
+    setSavingCat(true)
+    const key = quickCatForm.name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')
+    await supabase.from('expense_categories').insert({
+      organisation_id: ORG_ID, name: quickCatForm.name, key,
+      colour: quickCatForm.colour, is_active: true, sort_order: categories.length + 1
+    })
+    setQuickCatForm({ name: '', colour: '#10b981' })
+    setShowQuickCat(false)
+    setSavingCat(false)
+    await load()
+  }
+
+  const load = useCallback(async () => {
+    if (!STORE_ID) return
     setLoading(true)
     try {
-    const [catRes, itemRes, countRes, purchRes, wastRes, ordRes, suppRes, issueRes, sectRes] = await Promise.all([
-      supabase.from('stock_categories').select('*').eq('store_id', STORE_ID).order('sort_order'),
-      supabase.from('stock_items').select('*').eq('store_id', STORE_ID).eq('is_active', true).order('sort_order', { nullsFirst: false }),
-      supabase.from('stock_counts').select('*').eq('store_id', STORE_ID).order('count_date', { ascending: false }).limit(30),
-      supabase.from('stock_purchases').select('*').eq('store_id', STORE_ID).order('purchase_date', { ascending: false }).limit(50),
-      supabase.from('stock_wastage').select('*').eq('store_id', STORE_ID).order('wastage_date', { ascending: false }).limit(50),
-      supabase.from('stock_orders').select('*').eq('store_id', STORE_ID).order('order_date', { ascending: false }).limit(30),
-      supabase.from('stock_suppliers').select('*').eq('store_id', STORE_ID).eq('is_active', true).order('sort_order'),
-      supabase.from('stock_issues').select('*').eq('store_id', STORE_ID).order('issue_date', { ascending: false }).limit(50),
-      supabase.from('stock_sections').select('*').eq('store_id', STORE_ID).eq('is_active', true).order('sort_order'),
-    ])
-    // Fetch item-section assignments via join to filter by store
-    const iSecRes = await supabase
-      .from('stock_item_sections')
-      .select('stock_item_id, section_id, stock_sections!inner(store_id)')
-      .eq('stock_sections.store_id', STORE_ID)
-    setCategories(catRes.data || [])
-    setItems(itemRes.data || [])
-    setCounts(countRes.data || [])
-    setPurchases(purchRes.data || [])
-    setWastage(wastRes.data || [])
-    setIssues(issueRes.data || [])
-    if (suppRes?.error) console.error('suppliers error:', suppRes.error.message)
-    setOrders(ordRes.data || [])
-    setSuppliers(suppRes?.data || [])
-    setSections(sectRes.data || [])
-    // Build itemId → sectionId[] map
-    const iSectMap: Record<string, string[]> = {}
-    for (const row of (iSecRes.data || [])) {
-      const r = row as { stock_item_id: string; section_id: string }
-      if (!iSectMap[r.stock_item_id]) iSectMap[r.stock_item_id] = []
-      iSectMap[r.stock_item_id].push(r.section_id)
-    }
-    setItemSections(iSectMap)
-    } catch(e) { console.error('loadAll error:', e) }
-    setLoading(false)
-  }
-
-  async function saveSupplier() {
-    if (!supplierForm.name) return
-    setSaving(true)
-    const payload = {
-      store_id: STORE_ID, ...supplierForm,
-      payment_terms_days: parseInt(supplierForm.payment_terms_days) || 7,
-      is_active: true, sort_order: suppliers.length + 1,
-      invoice_columns: invoiceColumns.length > 0 ? invoiceColumns : null,
-      invoice_vat_included: invoiceVatIncluded,
-      delivers_stock: supplierForm.delivers_stock,
-    }
-    if (editSupplier) {
-      await supabase.from('stock_suppliers').update(payload).eq('id', editSupplier.id)
-    } else {
-      await supabase.from('stock_suppliers').insert(payload)
-    }
-    setShowSupplierForm(false); setEditSupplier(null)
-    setSupplierForm({ name: '', contact_name: '', phone: '', email: '', order_day: '', notes: '', payment_terms_days: '7', delivers_stock: true }); setInvoiceColumns([]); setInvoiceVatIncluded(true)
-    setSaving(false); await loadAll()
-  }
-
-  async function deleteSupplier(id: string) {
-    if (!confirm('Delete this supplier? Items linked to them will lose their supplier assignment.')) return
-    await supabase.from('stock_suppliers').update({ is_active: false }).eq('id', id)
-    await loadAll()
-  }
-
-  async function saveSection() {
-    if (!sectionForm.name.trim()) return
-    setSaving(true)
-    const payload = { store_id: STORE_ID, name: sectionForm.name.trim(), color: sectionForm.color, icon: sectionForm.icon || '📦', sort_order: editSection ? editSection.sort_order : sections.length + 1, is_active: true }
-    if (editSection) {
-      await supabase.from('stock_sections').update(payload).eq('id', editSection.id)
-    } else {
-      await supabase.from('stock_sections').insert(payload)
-    }
-    setSectionForm({ name: '', color: '#1a5c38', icon: '📦' }); setEditSection(null); setSaving(false); await loadAll()
-  }
-
-  async function deleteSection(id: string) {
-    if (!confirm('Delete this section? Items will be unassigned from it.')) return
-    await supabase.from('stock_sections').update({ is_active: false }).eq('id', id)
-    await loadAll()
-  }
-
-  async function startCount(type: string, countDate?: string) {
-    setSaving(true)
-    try {
-      const today = countDate || new Date().toISOString().split('T')[0]
-      // Check for existing in-progress session
-      const { data: existing } = await supabase
-        .from('stock_counts')
-        .select('*')
+    const monthStart = `${month}-01`
+    const [mYear, mMonth] = month.split('-').map(Number)
+    // Use local date components to avoid UTC offset stripping the last day (SAST is UTC+2)
+    const _lastDay = new Date(mYear, mMonth, 0)
+    const monthEnd = `${_lastDay.getFullYear()}-${String(_lastDay.getMonth() + 1).padStart(2, '0')}-${String(_lastDay.getDate()).padStart(2, '0')}`
+    const [cuRes, invRes, catRes, suppRes, qRes, stockRes, wageRes] = await Promise.all([
+      supabase.from('cash_ups')
+        .select('id,cash_up_date,cash_up_total,total_cash,eft_total,payouts,variance,customer_count,average_spend,status,notes')
         .eq('store_id', STORE_ID)
-        .eq('count_type', type)
-        .eq('count_date', today)
-        .eq('status', 'in_progress')
-        .maybeSingle()
-      if (existing) {
-        const { data: existingLines } = await supabase
-          .from('stock_count_lines')
-          .select('*, stock_items(description, unit)')
-          .eq('stock_count_id', existing.id)
-        setActiveCount(existing)
-        setCountLines(existingLines || [])
-        setSaving(false)
-        return
+        .gte('cash_up_date', monthStart).lte('cash_up_date', monthEnd)
+        .not('status', 'eq', 'draft')
+        .order('cash_up_date', { ascending: false }),
+      supabase.from('invoices')
+        .select('*, invoice_lines(*)')
+        .eq('store_id', STORE_ID)
+        .gte('invoice_date', monthStart).lte('invoice_date', monthEnd)
+        .order('invoice_date', { ascending: false }),
+      supabase.from('expense_categories').select('id, name, key, colour, sort_order').eq('organisation_id', ORG_ID).eq('is_active', true).order('sort_order'),
+      supabase.from('stock_suppliers').select('id, name, payment_terms_days, invoice_columns, invoice_vat_included, delivers_stock').eq('store_id', STORE_ID).eq('is_active', true).order('sort_order'),
+      supabase.from('expenses')
+        .select('*').eq('store_id', STORE_ID)
+        .gte('expense_date', monthStart).lte('expense_date', monthEnd)
+        .order('expense_date', { ascending: false }),
+      supabase.from('stock_items')
+        .select('id, description, unit, supplier')
+        .eq('store_id', STORE_ID).eq('is_active', true).order('description'),
+      // Payroll: periods overlapping this month, any status
+      supabase.from('payroll_periods')
+        .select('id')
+        .eq('store_id', STORE_ID)
+        .lte('period_start', monthEnd)
+        .gte('period_end', monthStart),
+    ])
+    setCashUps(cuRes.data || [])
+    setInvoices(invRes.data || [])
+    const cats = catRes.data || []
+    setCategories(cats.length ? cats : [])
+    setSuppliers(suppRes?.data || [])
+    setQuickExp(qRes.data || [])
+    setAllStockItems(stockRes?.data || [])
+    // Fetch payroll runs for those periods
+    const periodIds = (wageRes?.data || []).map((p: any) => p.id)
+    if (periodIds.length) {
+      const { data: runData } = await supabase
+        .from('payroll_runs')
+        .select('gross_pay,uif_employer')
+        .eq('store_id', STORE_ID)
+        .in('payroll_period_id', periodIds)
+      setWages(runData || [])
+    } else {
+      setWages([])
+    }
+    } catch(e) { console.error('[finances] load error', e) }
+    finally { setLoading(false) }
+  }, [month, STORE_ID, ORG_ID])
+
+  useEffect(() => { load() }, [load])
+
+  function fcPeriodRange(): [string, string] {
+    if (fcMode === 'week') {
+      const start = new Date(fcWeekStart + 'T00:00:00')
+      const end = new Date(start); end.setDate(end.getDate() + 6)
+      return [fcWeekStart, end.toISOString().split('T')[0]]
+    }
+    const [y, m] = month.split('-').map(Number)
+    return [`${month}-01`, new Date(y, m, 0).toISOString().split('T')[0]]
+  }
+
+  async function loadFoodCost() {
+    setFcLoading(true)
+    const [periodStart, periodEnd] = fcPeriodRange()
+
+    // Pull recent completed stock counts so we can find the closest one before/within this period
+    const { data: counts } = await supabase.from('stock_counts')
+      .select('id, count_date, status, count_type').eq('store_id', STORE_ID).eq('status', 'completed')
+      .order('count_date', { ascending: false }).limit(100)
+
+    // For MONTHLY mode: a monthly count done in the first 7 days of a new month almost always
+    // represents the PREVIOUS month's stock (e.g., a count on Oct 2 is the September closing count).
+    // We assign it an "effective month" one month back so it's matched correctly for food cost.
+    function effectiveMonthOf(c: { count_date: string; count_type: string }): string {
+      const d = new Date(c.count_date + 'T00:00:00')
+      if (c.count_type === 'monthly' && d.getDate() <= 7) {
+        d.setMonth(d.getMonth() - 1)
       }
-      // Create new session header
-      const { data: session, error: sessionErr } = await supabase
-        .from('stock_counts')
-        .insert({ store_id: STORE_ID, count_date: today, count_type: type, status: 'in_progress' })
-        .select().single()
-      if (sessionErr) { alert('Could not start count: ' + sessionErr.message); setSaving(false); return }
-      // Filter items based on count type
-      const countItems = type === 'daily' ? items.filter(i => i.on_daily_sheet) : items
-      if (countItems.length === 0) {
-        const msg = type === 'daily' ? 'No daily sheet items set up. Go to Stock Items tab and toggle Daily Sheet on items you buy locally every day.' : 'No stock items found. Add items in the Stock Items tab first.'
-        alert(msg)
-        await supabase.from('stock_counts').delete().eq('id', session.id)
-        setSaving(false)
-        return
-      }
-      // Build count lines: items with section assignments get one line per section;
-      // items with no sections get a single line (section_id = null)
-      const lines: { stock_count_id: string; stock_item_id: string; expected_qty: number; actual_qty: number; unit_cost: number; section_id: string | null }[] = []
-      for (const i of countItems) {
-        const assignedSections = itemSections[i.id] || []
-        const baseLine = { stock_count_id: session.id, stock_item_id: i.id, expected_qty: Number(i.current_qty) || 0, actual_qty: 0, unit_cost: Number(i.cost_price) || Number(i.price) || 0 }
-        if (assignedSections.length > 0) {
-          for (const sectionId of assignedSections) {
-            lines.push({ ...baseLine, section_id: sectionId })
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+    }
+
+    let closing = null
+    let opening = null
+
+    if (fcMode === 'month') {
+      // Closing = last completed count whose effective month matches the selected month
+      closing = (counts || []).find(c => effectiveMonthOf(c) === month) || null
+      // Opening = closing of the previous calendar month (so the same count serves as both
+      // the prior month's closing AND this month's opening — standard accounting practice)
+      const [y, m] = month.split('-').map(Number)
+      const prevDate = new Date(y, m - 2, 1)
+      const prevMonth = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}`
+      opening = (counts || []).find(c => effectiveMonthOf(c) === prevMonth) || null
+      // Fallback: any completed count before the period start
+      if (!opening) opening = (counts || []).find(c => c.count_date < periodStart) || null
+    } else {
+      // Weekly mode: use exact date-based matching
+      closing = (counts || []).find(c => c.count_date <= periodEnd) || null
+      opening = (counts || []).find(c => c.count_date < periodStart) || null
+    }
+
+    async function countValue(countId: string | undefined) {
+      if (!countId) return 0
+      const { data: lines } = await supabase.from('stock_count_lines').select('actual_qty, unit_cost').eq('stock_count_id', countId)
+      return (lines || []).reduce((s, l) => s + (Number(l.actual_qty) || 0) * (Number(l.unit_cost) || 0), 0)
+    }
+
+    // A manual override for this exact period takes precedence over whatever count we'd otherwise use.
+    const { data: overrides } = await supabase.from('food_cost_overrides').select('*')
+      .eq('store_id', STORE_ID).eq('period_start', periodStart).eq('period_end', periodEnd)
+    const openingOverride = (overrides || []).find(o => o.field === 'opening')
+    const closingOverride = (overrides || []).find(o => o.field === 'closing')
+
+    const [countedOpeningValue, countedClosingValue] = await Promise.all([countValue(opening?.id), countValue(closing?.id)])
+    const openingValue = openingOverride ? Number(openingOverride.value) : countedOpeningValue
+    const closingValue = closingOverride ? Number(closingOverride.value) : countedClosingValue
+    const openingMissing = !opening && !openingOverride
+    const closingMissing = !closing && !closingOverride
+
+    const [purchRes, wasteRes, salesRes, recentOverridesRes] = await Promise.all([
+      supabase.from('stock_purchases').select('total_cost').eq('store_id', STORE_ID).gte('purchase_date', periodStart).lte('purchase_date', periodEnd),
+      supabase.from('stock_wastage').select('total_cost').eq('store_id', STORE_ID).gte('wastage_date', periodStart).lte('wastage_date', periodEnd),
+      supabase.from('cash_ups').select('cash_up_total').eq('store_id', STORE_ID).not('status', 'eq', 'draft').gte('cash_up_date', periodStart).lte('cash_up_date', periodEnd),
+      supabase.from('food_cost_overrides').select('id', { count: 'exact', head: true }).eq('store_id', STORE_ID).gte('created_at', new Date(Date.now() - 90 * 86400000).toISOString()),
+    ])
+    const purchases = (purchRes.data || []).reduce((s, p) => s + (Number(p.total_cost) || 0), 0)
+    const wastage = (wasteRes.data || []).reduce((s, w) => s + (Number(w.total_cost) || 0), 0)
+    const sales = (salesRes.data || []).reduce((s, c) => s + (Number(c.cash_up_total) || 0), 0)
+    setFcOverrideCountThisQuarter(recentOverridesRes.count || 0)
+
+    setFcData({
+      openingValue, openingDate: opening?.count_date || null, openingMissing, openingManual: !!openingOverride, openingReason: openingOverride?.reason || null,
+      closingValue, closingDate: closing?.count_date || null, closingMissing, closingManual: !!closingOverride, closingReason: closingOverride?.reason || null,
+      purchases, wastage, sales,
+    })
+    setFcLoading(false)
+    setFcLoaded(true)
+  }
+
+  useEffect(() => { if (tab === 4 && STORE_ID) loadFoodCost() }, [tab, fcMode, fcWeekStart, month, STORE_ID])
+
+  function startDeviceScan() {
+    setShowScanChoice(false)
+    setDeviceScanStatus('waiting')
+    setScanError('')
+
+    // Capture supplier template NOW n/a scanSupplierRef.current is already set
+    // when the user clicks "Scan Invoice" (before choosing device vs file).
+    const _supplierName = scanSupplierRef.current || ''
+    const _matchedSup = suppliers.find(s => s.name === _supplierName)
+    const _deviceTemplate = _matchedSup?.invoice_columns?.length ? {
+      name: _matchedSup.name,
+      columns: _matchedSup.invoice_columns,
+      vatIncluded: _matchedSup.invoice_vat_included !== false,
+    } : undefined
+
+    // Mark any old pending scans for this store as done so they don't re-trigger
+    supabase.from('pending_invoice_scans')
+      .update({ status: 'done' })
+      .eq('store_id', STORE_ID)
+      .eq('status', 'uploaded')
+      .then(() => {})
+
+    // Listen for a new upload from the app via Realtime
+    const channel = supabase
+      .channel('invoice-scan-relay')
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'pending_invoice_scans',
+        filter: `store_id=eq.${STORE_ID}`,
+      }, async (payload) => {
+        const rowId = payload.new?.id
+        if (!rowId) return
+        setDeviceScanStatus('received')
+        supabase.removeChannel(channel)
+
+        // Mark as processing
+        await supabase.from('pending_invoice_scans').update({ status: 'processing' }).eq('id', rowId)
+
+        try {
+          // Fetch full row n/a Realtime payload truncates large columns
+          const { data: scanRow, error: fetchErr } = await supabase
+            .from('pending_invoice_scans')
+            .select('image_base64, image_url')
+            .eq('id', rowId)
+            .single()
+
+          if (fetchErr) throw new Error('Could not retrieve scan row: ' + fetchErr.message)
+
+          let b64 = scanRow?.image_base64 || ''
+
+          if (!b64 && scanRow?.image_url) {
+            // Old app version: uploaded to storage (bucket is now public, direct fetch works)
+            const imgRes = await fetch(scanRow.image_url)
+            if (!imgRes.ok) throw new Error(`Image fetch failed: ${imgRes.status} n/a try updating the app`)
+            const buf = await imgRes.arrayBuffer()
+            const uint8 = new Uint8Array(buf)
+            const CHUNK = 8190  // must be divisible by 3 to avoid = padding mid-string
+            for (let i = 0; i < uint8.length; i += CHUNK) {
+              b64 += btoa(String.fromCharCode(...uint8.subarray(i, i + CHUNK)))
+            }
+            if (!b64) throw new Error('Image encoding failed')
           }
+
+          if (!b64) throw new Error('No image data found in relay row')
+
+          const response = await fetch('/api/scan-invoice', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ base64: b64, mediaType: 'image/jpeg', supplierTemplate: _deviceTemplate })
+          })
+          const data = await response.json()
+          if (!response.ok) throw new Error(data.error || 'Scan failed')
+
+          setShowInvForm(true)
+          // Supplier is already set from pre-selection n/a never override it with AI-detected name.
+          // Only fill in fields the user hasn't provided yet.
+          if (data.invoice_number) setInvForm(f => ({ ...f, invoice_number: data.invoice_number }))
+          if (data.invoice_date) setInvForm(f => ({ ...f, invoice_date: data.invoice_date }))
+          if (data.due_date) {
+            setInvForm(f => ({ ...f, due_date: data.due_date }))
+          } else if (data.invoice_date) {
+            // Use pre-selected supplier for due date calc, not AI-detected name
+            setInvForm(f => {
+              const sup = suppliers.find(s => s.name === f.supplier)
+              return { ...f, due_date: sup ? addDays(data.invoice_date, sup.payment_terms_days ?? 7) : f.due_date }
+            })
+          }
+          if (data.notes) setInvForm(f => ({ ...f, notes: data.notes }))
+          if (data.lines?.length) {
+            setInvLines(data.lines.map((l: {description?: string; qty?: number; uom?: string; unit_price?: number; amount?: number; vat_amount?: number; case_size?: number | null; case_uom?: string | null}) => ({
+              category_key: defaultCatKey, description: l.description || '', qty: Number(l.qty) || 1,
+              uom: l.uom || 'each', unit_price: Number(l.unit_price) || 0,
+              amount: Number(l.amount) || 0, vat_amount: Number(l.vat_amount) || 0,
+              case_size: l.case_size ?? null, case_uom: l.case_uom ?? null,
+            })))
+          }
+          setScanError('')
+          await supabase.from('pending_invoice_scans').update({ status: 'done' }).eq('id', rowId)
+        } catch (err: unknown) {
+          setScanError(err instanceof Error ? err.message : 'Device scan failed')
+          await supabase.from('pending_invoice_scans').update({ status: 'error' }).eq('id', rowId)
+        }
+        setDeviceScanStatus(null)
+      })
+      .subscribe()
+
+    // Auto-cancel after 3 minutes if nothing arrives
+    setTimeout(() => {
+      supabase.removeChannel(channel)
+      setDeviceScanStatus(prev => {
+        if (prev === 'waiting') { setScanError('No photo received from device n/a make sure you\'re logged into the same store on the app.'); return null; }
+        return prev
+      })
+    }, 180000)
+  }
+
+  async function saveFoodCostOverride() {
+    if (!fcOverrideField || !fcOverrideForm.value) return
+    const [periodStart, periodEnd] = fcPeriodRange()
+    await supabase.from('food_cost_overrides').upsert({
+      store_id: STORE_ID, period_start: periodStart, period_end: periodEnd,
+      field: fcOverrideField, value: parseFloat(fcOverrideForm.value) || 0, reason: fcOverrideForm.reason || null,
+    }, { onConflict: 'store_id,period_start,period_end,field' })
+    setFcOverrideField(null)
+    setFcOverrideForm({ value: '', reason: '' })
+    await loadFoodCost()
+  }
+
+  async function clearFoodCostOverride(field: 'opening' | 'closing') {
+    const [periodStart, periodEnd] = fcPeriodRange()
+    await supabase.from('food_cost_overrides').delete()
+      .eq('store_id', STORE_ID).eq('period_start', periodStart).eq('period_end', periodEnd).eq('field', field)
+    await loadFoodCost()
+  }
+
+
+  async function loadHistory() {
+    setHistoryLoading(true)
+    const { data } = await supabase.from('invoices')
+      .select('*, invoice_lines(*)')
+      .eq('store_id', STORE_ID)
+      .order('invoice_date', { ascending: false })
+      .limit(300)
+    setHistoryInvoices(data || [])
+    setHistoryLoading(false)
+    setHistoryLoaded(true)
+  }
+
+  useEffect(() => { if (tab === 5 && !historyLoaded && STORE_ID) loadHistory() }, [tab, historyLoaded, STORE_ID])
+
+  const filteredHistory = historyInvoices.filter(inv => {
+    if (historySupplier !== 'All' && inv.supplier !== historySupplier) return false
+    if (historyStatus !== 'All' && inv.status !== historyStatus) return false
+    if (historySearch.trim()) {
+      const q = historySearch.trim().toLowerCase()
+      const hay = `${inv.supplier} ${inv.invoice_number} ${inv.notes || ''}`.toLowerCase()
+      if (!hay.includes(q)) return false
+    }
+    return true
+  })
+
+  // ── Summary calcs ──
+  const totalSales = cashUps.reduce((s, r) => s + Number(r.cash_up_total || 0), 0)
+  const totalSalesExcl = totalSales / (1 + VAT_RATE)   // ex-VAT for P&L
+  const totalInvoices = invoices.reduce((s, r) => s + Number(r.total_amount || 0), 0)
+  const totalInvoicesExcl = invoices.reduce((s, r) => s + Number(r.total_amount || 0) - Number(r.total_vat || 0), 0) // ex-VAT
+  const totalQuick = quickExp.reduce((s, r) => s + Number(r.amount || 0), 0)
+  const totalWages = wages.reduce((s, r) => s + Number(r.gross_pay || 0) + Number(r.uif_employer || 0), 0)
+  // P&L on ex-VAT basis: output VAT is a SARS liability, input VAT is reclaimable
+  const totalExpenses = totalInvoicesExcl + totalQuick + totalWages
+  const totalExpensesDisplay = totalInvoicesExcl + totalQuick + totalWages  // ex-VAT total for category % display
+  const netProfit = totalSalesExcl - totalExpenses
+  const totalVariance = cashUps.reduce((s, r) => s + Number(r.variance || 0), 0)
+  const totalCustomers = cashUps.reduce((s, r) => s + Number(r.customer_count || 0), 0)
+
+  // Category breakdown across invoices + quick + wages — all on ex-VAT basis
+  const expByCategory: Record<string, number> = {}
+  invoices.forEach(inv => {
+    (inv.invoice_lines || []).forEach(line => {
+      const k = CAT_MAP[line.category_key]?.name || line.category_key
+      // line.amount is incl-VAT; subtract vat_amount to get ex-VAT cost
+      const exclAmt = Number(line.amount) - Number(line.vat_amount || 0)
+      expByCategory[k] = (expByCategory[k] || 0) + exclAmt
+    })
+  })
+  quickExp.forEach(e => {
+    const k = CAT_MAP[e.category_key]?.name || e.category_name || 'Other'
+    // Quick expenses have no VAT split tracked — amount used as entered (ex-VAT intent)
+    expByCategory[k] = (expByCategory[k] || 0) + Number(e.amount)
+  })
+  if (totalWages > 0) {
+    expByCategory['Wages & UIF'] = (expByCategory['Wages & UIF'] || 0) + totalWages
+  }
+
+  // ── Invoice CRUD ──
+  function openNewInvoice() {
+    setEditInv(null); setInvForm(emptyInvoice()); setInvLines([emptyLine(defaultCatKey)]); setShowInvForm(true)
+  }
+  function openEditInvoice(inv: Invoice) {
+    setEditInv(inv)
+    setInvForm({ supplier: inv.supplier, invoice_number: inv.invoice_number, invoice_date: inv.invoice_date, due_date: inv.due_date || '', status: inv.status, payment_method: inv.payment_method || 'bank_transfer', notes: inv.notes || '' })
+    setInvLines(inv.invoice_lines?.length ? inv.invoice_lines.map(l => ({ id: l.id, category_key: l.category_key, description: l.description || '', qty: Number(l.qty) || 1, uom: l.uom || 'each', unit_price: Number(l.unit_price) || 0, amount: Number(l.amount), vat_amount: Number(l.vat_amount || 0) })) : [emptyLine(defaultCatKey)])
+    setShowInvForm(true)
+    setTab(2)
+    setTimeout(() => window.scrollTo({ top: 0, behavior: 'smooth' }), 50)
+  }
+
+  function addLine() { setInvLines(l => [...l, emptyLine(defaultCatKey)]) }
+  function removeLine(i: number) { setInvLines(l => l.filter((_, idx) => idx !== i)) }
+
+  // Maps a supplier template maps_to value to the internal InvoiceLine field and input type.
+  type ColDef = { header: string; field: keyof InvoiceLine; type: 'text' | 'number' | 'readonly'; placeholder: string; compute?: (line: InvoiceLine) => number }
+  const MAPS_TO_FIELD: Record<string, Omit<ColDef, 'header'>> = {
+    'description':     { field: 'description', type: 'text',   placeholder: 'Item description' },
+    'qty':             { field: 'qty',          type: 'number', placeholder: '1' },
+    'uom':             { field: 'uom',          type: 'text',   placeholder: 'kg' },
+    'unit_price_excl': { field: 'unit_price',   type: 'number', placeholder: '0.00' },
+    'unit_price_incl': { field: 'amount',       type: 'number', placeholder: '0.00' },
+    'vat_amount':      { field: 'vat_amount',   type: 'number', placeholder: '0.00' },
+    'total_incl':      { field: 'amount',       type: 'number', placeholder: '0.00' },
+    'total_excl':      { field: 'unit_price',   type: 'readonly', placeholder: '', compute: (l) => Number(l.qty) * Number(l.unit_price) },
+  }
+  const DEFAULT_COLS: ColDef[] = [
+    { header: 'Description',       field: 'description', type: 'text',   placeholder: 'Item description' },
+    { header: 'Qty',               field: 'qty',         type: 'number', placeholder: '1' },
+    { header: 'Unit Price (excl)', field: 'unit_price',  type: 'number', placeholder: '0.00' },
+    { header: 'Total (incl VAT)',  field: 'amount',      type: 'number', placeholder: '0.00' },
+    { header: 'VAT Amount',        field: 'vat_amount',  type: 'number', placeholder: '0.00' },
+  ]
+  function getInvoiceColumns(): ColDef[] {
+    const sup = suppliers.find(s => s.name === invForm.supplier)
+    if (!sup?.invoice_columns?.length) return DEFAULT_COLS
+    const cols: ColDef[] = []
+    const seenMapsTo = new Set<string>()
+    for (const c of sup.invoice_columns) {
+      if (!c.maps_to || !MAPS_TO_FIELD[c.maps_to]) continue
+      // Deduplicate by maps_to value n/a allows both unit_price_excl and total_excl
+      // to appear even though they share the same internal field ('unit_price').
+      // Without this, "Exclusive Value" (total_excl) was silently dropped whenever
+      // "Unit Price (excl)" (unit_price_excl) appeared earlier in the list.
+      if (seenMapsTo.has(c.maps_to)) continue
+      seenMapsTo.add(c.maps_to)
+      const def = MAPS_TO_FIELD[c.maps_to]
+      cols.push({ header: c.name || c.maps_to, ...def })
+    }
+    return cols.length >= 2 ? cols : DEFAULT_COLS
+  }
+
+  function updateLine(i: number, field: keyof InvoiceLine, value: string | number) {
+    setInvLines(lines => lines.map((l, idx) => {
+      if (idx !== i) return l
+      const updated = { ...l, [field]: value }
+      // When amount (total incl VAT) changes: back-calc VAT and unit_price excl
+      if (field === 'amount') {
+        const totalIncl = Number(value) || 0
+        const qty = Number(l.qty) || 1
+        if (l.zero_vat) {
+          updated.vat_amount = 0
+          updated.unit_price = Math.round((totalIncl / qty) * 10000) / 10000
         } else {
-          lines.push({ ...baseLine, section_id: null })
+          const totalExcl = totalIncl / (1 + VAT_RATE)
+          updated.vat_amount = Math.round((totalIncl - totalExcl) * 100) / 100
+          updated.unit_price = Math.round((totalExcl / qty) * 10000) / 10000
         }
       }
-      const { error: linesErr } = await supabase.from('stock_count_lines').insert(lines)
-      if (linesErr) { alert('Could not create count lines: ' + linesErr.message); setSaving(false); return }
-      const { data: freshLines } = await supabase
-        .from('stock_count_lines')
-        .select('*, stock_items(description, unit)')
-        .eq('stock_count_id', session.id)
-      setActiveCount(session)
-      setCountLines(freshLines || [])
-    } catch (e: unknown) {
-      alert('Error: ' + (e instanceof Error ? e.message : String(e)))
-    }
-    setSaving(false)
-  }
-  async function updateCountLine(lineId: string, qty: number) {
-    setCountLines(prev => prev.map(l => l.id === lineId ? { ...l, actual_qty: qty } : l))
-    await supabase.from('stock_count_lines').update({ actual_qty: qty }).eq('id', lineId)
-  }
-
-  async function completeCount() {
-    if (!activeCount) return
-    await supabase.from('stock_counts').update({ status: 'completed' }).eq('id', activeCount.id)
-    // Aggregate actual_qty across all sections per item (items counted in multiple sections sum up)
-    const totals: Record<string, number> = {}
-    for (const l of countLines) {
-      if (!l.stock_item_id) continue
-      totals[l.stock_item_id] = (totals[l.stock_item_id] || 0) + (Number(l.actual_qty) || 0)
-    }
-    await Promise.all(Object.entries(totals).map(([itemId, qty]) => supabase.from('stock_items').update({ current_qty: qty }).eq('id', itemId)))
-    setActiveCount(null); setCountLines([]); setActiveSection(null); await loadAll()
-  }
-
-  async function resumeCount(count: StockCount) {
-    setSaving(true)
-    const { data: lines } = await supabase
-      .from('stock_count_lines')
-      .select('*')
-      .eq('stock_count_id', count.id)
-    setActiveCount(count)
-    setCountLines(lines || [])
-    setViewMode(false)
-    setSaving(false)
+      // When zero_vat toggled: recalculate vat_amount and amount
+      if (field === 'zero_vat') {
+        const excl = Number(l.unit_price) * (Number(l.qty) || 1)
+        if (value) {
+          updated.vat_amount = 0
+          updated.amount = Math.round(excl * 100) / 100
+        } else {
+          updated.vat_amount = Math.round(excl * VAT_RATE * 100) / 100
+          updated.amount = Math.round(excl * (1 + VAT_RATE) * 100) / 100
+        }
+      }
+      // When unit_price or qty changes: forward-calc totals
+      if (field === 'unit_price' || field === 'qty') {
+        const newPrice = Number(field === 'unit_price' ? value : l.unit_price) || 0
+        const newQty   = Number(field === 'qty'        ? value : l.qty)        || 1
+        const oldPrice = Number(l.unit_price) || 0
+        const oldQty   = Number(l.qty)        || 1
+        const oldExcl  = oldPrice * oldQty
+        const newExcl  = newPrice * newQty
+        const currentVat = Number(l.vat_amount) || 0
+        // Only recalculate VAT if it was auto-calculated from the old values (within 2c rounding)
+        // If the user manually set VAT (e.g. 0 for a zero-rated item), preserve it
+        const expectedOldVat = Math.round(oldExcl * VAT_RATE * 100) / 100
+        const vatWasAuto = oldExcl === 0 || Math.abs(currentVat - expectedOldVat) < 0.02
+        if (l.zero_vat) {
+          // Zero-rated line: no VAT regardless of price change
+          updated.vat_amount = 0
+          updated.amount = Math.round(newExcl * 100) / 100
+        } else if (vatWasAuto) {
+          updated.vat_amount = Math.round(newExcl * VAT_RATE * 100) / 100
+          updated.amount     = Math.round(newExcl * (1 + VAT_RATE) * 100) / 100
+        } else {
+          // VAT manually set n/a just update the total using existing VAT
+          updated.amount = Math.round((newExcl + currentVat) * 100) / 100
+        }
+      }
+      return updated
+    }))
   }
 
-  async function viewCount(count: StockCount) {
-    setSaving(true)
-    const { data: lines } = await supabase
-      .from('stock_count_lines')
-      .select('*')
-      .eq('stock_count_id', count.id)
-    setActiveCount(count)
-    setCountLines(lines || [])
-    setViewMode(true)
-    setSaving(false)
-  }
+  const lineTotal = invLines.reduce((s, l) => s + Number(l.amount || 0), 0)
+  const lineVatTotal = invLines.reduce((s, l) => s + Number(l.vat_amount || 0), 0)
 
-  async function deleteCount(count: StockCount) {
-    const label = count.status === 'in_progress' ? 'incomplete' : 'completed'
-    if (!confirm(`Delete this ${label} count from ${formatDate(count.count_date)}? This cannot be undone.`)) return
-    setSaving(true)
-    await supabase.from('stock_count_lines').delete().eq('stock_count_id', count.id)
-    await supabase.from('stock_counts').delete().eq('id', count.id)
-    if (activeCount?.id === count.id) { setActiveCount(null); setCountLines([]); setActiveSection(null); setViewMode(false) }
-    await loadAll()
-    setSaving(false)
-  }
+  async function openGRV(inv: Invoice) {
+    setGrvInvoice(inv)
+    // Load ALL active stock items for matching n/a not filtered by supplier
+    // because a stock item may not have the supplier name set even if it comes from that supplier
+    const { data: items } = await supabase
+      .from('stock_items')
+      .select('id, description, unit, supplier, is_catch_weight, cost_price, price')
+      .eq('store_id', STORE_ID)
+      .eq('is_active', true)
+      .order('description')
+    setGrvItems(items || [])
+    // For the "unmatched at bottom" section, filter to items linked to this supplier
+    const supplierItems = (items || []).filter(i => (i.supplier || '').toLowerCase() === (inv.supplier || '').toLowerCase())
+    // Pre-populate lines from stock items, pulling qty/price straight from this invoice's
+    // line items wherever the description matches (the match chips on the invoice form
+    // already standardize wording to the stock sheet's exact naming).
+    const invLinesForMatch = inv.invoice_lines || []
+    const BULK_UNITS = ['kg', 'g', 'l', 'liter', 'litre', 'liters', 'litres']
+    const norm = (s: string) => s.trim().toLowerCase()
 
-  async function toggleFoodCost(itemId: string, currentlyIncluded: boolean) {
-    await supabase.from('stock_items').update({ is_food_cost: !currentlyIncluded }).eq('id', itemId)
-    setItems(prev => prev.map(i => i.id === itemId ? { ...i, is_food_cost: !currentlyIncluded } : i))
-  }
-
-  async function savePurchase() {
-    setSaving(true)
-    const total = parseFloat(purchaseForm.quantity || '0') * parseFloat(purchaseForm.unit_cost || '0')
-    await supabase.from('stock_purchases').insert({ store_id: STORE_ID, purchase_date: purchaseForm.purchase_date, supplier_name: purchaseForm.supplier_name || null, stock_item_id: purchaseForm.stock_item_id || null, item_name: purchaseForm.item_name || items.find(i => i.id === purchaseForm.stock_item_id)?.description || null, quantity: parseFloat(purchaseForm.quantity || '0'), unit: purchaseForm.unit, unit_cost: parseFloat(purchaseForm.unit_cost || '0'), total_cost: total, invoice_number: purchaseForm.invoice_number || null })
-    setPurchaseForm({ purchase_date: new Date().toISOString().split('T')[0], supplier_name: '', stock_item_id: '', item_name: '', quantity: '', unit: 'each', unit_cost: '', invoice_number: '' })
-    setShowAddPurchase(false); await loadAll(); setSaving(false)
-  }
-
-  async function saveWastage() {
-    setSaving(true)
-    const total = parseFloat(wastageForm.quantity || '0') * parseFloat(wastageForm.unit_cost || '0')
-    await supabase.from('stock_wastage').insert({ store_id: STORE_ID, wastage_date: wastageForm.wastage_date, stock_item_id: wastageForm.stock_item_id || null, item_name: wastageForm.item_name || items.find(i => i.id === wastageForm.stock_item_id)?.description || null, quantity: parseFloat(wastageForm.quantity || '0'), unit: wastageForm.unit, unit_cost: parseFloat(wastageForm.unit_cost || '0'), total_cost: total, reason: wastageForm.reason })
-    if (wastageForm.stock_item_id && parseFloat(wastageForm.quantity || '0') > 0) {
-      await supabase.rpc('increment_stock_qty', { item_id: wastageForm.stock_item_id, amount: -parseFloat(wastageForm.quantity) })
-    }
-    setWastageForm({ wastage_date: new Date().toISOString().split('T')[0], stock_item_id: '', item_name: '', quantity: '', unit: 'each', unit_cost: '', reason: 'Expired' })
-    setShowAddWastage(false); await loadAll(); setSaving(false)
-  }
-
-  async function verifyPin(pin: string, requireManager: boolean): Promise<boolean> {
-    const { data } = await supabase.from('employees').select('role, clock_pin').eq('store_id', STORE_ID).eq('clock_pin', pin).eq('is_active', true)
-    if (!data || data.length === 0) return false
-    if (requireManager) return data.some((e: any) => { const r = (e.role||'').toLowerCase(); return r.includes('manager')||r.includes('franchise')||r.includes('owner') })
-    return true
-  }
-
-  async function saveIssue() {
-    if (!issueForm.stock_item_id || !(parseFloat(issueForm.quantity||'0')>0)) { alert('Select an item and quantity'); return }
-    const issueQty = parseFloat(issueForm.quantity||'0')
-    const cur = items.find(i => i.id === issueForm.stock_item_id)
-    const wouldBeNeg = ((cur?.current_qty ?? 0) - issueQty) < 0
-    if (!storeSettings.allow_negative_stock && wouldBeNeg) {
-      setPinInput(''); setPinError('')
-      setPinModal({ mode: 'override', onSuccess: () => { setPinModal(null); doSaveIssue() } }); return
-    }
-    if (storeSettings.require_pin_on_issue) {
-      setPinInput(''); setPinError('')
-      setPinModal({ mode: 'issue', onSuccess: () => { setPinModal(null); doSaveIssue() } }); return
-    }
-    doSaveIssue()
-  }
-
-  async function doSaveIssue() {
-    if (!issueForm.stock_item_id || !(parseFloat(issueForm.quantity || '0') > 0)) { alert('Select an item and quantity'); return }
-    setSaving(true)
-    const allocations = Object.entries(issueForm.preppedBreakdown)
-      .map(([childId, val]) => ({ childId, portions: parseFloat(val || '0') }))
-      .filter(a => a.portions > 0)
-    const breakdown = allocations.map(a => {
-      const child = items.find(i => i.id === a.childId)
-      return { item_id: a.childId, name: child?.description || child?.name || '', portions: a.portions }
-    })
-    await supabase.from('stock_issues').insert({
-      store_id: STORE_ID, issue_date: new Date().toISOString(), stock_item_id: issueForm.stock_item_id || null,
-      item_name: issueForm.item_name || items.find(i => i.id === issueForm.stock_item_id)?.description || null,
-      quantity: parseFloat(issueForm.quantity || '0'), unit: issueForm.unit, issued_to: issueForm.issued_to, notes: issueForm.notes || null,
-      prepped_breakdown: breakdown.length ? breakdown : null
-    })
-    await supabase.rpc('increment_stock_qty', { item_id: issueForm.stock_item_id, amount: -parseFloat(issueForm.quantity) })
-    for (const a of allocations) {
-      await supabase.rpc('increment_stock_qty', { item_id: a.childId, amount: a.portions })
-    }
-    setIssueForm({ stock_item_id: '', item_name: '', quantity: '', unit: 'each', issued_to: 'Kitchen', notes: '', preppedBreakdown: {} })
-    setIssueCategory(null); setIssueSearch('')
-    await loadAll(); setSaving(false)
-  }
-
-  function generateOrderText(supplierName: string, orderDate: string, deliveryDate: string, notes: string) {
-    const orderItems = items
-      .filter(i => (i.supplier || 'Other') === supplierName && !i.parent_item_id)
-      .filter(i => parseFloat((orderForm as {[key:string]:string})[`qty_${i.id}`] || '0') > 0)
-      .map(i => {
-        const qty = (orderForm as {[key:string]:string})[`qty_${i.id}`] || '0'
-        return `  • ${i.description || i.name}: ${qty} ${i.unit}`
-      })
-    if (orderItems.length === 0) return ''
-    return [
-      `ORDER — ${supplierName}`,
-      `Date: ${orderDate}${deliveryDate ? `\nDeliver by: ${deliveryDate}` : ''}`,
-      `Store: Mochachos Hartswater`,
-      ``,
-      `ITEMS:`,
-      ...orderItems,
-      notes ? `\nNotes: ${notes}` : '',
-    ].filter(Boolean).join('\n')
-  }
-
-  function printStockSheet() {
-    if (!activeCount) return
-    const countLabel = COUNT_TYPES.find(c => c.key === activeCount.count_type)?.label || activeCount.count_type
-    const dateLabel = formatDate(activeCount.count_date)
-    const now = new Date().toLocaleDateString('en-ZA', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
-
-    const supplierSections = suppliers
-      .map(s => s.name)
-      .map(supplier => {
-        const lines = countLines.filter(l => {
-          const item = items.find(i => i.id === l.stock_item_id)
-          return (item?.supplier || 'Other') === supplier && item?.is_food_cost !== false
-        })
-        if (!lines.length) return ''
-        const rows = lines.map(line => {
-          const item = items.find(i => i.id === line.stock_item_id)
-          if (!item) return ''
-          const filled = line.actual_qty != null && line.actual_qty !== 0
-          return `<div class="row">
-            <span class="name">${item.description || item.name}</span>
-            <span class="unit">${item.unit || ''}</span>
-            <span class="exp">${line.expected_qty ?? 0}</span>
-            <span class="actual">${filled ? `<b style="color:#1a5c38">${line.actual_qty}</b>` : `<span class="box"></span>`}</span>
-          </div>`
-        }).join('')
-        return `<div class="section">
-          <div class="sup-header">● ${supplier} <span style="font-weight:400;color:#6b7280">(${lines.length})</span></div>
-          ${rows}
-        </div>`
-      })
-      .join('')
-
-    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Stock Sheet — ${dateLabel}</title>
-      <style>
-        @page { margin: 10mm 8mm; size: A4 portrait; }
-        body { font-family: Arial, sans-serif; color: #111; margin: 0; font-size: 9px; }
-        .header { margin-bottom: 6px; border-bottom: 2px solid #1a5c38; padding-bottom: 4px; }
-        .header h1 { font-size: 13px; font-weight: 800; color: #1a5c38; margin: 0; }
-        .header .sub { font-size: 8px; color: #6b7280; }
-        .col-headers { display: flex; font-size: 8px; font-weight: 700; color: #fff; background: #1a5c38;
-          padding: 3px 4px; border-radius: 3px; margin-bottom: 3px; }
-        .col-headers .cn { flex: 1 }
-        .col-headers .cu, .col-headers .ce, .col-headers .ca { width: 30px; text-align: center; }
-        .cols { column-count: 2; column-gap: 6mm; column-fill: auto; }
-        .section { break-inside: avoid-column; margin-bottom: 2px; }
-        .sup-header { font-size: 8px; font-weight: 700; color: #1a5c38; background: #f0f5f0;
-          padding: 2px 4px; margin-bottom: 1px; break-after: avoid; }
-        .row { display: flex; align-items: center; padding: 1px 4px; border-bottom: 0.5px solid #f0f0f0; break-inside: avoid; }
-        .name { flex: 1; font-size: 8.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .unit { width: 28px; font-size: 7.5px; color: #9ca3af; text-align: center; }
-        .exp { width: 26px; font-size: 8px; text-align: center; color: #555; }
-        .actual { width: 30px; text-align: center; }
-        .box { display: inline-block; width: 26px; height: 13px; border: 1px solid #bbb; border-radius: 2px; }
-        .footer { margin-top: 6px; font-size: 7.5px; color: #9ca3af; display: flex; justify-content: space-between; border-top: 0.5px solid #e5e7eb; padding-top: 3px; }
-      </style>
-    </head><body>
-      <div class="header">
-        <h1>Mochachos Hartswater (Pty) Ltd</h1>
-        <div class="sub">${countLabel} Stock Count · ${dateLabel} · ${countLines.filter(l => items.find(i => i.id === l.stock_item_id)?.is_food_cost !== false).length} items (food cost only)</div>
-      </div>
-      <div class="col-headers"><span class="cn">Item</span><span class="cu">Unit</span><span class="ce">Exp</span><span class="ca">Actual</span></div>
-      <div class="cols">${supplierSections}</div>
-      <div class="footer"><span>Generated by <b>CompliTrack</b> · complitrack.co.za</span><span>${now}</span></div>
-    </body></html>`
-
-    const win = window.open('', '_blank')
-    if (win) { win.document.write(html); win.document.close(); win.focus(); setTimeout(() => win.print(), 300) }
-  }
-
-  function printOrder() {
-    const text = generateOrderText(orderForm.supplier_name, orderForm.order_date, orderForm.expected_delivery, orderForm.notes)
-    if (!text) { alert('Add quantities to at least one item first'); return }
-    const win = window.open('', '_blank')
-    if (!win) return
-    win.document.write(`
-      <html><head><title>Order — ${orderForm.supplier_name}</title>
-      <style>
-        body { font-family: Arial, sans-serif; padding: 40px; max-width: 600px; margin: 0 auto; }
-        h1 { color: #1a5c38; font-size: 22px; margin-bottom: 4px; }
-        .meta { color: #6b7280; font-size: 14px; margin-bottom: 24px; }
-        table { width: 100%; border-collapse: collapse; margin-top: 16px; }
-        th { background: #1a5c38; color: white; padding: 10px 12px; text-align: left; font-size: 13px; }
-        td { padding: 9px 12px; border-bottom: 1px solid #e5e7eb; font-size: 14px; }
-        tr:nth-child(even) td { background: #f9fafb; }
-        .notes { margin-top: 24px; padding: 12px; background: #fef3c7; border-radius: 8px; font-size: 13px; }
-        .footer { margin-top: 32px; font-size: 12px; color: #9ca3af; border-top: 1px solid #e5e7eb; padding-top: 12px; }
-        @media print { button { display: none; } }
-      </style></head>
-      <body>
-        <button onclick="window.print()" style="background:#1a5c38;color:white;border:none;padding:10px 20px;border-radius:8px;cursor:pointer;font-size:14px;margin-bottom:20px;">🖨️ Print</button>
-        <h1>Purchase Order — ${orderForm.supplier_name}</h1>
-        <div class="meta">
-          Order Date: ${orderForm.order_date} &nbsp;|&nbsp;
-          ${orderForm.expected_delivery ? `Deliver By: ${orderForm.expected_delivery} &nbsp;|&nbsp;` : ''}
-          Store: Mochachos Hartswater
-        </div>
-        <table>
-          <tr><th>Item</th><th>Unit</th><th>Qty Ordered</th></tr>
-          ${items
-            .filter(i => (i.supplier || 'Other') === orderForm.supplier_name && !i.parent_item_id)
-            .filter(i => parseFloat((orderForm as {[key:string]:string})[`qty_${i.id}`] || '0') > 0)
-            .map(i => `<tr><td>${i.description || i.name}</td><td>${i.unit}</td><td><strong>${(orderForm as {[key:string]:string})[`qty_${i.id}`]}</strong></td></tr>`)
-            .join('')}
-        </table>
-        ${orderForm.notes ? `<div class="notes">📝 Notes: ${orderForm.notes}</div>` : ''}
-        <div class="footer">Generated by CompliTrack • ${new Date().toLocaleString('en-ZA')}</div>
-      </body></html>
-    `)
-    win.document.close()
-  }
-
-  function shareOrderWhatsApp() {
-    const text = generateOrderText(orderForm.supplier_name, orderForm.order_date, orderForm.expected_delivery, orderForm.notes)
-    if (!text) { alert('Add quantities to at least one item first'); return }
-    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank')
-  }
-
-  function copyOrder() {
-    const text = generateOrderText(orderForm.supplier_name, orderForm.order_date, orderForm.expected_delivery, orderForm.notes)
-    if (!text) { alert('Add quantities to at least one item first'); return }
-    navigator.clipboard.writeText(text).then(() => alert('Order copied to clipboard!'))
-  }
-
-  async function saveOrder() {
-    if (!orderForm.supplier_name) return
-    setSaving(true)
-    await supabase.from('stock_orders').insert({ store_id: STORE_ID, supplier_name: orderForm.supplier_name, order_date: orderForm.order_date, expected_delivery: orderForm.expected_delivery || null, notes: orderForm.notes || null, status: 'pending', total_value: 0 })
-    setOrderForm({ supplier_name: '', order_date: new Date().toISOString().split('T')[0], expected_delivery: '', notes: '' })
-    setShowAddOrder(false); await loadAll(); setSaving(false)
-  }
-
-  async function updateOrderStatus(id: string, status: string) {
-    await supabase.from('stock_orders').update({ status }).eq('id', id); await loadAll()
-  }
-
-  async function saveAdjustment() {
-    if (!adjustItem || !adjustQty || !adjustReason) { alert('Please fill in quantity and reason'); return }
-    setAdjusting(true)
-    // Re-fetch current_qty directly from DB — React state may be stale if stock was
-    // recently issued via the RPC (e.g. -5 shows as 0 in state, causing wrong calc)
-    const { data: fresh } = await supabase.from('stock_items').select('current_qty').eq('id', adjustItem.id).single()
-    const qtyBefore = fresh ? Number(fresh.current_qty) : Number(adjustItem.current_qty)
-    const entered = parseFloat(adjustQty) || 0
-    const qtyAfter = adjustMode === 'set' ? entered : adjustMode === 'add' ? qtyBefore + entered : qtyBefore - entered
-    const adjustment = qtyAfter - qtyBefore
-    await supabase.from('stock_items').update({ current_qty: qtyAfter }).eq('id', adjustItem.id)
-    await supabase.from('stock_adjustments').insert({ store_id: STORE_ID, stock_item_id: adjustItem.id, item_name: adjustItem.description || adjustItem.name, qty_before: qtyBefore, qty_after: qtyAfter, adjustment, unit: adjustItem.unit, reason: adjustReason, notes: adjustNotes })
-    setAdjustItem(null); setAdjustQty(''); setAdjustReason(''); setAdjustNotes(''); setAdjusting(false)
-    await loadAll()
-  }
-
-  async function loadAdjustHistory(itemId: string) {
-    const { data } = await supabase.from('stock_adjustments').select('*').eq('stock_item_id', itemId).order('created_at', { ascending: false }).limit(10)
-    setAdjustHistory((data || []) as StockAdjustment[])
-  }
-
-  async function saveItem() {
-    if (!itemForm.name.trim() && !itemForm.description.trim()) { alert('Item name is required'); return }
-    setSaving(true)
-    const parentItem = itemForm.is_prepped_item ? items.find(i => i.id === itemForm.parent_item_id) : undefined
-    const calcPrice = itemForm.is_catch_weight
-      ? parseFloat(itemForm.kg_price || '0') * parseFloat(itemForm.avg_weight_kg || '0')
-      : itemForm.is_prepped_item && parentItem
-      ? (Number(parentItem.cost_price) || Number(parentItem.price) || 0) * parseFloat(itemForm.portion_size || '0')
-      : parseFloat(itemForm.cost_price || '0')
-    const payload = {
-      store_id: STORE_ID,
-      name: itemForm.name.trim() || itemForm.description.trim(),
-      description: itemForm.name.trim() || itemForm.description.trim(),
-      category: itemForm.category_id,
-      unit: itemForm.unit,
-      price: calcPrice,
-      cost_price: calcPrice,
-      par_level: parseFloat(itemForm.par_level || '0'),
-      is_active: true,
-      supplier: itemForm.is_prepped_item ? 'Instore' : (itemForm.supplier || 'Other'),
-      on_daily_sheet: itemForm.on_daily_sheet,
-      is_catch_weight: itemForm.is_catch_weight,
-      kg_price: parseFloat(itemForm.kg_price || '0'),
-      avg_weight_kg: parseFloat(itemForm.avg_weight_kg || '0'),
-      parent_item_id: itemForm.is_prepped_item ? (itemForm.parent_item_id || null) : null,
-      portion_size: itemForm.is_prepped_item ? parseFloat(itemForm.portion_size || '0') : null
-    }
-    let savedId: string | null = null
-    if (editItem) {
-      const res = await supabase.from('stock_items').update(payload).eq('id', editItem.id)
-      if (res.error) { alert('Error saving item: ' + res.error.message); setSaving(false); return }
-      savedId = editItem.id
-    } else {
-      const res = await supabase.from('stock_items').insert(payload).select().single()
-      if (res.error) { alert('Error saving item: ' + res.error.message); setSaving(false); return }
-      savedId = res.data?.id || null
-    }
-    // Sync section assignments
-    if (savedId) {
-      const theId = savedId
-      await supabase.from('stock_item_sections').delete().eq('stock_item_id', theId)
-      if (itemFormSections.length > 0) {
-        await supabase.from('stock_item_sections').insert(itemFormSections.map(sid => ({ stock_item_id: theId, section_id: sid })))
+    const buildLine = (i: typeof items[0], match: typeof invLinesForMatch[0] | undefined) => {
+      const matchQty = match ? Number(match.qty) || 0 : 0
+      const matchAmount = match ? Number(match.amount) || 0 : 0
+      const matchUnitCost = match?.unit_price && Number(match.unit_price) > 0
+        ? Number(match.unit_price)
+        : match && matchQty > 0 ? (matchAmount / matchQty) : 0
+      const stockUnitIsBulk = BULK_UNITS.includes((i.unit || '').toLowerCase())
+      const caseSize = match?.case_size ? Number(match.case_size) : null
+      const caseSizeMatchesUnit = caseSize && match?.case_uom
+        && BULK_UNITS.includes((match.case_uom || '').toLowerCase())
+      if (match && matchQty > 0 && stockUnitIsBulk && caseSizeMatchesUnit && caseSize) {
+        const totalQty = matchQty * caseSize
+        const costPerUnit = matchUnitCost > 0 ? matchUnitCost / caseSize : 0
+        return {
+          stock_item_id: i.id, description: i.description || '', unit: i.unit || 'each',
+          qty_received: totalQty.toFixed(3),
+          unit_cost: costPerUnit > 0 ? costPerUnit.toFixed(4) : String(Number(i.cost_price || i.price || 0) || ''),
+          units_per_case: String(caseSize), case_qty: String(matchQty),
+          case_price: matchUnitCost > 0 ? matchUnitCost.toFixed(2) : '',
+          is_catch_weight: !!(i as any).is_catch_weight,
+        }
+      }
+      // For catch weight items, pre-initialize the helper fields so the formula
+      // computes immediately when the user enters the actual kg weight
+      const isCatchWeight = !!(i as any).is_catch_weight
+      const invoiceUnitCost = match && matchUnitCost > 0 ? matchUnitCost.toFixed(4) : String(Number(i.cost_price || i.price || 0) || '')
+      return {
+        stock_item_id: i.id, description: i.description || '', unit: i.unit || 'each',
+        qty_received: match && matchQty > 0 ? String(matchQty) : '',
+        unit_cost: invoiceUnitCost,
+        units_per_case: '', case_qty: '', case_price: '',
+        is_catch_weight: isCatchWeight,
+        // Pre-init catch weight fields so formula fires as soon as user types kg
+        ...(isCatchWeight && match ? {
+          catch_units: matchQty > 0 ? String(matchQty) : '',
+          catch_rpu: matchUnitCost > 0 ? matchUnitCost.toFixed(4) : '',
+          catch_kg: '',
+        } : {}),
       }
     }
-    setItemForm({ name: '', description: '', category_id: categories[0]?.id || '', unit: 'each', cost_price: '', par_level: '', supplier: 'Other', on_daily_sheet: false, is_catch_weight: false, kg_price: '', avg_weight_kg: '', is_prepped_item: false, parent_item_id: '', portion_size: '' })
-    setItemFormSections([])
-    setShowAddItem(false); setEditItem(null); setShowInlineCat(false); await loadAll(); setSaving(false)
+
+    // Build GRV in INVOICE LINE ORDER (matching supplier's physical invoice layout)
+    // then append any supplier stock items not on this invoice at the bottom
+    const matchedStockIds = new Set<string>()
+    const invoiceOrderedLines = invLinesForMatch
+      .map(invLine => {
+        const stockItem = (items || []).find(i => norm(i.description || '') === norm(invLine.description || ''))
+        if (!stockItem) return null // invoice line has no stock item set up n/a skip
+        matchedStockIds.add(stockItem.id)
+        return buildLine(stockItem, invLine)
+      })
+      .filter(Boolean) as ReturnType<typeof buildLine>[]
+
+    // Supplier stock items not on this invoice (available to receive at bottom)
+    const unmatchedLines = (items || [])
+      .filter(i => !matchedStockIds.has(i.id))
+      .map(i => buildLine(i, undefined))
+
+    setGrvLines([...invoiceOrderedLines, ...unmatchedLines])
+    setShowGRV(true)
   }
 
-  async function saveCategory() {
-    if (!categoryForm.name) return
-    await supabase.from('stock_categories').insert({ store_id: STORE_ID, name: categoryForm.name, color: categoryForm.color, sort_order: categories.length + 1 })
-    setCategoryForm({ name: '', color: '#1a5c38' }); setShowAddCategory(false); await loadAll()
+  // Breaks a case/box delivery down into the stock-keeping unit (e.g. 1 case of 10kg avo -> 10kg @ R/kg).
+  // Only overwrites qty_received/unit_cost when both case_qty and units_per_case are usable.
+  function recalcGrvCase(line: {qty_received:string;unit_cost:string;units_per_case:string;case_qty:string;case_price:string}) {
+    const perCase = parseFloat(line.units_per_case) || 0
+    const cases = parseFloat(line.case_qty) || 0
+    const casePrice = parseFloat(line.case_price) || 0
+    const updated = { ...line }
+    if (perCase > 0 && cases > 0) updated.qty_received = String(Number((cases * perCase).toFixed(3)))
+    if (perCase > 0 && casePrice > 0) updated.unit_cost = (casePrice / perCase).toFixed(4)
+    return updated
   }
 
-  async function saveInlineCategory() {
-    if (!newCatName.trim()) return
-    setSavingCat(true)
-    const { data: newCat } = await supabase.from('stock_categories')
-      .insert({ store_id: STORE_ID, name: newCatName.trim(), color: '#1a5c38', sort_order: categories.length + 1 })
-      .select().single()
-    await loadAll()
-    // Auto-select the newly created category in the item form
-    if (newCat) setItemForm(f => ({ ...f, category_id: newCat.id }))
-    setNewCatName(''); setShowInlineCat(false); setSavingCat(false)
-  }
-
-  async function deleteItem(id: string) {
-    if (!confirm('Deactivate this item?')) return
-    await supabase.from('stock_items').update({ is_active: false }).eq('id', id); await loadAll()
-  }
-
-  async function runAIImport() {
-    if (!aiText.trim()) return
-    setAILoading(true)
-    try {
-      const resp = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 1000, messages: [{ role: 'user', content: `Extract stock items from this text. Return ONLY a JSON array. Each object: name (string), qty (number), unit (string from: each,kg,g,L,ml,pack,box,bag,bottle,tin,tray,dozen). Text:\n\n${aiText}` }] }) })
-      const data = await resp.json()
-      const text = data.content?.[0]?.text || '[]'
-      setAIResults(JSON.parse(text.replace(/```json|```/g, '').trim()))
-    } catch (e) { console.error(e) }
-    setAILoading(false)
-  }
-
-  async function applyAIResults() {
-    if (!activeCount) return
-    for (const result of aiResults) {
-      const matched = items.find(i => (i.name||i.description||'').toLowerCase().includes(result.name.toLowerCase()) || result.name.toLowerCase().includes((i.name||i.description||'').toLowerCase()))
-      if (matched) { const line = countLines.find(l => l.stock_item_id === matched.id); if (line) await updateCountLine(line.id, result.qty) }
+  async function saveGRV() {
+    if (!grvInvoice) return
+    setSavingGRV(true)
+    // Only save lines where qty was entered
+    const linesToSave = grvLines.filter(l => parseFloat(l.qty_received) > 0)
+    if (linesToSave.length === 0) {
+      alert('Enter at least one received quantity')
+      setSavingGRV(false)
+      return
     }
-    setShowAIImport(false); setAIText(''); setAIResults([])
+    // Insert stock purchases
+    const purchases = linesToSave.map(l => ({
+      store_id: STORE_ID,
+      purchase_date: grvInvoice.invoice_date,
+      supplier_name: grvInvoice.supplier,
+      stock_item_id: l.stock_item_id,
+      item_name: l.description,
+      quantity: parseFloat(l.qty_received),
+      unit: l.unit,
+      unit_cost: parseFloat(l.unit_cost) || 0,
+      total_cost: parseFloat(l.qty_received) * (parseFloat(l.unit_cost) || 0),
+      invoice_number: grvInvoice.invoice_number || null,
+      invoice_id: grvInvoice.id,
+    }))
+    const { error } = await supabase.from('stock_purchases').insert(purchases)
+    if (error) { alert('Error saving GRV: ' + error.message); setSavingGRV(false); return }
+    // Add received quantities onto each item's running stock balance
+    await Promise.all(linesToSave.map(l =>
+      supabase.rpc('increment_stock_qty', { item_id: l.stock_item_id, amount: parseFloat(l.qty_received) })
+    ))
+    // Update invoice status to received
+    await supabase.from('invoices').update({ status: 'received' }).eq('id', grvInvoice.id)
+    setShowGRV(false)
+    setGrvInvoice(null)
+    setSavingGRV(false)
+    load()
   }
 
-  const CAT_LABELS: Record<string,string> = { goods: 'Goods', beverages: 'Beverages', packaging: 'Packaging', basting: 'Basting & Sauces', other: 'Other' }
-  // Group items by their actual category UUID — matching real categories
-  const groupedItems = (categories || []).reduce((acc, cat) => {
-    const catItems = (items || []).filter(i => i.category === cat.id)
-    if (catItems.length) acc[cat.id] = { key: cat.id, label: cat.name, color: cat.color || '#6b7280', items: catItems }
-    return acc
-  }, {} as Record<string, { key: string; label: string; color: string; items: StockItem[] }>)
-  // Also bucket any items with unmatched categories into 'Other'
-  const matchedIds = new Set(Object.values(groupedItems).flatMap(g => g.items.map(i => i.id)))
-  const uncategorised = (items || []).filter(i => !matchedIds.has(i.id))
-  if (uncategorised.length) groupedItems['other'] = { key: 'other', label: 'Other', color: '#6b7280', items: uncategorised }
-  const todayStr = new Date().toISOString().split('T')[0]
-  const todayPurchases = (purchases || []).filter(p => p.purchase_date === todayStr)
-  const todayWastage = (wastage || []).filter(w => w.wastage_date === todayStr)
-  const pendingOrders = (orders || []).filter(o => o.status === 'pending')
-  const sc = (s: string) => s === 'delivered' ? { bg: '#dcfce7', color: '#166534' } : s === 'pending' ? { bg: '#fef3c7', color: '#92400e' } : s === 'partial' ? { bg: '#dbeafe', color: '#1e40af' } : { bg: '#fee2e2', color: '#dc2626' }
+  async function scanInvoice(file: File, supplierArg?: string) {
+    setScanning(true)
+    setScanError('')
+    try {
+      const mediaType = file.type === 'application/pdf' ? 'application/pdf'
+        : file.type === 'image/png' ? 'image/png'
+        : file.type === 'image/webp' ? 'image/webp'
+        : 'image/jpeg'
 
+      let arrayBuffer: ArrayBuffer
+      try {
+        arrayBuffer = await file.arrayBuffer()
+      } catch {
+        arrayBuffer = await new Promise<ArrayBuffer>((resolve, reject) => {
+          const reader = new FileReader()
+          reader.onload = () => resolve(reader.result as ArrayBuffer)
+          reader.onerror = () => reject(new Error(
+            'Could not read this file from disk. Try selecting it again, or pick a different copy of the file.'
+          ))
+          reader.readAsArrayBuffer(file)
+        })
+      }
+      const uint8Array = new Uint8Array(arrayBuffer)
+      let b64 = ''
+      const CHUNK = 8190
+      for (let i = 0; i < uint8Array.length; i += CHUNK) {
+        b64 += btoa(String.fromCharCode(...uint8Array.subarray(i, i + CHUNK)))
+      }
+
+      if (!b64) throw new Error('Could not read file')
+
+      // supplierArg is passed directly from the call site n/a zero closure/ref ambiguity
+      const supplierName = (supplierArg && supplierArg !== '__other__') ? supplierArg : ''
+      const matchedSupplier = suppliers.find(s => s.name === supplierName)
+      const supplierTemplate = matchedSupplier?.invoice_columns?.length ? {
+        name: matchedSupplier.name,
+        columns: matchedSupplier.invoice_columns,
+        vatIncluded: matchedSupplier.invoice_vat_included !== false,
+      } : undefined
+
+      // Auto-retry up to 3 times on failure
+      let response: Response | null = null
+      let data: any = null
+      let lastErr = ''
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          if (attempt > 1) {
+            setScanStatus(`Retry ${attempt}/3 — running AI scan...`)
+            await new Promise(r => setTimeout(r, 1000 * attempt)) // back-off: 2s, 3s
+          }
+          response = await fetch('/api/scan-invoice', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ base64: b64, mediaType, supplierTemplate })
+          })
+          data = await response.json()
+          if (response.ok) break // success
+          lastErr = data.error || 'Scan failed'
+        } catch (e: any) {
+          lastErr = e.message
+        }
+      }
+      if (!response?.ok) throw new Error(lastErr || 'Scan failed after 3 attempts')
+
+      // Pre-fill the invoice form — supplier is already set from pre-selection (modal onChange),
+      // so we NEVER change it here. Only fill fields the user hasn't touched yet.
+      setShowInvForm(true)
+      setInvForm(f => ({
+        ...f,
+        // Keep whatever supplier is already set — don't let AI override pre-selection
+        invoice_number: data.invoice_number || f.invoice_number,
+        invoice_date: data.invoice_date || f.invoice_date,
+        notes: data.notes || f.notes,
+      }))
+      if (data.due_date) {
+        setInvForm(f => ({ ...f, due_date: data.due_date }))
+      } else if (data.invoice_date) {
+        // Calculate due date from the pre-selected supplier's payment terms
+        setInvForm(f => {
+          const sup = suppliers.find(s => s.name === f.supplier)
+          return sup ? { ...f, due_date: addDays(data.invoice_date, sup.payment_terms_days ?? 7) } : f
+        })
+      }
+      if (data.lines && data.lines.length > 0) {
+        setInvLines(data.lines.map((l: {description?: string; qty?: number; uom?: string; unit_price?: number; amount?: number; vat_amount?: number; case_size?: number | null; case_uom?: string | null}) => ({
+          category_key: defaultCatKey,
+          description: l.description || '',
+          qty: Number(l.qty) || 1,
+          uom: l.uom || 'each',
+          unit_price: Number(l.unit_price) || 0,
+          amount: Number(l.amount) || 0,
+          vat_amount: Number(l.vat_amount) || 0,
+          case_size: l.case_size ?? null,
+          case_uom: l.case_uom ?? null,
+        })))
+      }
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Could not read invoice. Please try again.'
+      const friendly = /could not be found|NotFoundError|NotReadableError/i.test(msg)
+        ? 'Could not read this file from disk — this can happen if the file was just created/moved or is locked by another app. Wait a moment and try selecting it again.'
+        : msg
+      setScanError(friendly)
+    }
+    setScanning(false)
+  }
+
+
+  async function saveInvoice(andReceive: boolean) {
+    if (!invForm.supplier) { setError('Supplier is required'); return }
+    if (!invForm.invoice_date) { setError('Date is required'); return }
+    if (invLines.every(l => !l.amount)) { setError('At least one line item with an amount is required'); return }
+    setSaving(true); setError('')
+    const payload = {
+      store_id: STORE_ID,
+      organisation_id: ORG_ID,
+      ...invForm,
+      status: andReceive ? invForm.status : 'draft',
+      due_date: invForm.due_date || null,
+      total_amount: lineTotal,
+      total_vat: lineVatTotal,
+    }
+    let invoiceId = editInv?.id
+    if (editInv) {
+      const { error: e } = await supabase.from('invoices').update(payload).eq('id', editInv.id)
+      if (e) { setError(e.message); setSaving(false); return }
+      await supabase.from('invoice_lines').delete().eq('invoice_id', editInv.id)
+    } else {
+      const { data, error: e } = await supabase.from('invoices').insert(payload).select().single()
+      if (e) { setError(e.message); setSaving(false); return }
+      invoiceId = data.id
+    }
+    const lines = invLines.filter(l => Number(l.amount) > 0).map(l => ({
+      invoice_id: invoiceId, store_id: STORE_ID,
+      category_key: l.category_key, description: l.description,
+      qty: Number(l.qty) || 1, uom: l.uom || 'each', unit_price: Number(l.unit_price) || 0,
+      amount: Number(l.amount), vat_amount: Number(l.vat_amount || 0),
+      case_size: l.case_size ?? null, case_uom: l.case_uom ?? null,
+    }))
+    if (lines.length) {
+      const { error: le } = await supabase.from('invoice_lines').insert(lines)
+      if (le) { setError(le.message); setSaving(false); return }
+    }
+    setSaving(false); setShowInvForm(false); setEditInv(null)
+    await load()
+    if (!andReceive) return
+    // CRITICAL: never re-open GRV for invoices already received or paid
+    if (editInv && (editInv.status === 'received' || editInv.status === 'paid')) return
+    const savedInvoice: Invoice = {
+      id: invoiceId!,
+      supplier: invForm.supplier,
+      invoice_number: invForm.invoice_number,
+      invoice_date: invForm.invoice_date,
+      due_date: invForm.due_date,
+      status: payload.status,
+      payment_method: invForm.payment_method,
+      notes: invForm.notes,
+      total_amount: lineTotal,
+      total_vat: lineVatTotal,
+      invoice_lines: lines as unknown as InvoiceLine[],
+    }
+    // Only open GRV if this supplier delivers stock
+    const sup = suppliers.find(s => s.name === invForm.supplier)
+    const deliversStock = !sup || sup.delivers_stock !== false
+    if (deliversStock) {
+      openGRV(savedInvoice)
+    } else {
+      // Non-stock supplier (rent, Micros, insurance, etc.) n/a just mark as received, no GRV
+      await supabase.from('invoices').update({ status: 'received' }).eq('id', savedInvoice.id)
+      setShowInvForm(false); setEditInv(null); await load()
+    }
+  }
+
+  async function deleteInvoice(id: string) {
+    if (!confirm('Delete this invoice and all its lines?')) return
+    await supabase.from('invoice_lines').delete().eq('invoice_id', id)
+    await supabase.from('invoices').delete().eq('id', id)
+    load()
+  }
+
+  async function updateInvoiceStatus(id: string, status: string) {
+    await supabase.from('invoices').update({ status }).eq('id', id)
+    load()
+  }
+
+  // ── Quick expense CRUD ──
+  async function saveQuick() {
+    setSaving(true); setError('')
+    const validLines = (qForm.lines || []).filter((l: any) => l.description?.trim() && parseFloat(l.amount) > 0)
+    if (validLines.length === 0) { setError('Add at least one line with description and amount.'); setSaving(false); return }
+
+    if (editQ) {
+      // Single-line edit (legacy)
+      const cat = categories.find(c => c.key === validLines[0].category_key)
+      const res = await supabase.from('expenses').update({
+        store_id: STORE_ID, expense_date: qForm.expense_date,
+        category_key: validLines[0].category_key, category_name: cat?.name || '',
+        description: validLines[0].description, amount: parseFloat(validLines[0].amount) || 0,
+        supplier: qForm.supplier, payment_method: qForm.payment_method, notes: qForm.notes,
+      }).eq('id', editQ.id)
+      if (res.error) { setError(res.error.message); setSaving(false); return }
+    } else {
+      // Multi-line insert n/a one row per line
+      const rows = validLines.map((l: any) => {
+        const cat = categories.find(c => c.key === l.category_key)
+        return {
+          store_id: STORE_ID, expense_date: qForm.expense_date,
+          category_key: l.category_key, category_name: cat?.name || '',
+          description: l.description.trim(), amount: parseFloat(l.amount) || 0,
+          supplier: qForm.supplier, payment_method: qForm.payment_method, notes: qForm.notes,
+        }
+      })
+      const res = await supabase.from('expenses').insert(rows)
+      if (res.error) { setError(res.error.message); setSaving(false); return }
+    }
+    setSaving(false)
+    setShowQForm(false); setEditQ(null); load()
+  }
+
+  async function deleteQuick(id: string) {
+    if (!confirm('Delete this expense?')) return
+    await supabase.from('expenses').delete().eq('id', id)
+    load()
+  }
+
+  // ── Styles ──
+  const hdr: React.CSSProperties = { background: 'linear-gradient(135deg, #0a1f12 0%, #1a5c38 100%)', padding: '24px 32px', color: '#fff', display: 'flex', alignItems: 'center', gap: 16 }
+  const card: React.CSSProperties = { background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 1px 4px rgba(0,0,0,0.08)', marginBottom: 16 }
+  const inp: React.CSSProperties = { width: '100%', padding: '10px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 14, boxSizing: 'border-box' as const }
+  const btn = (color = '#1a5c38'): React.CSSProperties => ({ background: color, color: '#fff', border: 'none', borderRadius: 8, padding: '10px 18px', cursor: 'pointer', fontSize: 14, fontWeight: 600 })
+  const smBtn = (bg: string, color: string): React.CSSProperties => ({ background: bg, color, border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 12, fontWeight: 600 })
+
+  const statusBadge = (status: string, size = 12) => {
+    const map: Record<string, { bg: string; color: string }> = {
+      submitted: { bg: '#f0fdf4', color: '#16a34a' }, pending: { bg: '#fffbeb', color: '#d97706' },
+      approved: { bg: '#eff6ff', color: '#2563eb' }, draft: { bg: '#f3f4f6', color: '#6b7280' },
+      paid: { bg: '#f0fdf4', color: '#15803d' }, signed_off: { bg: '#f0fdf4', color: '#15803d' },
+    }
+    const s = map[status] || { bg: '#f3f4f6', color: '#6b7280' }
+    return <span style={{ background: s.bg, color: s.color, padding: '2px 10px', borderRadius: 20, fontSize: size, fontWeight: 600, textTransform: 'capitalize' as const }}>{status || 'draft'}</span>
+  }
 
   return (
-    <div style={{ minHeight: '100vh', background: '#f0f4f0', fontFamily: 'system-ui, sans-serif' }}>
-      <header style={{ background: 'linear-gradient(135deg, #0a1f12 0%, #1a5c38 100%)', position: 'sticky', top: 0, zIndex: 10, padding: '0 40px' }}>
-        <div style={{ maxWidth: '1200px', margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: '72px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <div style={{ width: '40px', height: '40px', borderRadius: '12px', background: 'rgba(255,255,255,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px' }}>📦</div>
-            <div><div style={{ fontWeight: 800, fontSize: '16px', color: 'white' }}>CompliTrack</div><div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.55)' }}>Stock Management</div></div>
-          </div>
-          <button onClick={() => router.push('/dashboard')} style={{ padding: '8px 16px', border: '1.5px solid rgba(255,255,255,0.4)', borderRadius: '10px', fontSize: '13px', fontWeight: 700, color: 'white', background: 'rgba(255,255,255,0.15)', cursor: 'pointer' }}>← Dashboard</button>
+    <div style={{ minHeight: '100vh', background: '#f0f4f0' }}>
+      {/* Header */}
+      <div style={hdr}>
+        <button onClick={() => router.push('/dashboard')} style={{ background: 'rgba(255,255,255,0.15)', border: 'none', borderRadius: 8, color: '#fff', padding: '8px 14px', cursor: 'pointer', fontSize: 14 }}>← Back</button>
+        <div>
+          <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>💰 Income &amp; Expenses</h1>
+          <p style={{ margin: '2px 0 0', opacity: 0.7, fontSize: 13 }}>Track sales, supplier bills and expenses</p>
         </div>
-      </header>
-
-      <div style={{ background: 'linear-gradient(135deg, #0a1f12 0%, #1a5c38 100%)', padding: '40px 40px 100px' }}>
-        <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
-          <h1 style={{ fontSize: '32px', fontWeight: 800, color: 'white', margin: '0 0 6px', letterSpacing: '-0.5px' }}>Stock Management 📦</h1>
-          <p style={{ fontSize: '15px', color: 'rgba(255,255,255,0.6)', margin: 0 }}>Daily counts, purchases, wastage, orders and food cost tracking</p>
+        <div style={{ marginLeft: 'auto' }}>
+          <input type="month" value={month} onChange={e => setMonth(e.target.value)}
+            style={{ ...inp, width: 160, background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.3)', color: '#fff' }} />
         </div>
       </div>
 
-      <main style={{ maxWidth: '1200px', margin: '-60px auto 0', padding: '0 40px 60px', position: 'relative', zIndex: 1 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', marginBottom: '24px' }}>
-          {[
-            { label: "Today's Purchases", value: formatCurrency(todayPurchases.reduce((s, p) => s + p.total_cost, 0)), color: '#1a5c38' },
-            { label: "Today's Wastage", value: formatCurrency(todayWastage.reduce((s, w) => s + w.total_cost, 0)), color: '#dc2626' },
-            { label: 'Pending Orders', value: String(pendingOrders.length), color: '#d97706' },
-            { label: 'Stock Items', value: String(items.length), color: '#7c3aed' },
-          ].map((k, i) => (
-            <div key={i} style={{ background: 'white', borderRadius: '20px', border: '1.5px solid #eef2ee', padding: '20px 24px', boxShadow: '0 2px 8px rgba(0,0,0,0.04)', textAlign: 'center' }}>
-              <div style={{ fontSize: '26px', fontWeight: 800, color: k.color }}>{k.value}</div>
-              <div style={{ fontSize: '12px', color: '#9ca3af', marginTop: '4px' }}>{k.label}</div>
-            </div>
-          ))}
-        </div>
+      {/* Tabs */}
+      <div style={{ background: '#fff', borderBottom: '1px solid #e5e7eb', display: 'flex', paddingLeft: 24, overflowX: 'auto' }}>
+        {TABS.map((t, i) => (
+          <button key={t} onClick={() => setTab(i)}
+            style={{ padding: '14px 20px', border: 'none', background: 'none', cursor: 'pointer', whiteSpace: 'nowrap',
+              fontWeight: tab === i ? 700 : 400, color: tab === i ? '#1a5c38' : '#6b7280', fontSize: 14,
+              borderBottom: tab === i ? '2px solid #1a5c38' : '2px solid transparent' }}>
+            {t}
+          </button>
+        ))}
+      </div>
 
-        <div style={{ background: 'white', borderRadius: '16px', padding: '6px', display: 'inline-flex', gap: '4px', marginBottom: '24px', boxShadow: '0 2px 8px rgba(0,0,0,0.06)', flexWrap: 'wrap' }}>
-          {TABS.map(t => (
-            <button key={t.key} onClick={() => setTab(t.key)} style={{ padding: '10px 18px', borderRadius: '10px', fontSize: '13px', fontWeight: 700, cursor: 'pointer', border: 'none', background: tab === t.key ? '#1a5c38' : 'transparent', color: tab === t.key ? '#fff' : '#6b7280' }}>{t.label}</button>
-          ))}
-        </div>
+      <div style={{ maxWidth: 1200, margin: '0 auto', padding: '24px 16px' }}>
+        {loading ? <div style={{ textAlign: 'center', padding: 60, color: '#6b7280' }}>Loading…</div> : (<>
 
-        {loading ? <div style={{ textAlign: 'center', padding: '60px', color: '#9ca3af' }}>Loading...</div> : (<>
-
-          {/* STOCK COUNTS */}
-          {tab === 'counts' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-              {activeCount ? (
-                <div style={{ background: 'white', borderRadius: '20px', border: '1.5px solid #eef2ee', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
-                  <div style={{ background: viewMode ? '#f8fafc' : COUNT_TYPES.find(c => c.key === activeCount.count_type)?.bg, padding: '20px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
-                    <div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                        <div style={{ fontWeight: 800, fontSize: '18px', color: viewMode ? '#374151' : COUNT_TYPES.find(c => c.key === activeCount.count_type)?.color }}>{COUNT_TYPES.find(c => c.key === activeCount.count_type)?.label} Count — {activeSection ? `${activeSection.icon} ${activeSection.name}` : formatDate(activeCount.count_date)}</div>
-                        {viewMode && <span style={{ fontSize: '11px', fontWeight: 800, background: '#dbeafe', color: '#1d4ed8', padding: '3px 10px', borderRadius: '100px', whiteSpace: 'nowrap' }}>👁 VIEW ONLY</span>}
-                      </div>
-                      <div style={{ fontSize: '13px', color: '#6b7280', marginTop: '2px' }}>{activeSection ? countLines.filter(l => activeSection.id === '__unassigned__' ? !l.section_id : l.section_id === activeSection.id).length : countLines.length} items{activeSection ? ` in this section` : ''} {viewMode ? '• Read-only — finalised count' : '• Enter actual quantities'}{!viewMode && activeSection && sections.length > 0 ? ' · tap 🌐 All to see totals' : ''}</div>
-                    </div>
-                    <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-                      {!viewMode && <button onClick={() => setShowAIImport(true)} style={{ padding: '8px 16px', background: '#7c3aed', color: 'white', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>🤖 AI Import</button>}
-                      <button onClick={printStockSheet} style={{ padding: '8px 16px', background: '#f0f4f0', color: '#1a5c38', border: '1.5px solid #d1fae5', borderRadius: '10px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>🖨 Print Sheet</button>
-                      <button onClick={() => { setActiveCount(null); setCountLines([]); setViewMode(false); setActiveSection(null); if (!viewMode) loadAll() }} style={{ padding: '8px 16px', background: viewMode ? '#6b7280' : '#f59e0b', color: 'white', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>{viewMode ? '✕ Close' : '💾 Save & Close'}</button>
-                      {!viewMode && <button onClick={completeCount} style={{ padding: '8px 16px', background: '#1a5c38', color: 'white', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>✅ Finalise</button>}
-                    </div>
+          {/* ── SUMMARY ── */}
+          {tab === 0 && (
+            <div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6,1fr)', gap: 16, marginBottom: 24 }}>
+                {[
+                  { label: 'Total Sales', value: fmt(totalSales), color: '#16a34a', icon: '📈', sub: `${cashUps.length} cash-ups · ex-VAT ${fmt(totalSalesExcl)}` },
+                  { label: 'Supplier Bills', value: fmt(totalInvoices), color: '#dc2626', icon: '🧾', sub: `${invoices.length} invoices` },
+                  { label: 'Quick Expenses', value: fmt(totalQuick), color: '#f97316', icon: '💵', sub: `${quickExp.length} entries` },
+                  { label: 'Wages & UIF', value: fmt(totalWages), color: '#7c3aed', icon: '👷', sub: `${wages.length} employee${wages.length !== 1 ? 's' : ''}` },
+                  { label: netProfit >= 0 ? 'Net Profit' : 'Net Loss', value: fmt(netProfit), color: netProfit >= 0 ? '#1a5c38' : '#ef4444', icon: netProfit >= 0 ? '✅' : '⚠️', sub: totalSalesExcl > 0 ? `${((netProfit / totalSalesExcl) * 100).toFixed(1)}% margin` : '' },
+                  { label: 'Variance', value: fmt(totalVariance), color: Math.abs(totalVariance) > 500 ? '#dc2626' : '#6b7280', icon: '⚖️', sub: `${totalCustomers} customers` },
+                ].map(k => (
+                  <div key={k.label} style={{ ...card, marginBottom: 0, textAlign: 'center', padding: 18 }}>
+                    <div style={{ fontSize: 24 }}>{k.icon}</div>
+                    <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>{k.label}</div>
+                    <div style={{ fontSize: 20, fontWeight: 700, color: k.color, marginTop: 4 }}>{k.value}</div>
+                    {k.sub && <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>{k.sub}</div>}
                   </div>
-                  {/* Section tabs — only shown when sections exist and count has section lines */}
-                  {(() => {
-                    const sectionIdsInCount = [...new Set(countLines.map(l => l.section_id).filter(Boolean))] as string[]
-                    const sectionsInCount = sections.filter(s => sectionIdsInCount.includes(s.id))
-                    if (sectionsInCount.length === 0) return null
-                    const unassignedLines = countLines.filter(l => !l.section_id)
-                    return (
-                      <div style={{ display: 'flex', gap: '8px', padding: '12px 24px', background: '#f9fafb', borderTop: '1px solid #e5e7eb', flexWrap: 'wrap' }}>
-                        <button onClick={() => setActiveSection(null)}
-                          style={{ padding: '7px 16px', borderRadius: '20px', border: 'none', cursor: 'pointer', fontWeight: 700, fontSize: '13px', background: activeSection === null ? '#1a5c38' : '#e5e7eb', color: activeSection === null ? 'white' : '#374151' }}>
-                          🌐 All ({countLines.length})
-                        </button>
-                        {sectionsInCount.map(sec => {
-                          const secLines = countLines.filter(l => l.section_id === sec.id)
-                          const filled = secLines.filter(l => (countInputs[l.id] ?? '') !== '').length
-                          return (
-                            <button key={sec.id} onClick={() => setActiveSection(activeSection?.id === sec.id ? null : sec)}
-                              style={{ padding: '7px 16px', borderRadius: '20px', border: `2px solid ${sec.color}`, cursor: 'pointer', fontWeight: 700, fontSize: '13px', background: activeSection?.id === sec.id ? sec.color : 'white', color: activeSection?.id === sec.id ? 'white' : sec.color }}>
-                              {sec.icon} {sec.name} ({filled}/{secLines.length})
-                            </button>
-                          )
-                        })}
-                        {unassignedLines.length > 0 && (
-                          <button onClick={() => setActiveSection({ id: '__unassigned__', store_id: '', name: 'General', color: '#6b7280', icon: '📦', sort_order: 999, is_active: true })}
-                            style={{ padding: '7px 16px', borderRadius: '20px', border: '2px solid #6b7280', cursor: 'pointer', fontWeight: 700, fontSize: '13px', background: activeSection?.id === '__unassigned__' ? '#6b7280' : 'white', color: activeSection?.id === '__unassigned__' ? 'white' : '#6b7280' }}>
-                            📦 General ({unassignedLines.length})
-                          </button>
-                        )}
-                      </div>
-                    )
-                  })()}
-                  {/* Group by supplier in count screen */}
-                  {suppliers.map(s => s.name).map(supplier => {
-                    const supplierLines = countLines.filter(l => {
-                      const item = items.find(i => i.id === l.stock_item_id)
-                      // When a section tab is active, filter to that section's lines only
-                      if (activeSection) {
-                        if (activeSection.id === '__unassigned__' && l.section_id) return false
-                        if (activeSection.id !== '__unassigned__' && l.section_id !== activeSection.id) return false
-                      }
-                      return (item?.supplier || 'Other') === supplier
-                    })
-                    if (!supplierLines.length) return null
-                    return (
-                  <div key={supplier}>
-                    <div style={{ padding: '10px 24px', background: '#f9fafb', borderTop: '1px solid #e5e7eb', fontWeight: 700, fontSize: '13px', color: '#1a5c38', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#1a5c38' }} />{supplier} ({supplierLines.length} items)
-                    </div>
-                    {supplierLines.map(line => {
-                      const item = items.find(i => i.id === line.stock_item_id)
-                      if (!item) return null
-                      const variance = (line.actual_qty || 0) - (line.expected_qty || 0)
+                ))}
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                <div style={card}>
+                  <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 700 }}>Expense Breakdown by Category</h3>
+                  {Object.keys(expByCategory).length === 0
+                    ? <p style={{ color: '#6b7280', fontSize: 14 }}>No expenses recorded this month.</p>
+                    : Object.entries(expByCategory).sort((a, b) => b[1] - a[1]).map(([cat, amt]) => {
+                      const pct = totalExpensesDisplay > 0 ? (amt / totalExpensesDisplay) * 100 : 0
+                      const catEntry = categories.find(c => c.name === cat)
                       return (
-                        <div key={line.id} style={{ display: 'flex', alignItems: 'center', gap: '16px', padding: '12px 24px', borderTop: '1px solid #f3f4f6' }}>
-                          <div style={{ flex: 1 }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                              <span style={{ fontWeight: 600, fontSize: '14px', color: item.is_food_cost === false ? '#9ca3af' : '#111' }}>{item.description || item.name}</span>
-                              {item.is_food_cost === false && <span style={{ fontSize: '10px', fontWeight: 700, background: '#fee2e2', color: '#dc2626', padding: '2px 6px', borderRadius: '100px', whiteSpace: 'nowrap' }}>🚫 excl. food cost</span>}
-                              {!activeSection && line.section_id && (() => { const sec = sections.find(s => s.id === line.section_id); return sec ? <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '100px', background: sec.color + '20', color: sec.color, whiteSpace: 'nowrap' }}>{sec.icon} {sec.name}</span> : null })()}
-                            </div>
-                            <div style={{ fontSize: '12px', color: '#9ca3af' }}>{item.unit}</div>
+                        <div key={cat} style={{ marginBottom: 12 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, fontSize: 13 }}>
+                            <span style={{ fontWeight: 600 }}>{cat}</span>
+                            <span>{fmt(amt)} <span style={{ color: '#9ca3af' }}>({pct.toFixed(1)}%)</span></span>
                           </div>
-                          <div style={{ fontSize: '12px', color: '#9ca3af', minWidth: '80px', textAlign: 'right' }}>Expected: <strong>{line.expected_qty || 0}</strong></div>
-                          <input type="number" min="0" step="0.1"
-                            value={viewMode ? (line.actual_qty ?? 0) : (countInputs[line.id] ?? '')}
-                            readOnly={viewMode}
-                            onChange={viewMode ? undefined : e => {
-                              const val = e.target.value
-                              setCountInputs(prev => ({ ...prev, [line.id]: val }))
-                              updateCountLine(line.id, val === '' ? 0 : (parseFloat(val) || 0))
-                            }}
-                            placeholder="0"
-                            style={{ width: '90px', padding: '8px 10px', border: `1.5px solid ${viewMode ? '#e5e7eb' : item.is_food_cost === false ? '#fca5a5' : '#e5e7eb'}`, borderRadius: '10px', fontSize: '16px', textAlign: 'center', outline: 'none', background: viewMode ? '#f3f4f6' : item.is_food_cost === false ? '#fff7f7' : 'white', cursor: viewMode ? 'default' : 'auto' }} />
-                          <div style={{ minWidth: '70px', textAlign: 'right', fontSize: '13px', fontWeight: 700, color: variance < 0 ? '#dc2626' : variance > 0 ? '#16a34a' : '#9ca3af' }}>
-                            {variance > 0 ? '+' : ''}{variance.toFixed(1)}
+                          <div style={{ background: '#f3f4f6', borderRadius: 6, height: 7 }}>
+                            <div style={{ background: catEntry?.colour || '#6b7280', width: `${pct}%`, height: 7, borderRadius: 6 }} />
                           </div>
-                          {!viewMode && <button onClick={() => toggleFoodCost(item.id, item.is_food_cost !== false)}
-                            title={item.is_food_cost === false ? 'Excluded from food cost — tap to include' : 'Included in food cost — tap to exclude'}
-                            style={{ fontSize: '11px', fontWeight: 700, padding: '5px 8px', borderRadius: '8px', border: 'none', cursor: 'pointer', flexShrink: 0, background: item.is_food_cost === false ? '#fee2e2' : '#f0fdf4', color: item.is_food_cost === false ? '#dc2626' : '#16a34a' }}>
-                            {item.is_food_cost === false ? '🚫 FC' : '🍽️ FC'}
-                          </button>}
                         </div>
                       )
                     })}
-                  </div>
-                    )
-                  })}
-                  {/* Food cost summary strip */}
-                  {(() => {
-                    const foodLines = countLines.filter(l => items.find(i => i.id === l.stock_item_id)?.is_food_cost !== false)
-                    const nonFoodLines = countLines.filter(l => items.find(i => i.id === l.stock_item_id)?.is_food_cost === false)
-                    const foodTotal = foodLines.reduce((s, l) => s + (Number(l.actual_qty) || 0) * (Number(l.unit_cost) || 0), 0)
-                    const nonFoodTotal = nonFoodLines.reduce((s, l) => s + (Number(l.actual_qty) || 0) * (Number(l.unit_cost) || 0), 0)
-                    const grandTotal = foodTotal + nonFoodTotal
-                    if (grandTotal === 0) return null
-                    return (
-                      <div style={{ borderTop: '2px solid #e5e7eb', padding: '14px 24px', display: 'flex', gap: '24px', justifyContent: 'flex-end', alignItems: 'center', background: '#f9fafb', flexWrap: 'wrap' }}>
-                        {nonFoodTotal > 0 && <div style={{ fontSize: '13px', color: '#6b7280' }}>🚫 Non-food cost: <strong style={{ color: '#dc2626' }}>{formatCurrency(nonFoodTotal)}</strong></div>}
-                        <div style={{ fontSize: '13px', color: '#6b7280' }}>🍽️ Food Cost Value: <strong style={{ color: '#1a5c38', fontSize: '15px' }}>{formatCurrency(foodTotal)}</strong></div>
-                        {nonFoodTotal > 0 && <div style={{ fontSize: '13px', color: '#6b7280' }}>Total: <strong style={{ color: '#111' }}>{formatCurrency(grandTotal)}</strong></div>}
+                </div>
+                <div style={card}>
+                  <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 700 }}>Sales vs Expenses {'—'} {month}</h3>
+                  {[
+                    { label: 'Total Sales', value: totalSalesExcl, color: '#16a34a', pct: 100 },
+                    { label: 'Supplier Bills', value: totalInvoicesExcl, color: '#dc2626', pct: totalSalesExcl > 0 ? (totalInvoicesExcl / totalSalesExcl) * 100 : 0 },
+                    { label: 'Quick Expenses', value: totalQuick, color: '#f97316', pct: totalSalesExcl > 0 ? (totalQuick / totalSalesExcl) * 100 : 0 },
+                    { label: 'Wages & UIF', value: totalWages, color: '#7c3aed', pct: totalSalesExcl > 0 ? (totalWages / totalSalesExcl) * 100 : 0 },
+                  ].map(row => (
+                    <div key={row.label} style={{ marginBottom: 16 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, marginBottom: 4 }}>
+                        <span style={{ fontWeight: 600 }}>{row.label}</span>
+                        <span style={{ color: row.color, fontWeight: 700 }}>{fmt(row.value)}</span>
                       </div>
-                    )
-                  })()}
-                  {/* OLD groupedItems render replaced */}
-                  {false && Object.values(groupedItems).map(({ key, label, color, items: catItems }) => (
-                    <div key={key}>
-                      <div style={{ padding: '10px 24px', background: '#f9fafb', borderTop: '1px solid #e5e7eb', fontWeight: 700, fontSize: '13px', color: color, display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: color }} />{label}
+                      <div style={{ background: '#f3f4f6', borderRadius: 6, height: 10 }}>
+                        <div style={{ background: row.color, width: `${Math.min(row.pct, 100)}%`, height: 10, borderRadius: 6 }} />
                       </div>
-                      {catItems.map(item => {
-                        const line = countLines.find(l => l.stock_item_id === item.id)
-                        if (!line) return null
-                        const variance = (line.actual_qty || 0) - (line.expected_qty || 0)
-                        return (
-                          <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: '16px', padding: '12px 24px', borderTop: '1px solid #f3f4f6' }}>
-                            <td style={{ padding: '12px 16px' }}><div style={{ fontWeight: 700, fontSize: '14px', color: '#111' }}>{item.description || item.name}</div>{item.supplier && <span style={{ fontSize: '11px', fontWeight: 600, background: '#eff6ff', color: '#2563eb', padding: '2px 8px', borderRadius: '20px', marginTop: '4px', display: 'inline-block' }}>{item.supplier}</span>}{item.on_daily_sheet && <span style={{ fontSize: '11px', fontWeight: 600, background: '#f0fdf4', color: '#16a34a', padding: '2px 8px', borderRadius: '20px', marginLeft: '4px', display: 'inline-block' }}>📋 Daily</span>}{item.is_catch_weight && <span style={{ fontSize: '11px', fontWeight: 600, background: '#fefce8', color: '#92400e', padding: '2px 8px', borderRadius: '20px', marginLeft: '4px', display: 'inline-block' }}>⚖️ Catch Wt</span>}</td>
-                            <div style={{ fontSize: '12px', color: '#9ca3af', minWidth: '80px', textAlign: 'right' }}>Expected: <strong>{line.expected_qty}</strong></div>
-                            <input type="number" min="0" step="0.1" value={line.actual_qty || ''} onChange={e => updateCountLine(line.id, parseFloat(e.target.value) || 0)} placeholder="0" style={{ width: '100px', border: '1.5px solid #e5e7eb', borderRadius: '8px', padding: '8px 10px', fontSize: '14px', fontWeight: 700, textAlign: 'center', outline: 'none' }} />
-                            <div style={{ minWidth: '70px', textAlign: 'right', fontSize: '13px', fontWeight: 700, color: variance < 0 ? '#dc2626' : variance > 0 ? '#d97706' : '#9ca3af' }}>{variance === 0 ? '—' : `${variance > 0 ? '+' : ''}${variance.toFixed(1)}`}</div>
-                          </div>
-                        )
-                      })}
                     </div>
                   ))}
+                  <div style={{ borderTop: '2px solid #e5e7eb', paddingTop: 12, marginTop: 4, display: 'flex', justifyContent: 'space-between', fontSize: 15, fontWeight: 700 }}>
+                    <span>{netProfit >= 0 ? 'Net Profit' : 'Net Loss'}</span>
+                    <span style={{ color: netProfit >= 0 ? '#16a34a' : '#dc2626' }}>{fmt(netProfit)}</span>
+                  </div>
                 </div>
-              ) : (<>
-                {/* Month picker modal for Monthly counts */}
-                {showMonthPicker && (
-                  <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 9000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px' }}>
-                    <div style={{ background: '#fff', borderRadius: '20px', padding: '32px', width: '100%', maxWidth: '420px', boxShadow: '0 20px 60px rgba(0,0,0,0.18)' }}>
-                      <div style={{ fontSize: '22px', fontWeight: 900, color: '#7c3aed', marginBottom: '6px' }}>📊 Monthly Stock Count</div>
-                      <div style={{ fontSize: '13px', color: '#6b7280', marginBottom: '24px' }}>Select the month you are counting for. The count date will be set to the last day of that month — this becomes your closing stock and the opening balance for the following month.</div>
-                      <label style={{ ...LABEL }}>Count Month</label>
-                      <input
-                        type="month"
-                        value={monthPickerMonth}
-                        max={new Date().toISOString().slice(0, 7)}
-                        onChange={e => setMonthPickerMonth(e.target.value)}
-                        style={{ ...INPUT, marginBottom: '20px' }}
-                      />
-                      {monthPickerMonth && (() => {
-                        const [y, m] = monthPickerMonth.split('-').map(Number)
-                        const lastDay = new Date(y, m, 0).getDate()
-                        const countDate = `${monthPickerMonth}-${String(lastDay).padStart(2, '0')}`
-                        const label = new Date(monthPickerMonth + '-01').toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' })
-                        return (
-                          <div style={{ background: '#ede9fe', borderRadius: '10px', padding: '12px 16px', marginBottom: '20px', fontSize: '13px', color: '#5b21b6' }}>
-                            Count date will be: <strong>{countDate}</strong> · Closing stock for <strong>{label}</strong>
-                          </div>
-                        )
-                      })()}
-                      <div style={{ display: 'flex', gap: '10px' }}>
-                        <button onClick={() => setShowMonthPicker(false)} style={{ flex: 1, padding: '12px', border: '1.5px solid #e5e7eb', borderRadius: '10px', background: 'white', fontSize: '14px', fontWeight: 700, cursor: 'pointer', color: '#374151' }}>Cancel</button>
-                        <button
-                          disabled={!monthPickerMonth}
-                          onClick={() => {
-                            if (!monthPickerMonth) return
-                            const [y, m] = monthPickerMonth.split('-').map(Number)
-                            const lastDay = new Date(y, m, 0).getDate()
-                            const countDate = `${monthPickerMonth}-${String(lastDay).padStart(2, '0')}`
-                            setShowMonthPicker(false)
-                            startCount('monthly', countDate)
-                          }}
-                          style={{ flex: 2, padding: '12px', border: 'none', borderRadius: '10px', background: '#7c3aed', color: 'white', fontSize: '14px', fontWeight: 800, cursor: 'pointer' }}
-                        >Start Count →</button>
-                      </div>
-                    </div>
-                  </div>
-                )}
-                {/* In-progress counts banner — resume without re-entering month picker */}
-                {counts.filter(c => c.status === 'in_progress' && new Date(c.count_date) >= new Date(Date.now() - 14 * 24 * 60 * 60 * 1000)).length > 0 && (
-                  <div style={{ background: '#fffbeb', border: '1.5px solid #fcd34d', borderRadius: '16px', padding: '16px 20px' }}>
-                    <div style={{ fontWeight: 800, fontSize: '13px', color: '#92400e', marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>⏸ Counts In Progress</div>
-                    {counts.filter(c => c.status === 'in_progress' && new Date(c.count_date) >= new Date(Date.now() - 14 * 24 * 60 * 60 * 1000)).map(count => {
-                      const ct = COUNT_TYPES.find(t => t.key === count.count_type)
-                      return (
-                        <div key={count.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'white', borderRadius: '10px', padding: '12px 16px', marginBottom: '8px', border: '1px solid #fde68a' }}>
-                          <div>
-                            <span style={{ fontWeight: 700, fontSize: '14px', color: ct?.color }}>{ct?.label} Count</span>
-                            <span style={{ fontSize: '13px', color: '#6b7280', marginLeft: '10px' }}>{formatDate(count.count_date)}</span>
-                          </div>
-                          <button onClick={() => resumeCount(count)} disabled={saving} style={{ padding: '8px 18px', background: '#f59e0b', color: 'white', border: 'none', borderRadius: '8px', fontSize: '13px', fontWeight: 800, cursor: 'pointer' }}>▶ Resume</button>
-                        </div>
-                      )
-                    })}
-                  </div>
-                )}
-                {/* Counting Sections Management */}
-                <div style={{ background: 'white', borderRadius: '20px', border: '1.5px solid #eef2ee', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
-                  <div onClick={() => setShowSectionManager(v => !v)} style={{ padding: '16px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', userSelect: 'none' }}>
-                    <div>
-                      <span style={{ fontWeight: 800, fontSize: '15px', color: '#111' }}>📍 Counting Sections</span>
-                      <span style={{ fontSize: '13px', color: '#9ca3af', marginLeft: '10px' }}>{sections.length > 0 ? `${sections.length} section${sections.length !== 1 ? 's' : ''} — cashier counts front, manager counts cooler, etc.` : 'Divide stock counting by area'}</span>
-                    </div>
-                    <span style={{ fontSize: '18px', color: '#9ca3af' }}>{showSectionManager ? '▲' : '▼'}</span>
-                  </div>
-                  {showSectionManager && (
-                    <div style={{ borderTop: '1px solid #f3f4f6', padding: '16px 24px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                      {sections.map(sec => (
-                        <div key={sec.id} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 14px', background: '#f9fafb', borderRadius: '10px', border: `1.5px solid ${sec.color}30` }}>
-                          <span style={{ fontSize: '20px' }}>{sec.icon}</span>
-                          <div style={{ flex: 1 }}>
-                            <div style={{ fontWeight: 700, fontSize: '14px', color: '#111' }}>{sec.name}</div>
-                            <div style={{ fontSize: '12px', color: '#9ca3af' }}>{(Object.values(itemSections) as string[][]).filter(sids => sids.includes(sec.id)).length} items assigned</div>
-                          </div>
-                          <div style={{ width: '16px', height: '16px', borderRadius: '50%', background: sec.color, flexShrink: 0 }} />
-                          <button onClick={() => { setEditSection(sec); setSectionForm({ name: sec.name, color: sec.color, icon: sec.icon }) }} style={{ fontSize: '12px', padding: '5px 10px', borderRadius: '8px', border: '1.5px solid #e5e7eb', background: 'white', cursor: 'pointer', fontWeight: 600 }}>Edit</button>
-                          <button onClick={() => deleteSection(sec.id)} style={{ fontSize: '12px', padding: '5px 10px', borderRadius: '8px', border: 'none', background: '#fee2e2', color: '#dc2626', cursor: 'pointer', fontWeight: 600 }}>Delete</button>
-                        </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── CASH-UPS / SALES ── */}
+          {tab === 1 && (
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Cash-Ups / Sales</h2>
+                <button style={btn()} onClick={() => router.push('/cashup')}>+ New Cash-Up →</button>
+              </div>
+              <div style={{ ...card, background: '#fffbeb', border: '1px solid #fde68a', padding: '12px 16px', marginBottom: 16 }}>
+                <p style={{ margin: 0, fontSize: 13, color: '#92400e' }}>
+                  💡 Sales figures are pulled directly from submitted cash-ups. Submit cash-ups via the mobile app or <a href="/cashup" style={{ color: '#92400e' }}>/cashup</a>.
+                </p>
+              </div>
+              {cashUps.length === 0
+                ? <div style={{ ...card, textAlign: 'center', padding: 48, color: '#6b7280' }}>
+                  <div style={{ fontSize: 40, marginBottom: 8 }}>🧾</div>
+                  <p>No cash-ups submitted for {month}.</p>
+                  <button style={{ ...btn(), marginTop: 12 }} onClick={() => router.push('/cashup')}>Go to Cash-Up →</button>
+                </div>
+                : <div style={card}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+                    <thead>
+                      <tr style={{ borderBottom: '2px solid #e5e7eb' }}>
+                        {['Date', 'POS Total', 'Cash', 'EFT', 'Payouts', 'Variance', 'Customers', 'Avg Spend', 'Status'].map(h => (
+                          <th key={h} style={{ padding: '8px 10px', textAlign: h === 'Date' || h === 'Status' ? 'left' : 'right', color: '#6b7280', fontWeight: 600, fontSize: 12, whiteSpace: 'nowrap' }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {cashUps.map(c => (
+                        <tr key={c.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                          <td style={{ padding: '9px 10px', fontWeight: 600 }}>{c.cash_up_date}</td>
+                          <td style={{ padding: '9px 10px', textAlign: 'right', fontWeight: 700, color: '#16a34a' }}>{fmt(Number(c.cash_up_total))}</td>
+                          <td style={{ padding: '9px 10px', textAlign: 'right' }}>{fmt(Number(c.total_cash))}</td>
+                          <td style={{ padding: '9px 10px', textAlign: 'right' }}>{fmt(Number(c.eft_total))}</td>
+                          <td style={{ padding: '9px 10px', textAlign: 'right', color: '#dc2626' }}>{fmt(Number(c.payouts))}</td>
+                          <td style={{ padding: '9px 10px', textAlign: 'right', color: Math.abs(Number(c.variance)) > 50 ? '#dc2626' : '#16a34a', fontWeight: 600 }}>{fmt(Number(c.variance))}</td>
+                          <td style={{ padding: '9px 10px', textAlign: 'right' }}>{c.customer_count || 'n/a'}</td>
+                          <td style={{ padding: '9px 10px', textAlign: 'right' }}>{c.average_spend ? fmt(Number(c.average_spend)) : 'n/a'}</td>
+                          <td style={{ padding: '9px 10px' }}>{statusBadge(c.status)}</td>
+                        </tr>
                       ))}
-                      {/* Add / Edit form */}
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr auto auto auto', gap: '8px', alignItems: 'center', paddingTop: '4px' }}>
-                        <input value={sectionForm.name} onChange={e => setSectionForm(f => ({ ...f, name: e.target.value }))} placeholder="Section name (e.g. Front Counter, Cooler, Kitchen)" style={{ padding: '9px 12px', border: '1.5px solid #e5e7eb', borderRadius: '10px', fontSize: '14px', outline: 'none' }} onKeyDown={e => e.key === 'Enter' && saveSection()} />
-                        <input value={sectionForm.icon} onChange={e => setSectionForm(f => ({ ...f, icon: e.target.value }))} placeholder="📦" style={{ padding: '9px 10px', border: '1.5px solid #e5e7eb', borderRadius: '10px', fontSize: '18px', width: '52px', textAlign: 'center', outline: 'none' }} />
-                        <input type="color" value={sectionForm.color} onChange={e => setSectionForm(f => ({ ...f, color: e.target.value }))} style={{ width: '40px', height: '40px', border: 'none', borderRadius: '8px', cursor: 'pointer', padding: '2px' }} />
-                        <button onClick={saveSection} disabled={saving || !sectionForm.name.trim()} style={{ padding: '9px 16px', background: !sectionForm.name.trim() ? '#d1d5db' : '#1a5c38', color: 'white', border: 'none', borderRadius: '10px', fontWeight: 700, fontSize: '13px', cursor: 'pointer', whiteSpace: 'nowrap' }}>{editSection ? 'Update' : '+ Add'}</button>
-                      </div>
-                      {editSection && <button onClick={() => { setEditSection(null); setSectionForm({ name: '', color: '#1a5c38', icon: '📦' }) }} style={{ alignSelf: 'flex-start', fontSize: '12px', padding: '5px 12px', border: '1.5px solid #e5e7eb', borderRadius: '8px', background: 'white', cursor: 'pointer', color: '#6b7280', fontWeight: 600 }}>✕ Cancel edit</button>}
-                      <div style={{ fontSize: '12px', color: '#9ca3af', background: '#f9fafb', padding: '10px 12px', borderRadius: '8px' }}>
-                        💡 <strong>How sections work:</strong> Assign items to one or more sections in Stock Items. When counting, each person opens their section tab and only sees their items. Finalising automatically adds up all sections for the total stock count.
-                      </div>
+                      <tr style={{ borderTop: '2px solid #e5e7eb', background: '#f0fdf4' }}>
+                        <td style={{ padding: '10px', fontWeight: 700 }}>Month Total</td>
+                        <td style={{ padding: '10px', textAlign: 'right', fontWeight: 800, color: '#16a34a', fontSize: 15 }}>{fmt(totalSales)}</td>
+                        <td colSpan={7} />
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>}
+            </div>
+          )}
+
+          {/* ── SUPPLIER BILLS ── */}
+          {tab === 2 && (
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Supplier Bills</h2>
+                <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                  {showInvForm && (
+                    <div style={{ position: 'relative', display: 'inline-block' }}>
+                      <button style={{ ...btn('#6366f1'), pointerEvents: scanning ? 'none' : 'auto', opacity: scanning ? 0.7 : 1 }} onClick={() => { if (!scanning) { const s = invForm.supplier || ''; setScanSupplier(s); scanSupplierRef.current = s; setShowScanChoice(true) } }}>
+                        {scanning ? '⏳ Scanning...' : deviceScanStatus === 'waiting' ? '📡 Waiting for device...' : deviceScanStatus === 'received' ? '⚡ Processing...' : '📷 Scan Invoice'}
+                      </button>
+                      <input ref={fileInputRef} type="file" accept="image/*,application/pdf"
+                        style={{ display: 'none' }}
+                        onChange={e => {
+                          const f = e.target.files?.[0]
+                          // Pass the supplier directly as a parameter n/a no ref/closure ambiguity
+                          if (f) scanInvoice(f, scanSupplierRef.current)
+                        }} />
                     </div>
                   )}
+                  <button style={btn()} onClick={openNewInvoice}>+ New Invoice</button>
                 </div>
+              </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px' }}>
-                  {COUNT_TYPES.map(ct => (
-                    <button key={ct.key} onClick={() => ct.key === 'monthly' ? setShowMonthPicker(true) : startCount(ct.key)} style={{ background: 'white', borderRadius: '20px', border: `2px solid ${ct.color}30`, padding: '24px', textAlign: 'left', cursor: 'pointer', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
-                      <div style={{ fontSize: '28px', marginBottom: '10px' }}>{ct.key === 'daily' ? '🌅' : ct.key === 'weekly' ? '📅' : '📊'}</div>
-                      <div style={{ fontWeight: 800, fontSize: '16px', color: ct.color }}>{ct.label}</div>
-                      <div style={{ fontSize: '13px', color: '#9ca3af', marginTop: '4px' }}>{ct.desc}</div>
-                      <div style={{ marginTop: '14px', padding: '8px 14px', background: ct.bg, color: ct.color, borderRadius: '8px', fontSize: '12px', fontWeight: 700, display: 'inline-block' }}>Start Count →</div>
-                    </button>
-                  ))}
+              {/* Invoice search bar */}
+              {!showInvForm && (
+                <div style={{ marginBottom: 16 }}>
+                  <input
+                    type="text"
+                    placeholder="🔍 Search by invoice #, supplier or notes…"
+                    value={invSearch}
+                    onChange={e => setInvSearch(e.target.value)}
+                    style={{ ...inp, width: '100%', maxWidth: 400, boxSizing: 'border-box' }}
+                  />
                 </div>
-                <div style={{ background: 'white', borderRadius: '20px', border: '1.5px solid #eef2ee', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
-                  <div style={{ padding: '16px 24px', borderBottom: '1px solid #f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <div style={{ fontWeight: 800, fontSize: '15px', color: '#111' }}>Count History</div>
-                    <div style={{ display: 'flex', gap: '6px' }}>
-                      {COUNT_TYPES.map(ct => <button key={ct.key} onClick={() => setCountTypeFilter(ct.key)} style={{ padding: '5px 12px', borderRadius: '8px', border: 'none', fontSize: '12px', fontWeight: 700, cursor: 'pointer', background: countTypeFilter === ct.key ? ct.color : '#f3f4f6', color: countTypeFilter === ct.key ? 'white' : '#6b7280' }}>{ct.label}</button>)}
+              )}
+
+              {scanError && (
+                <div style={{ background: '#fef2f2', color: '#dc2626', padding: '10px 14px', borderRadius: 8, marginBottom: 16, fontSize: 13, fontWeight: 600, border: '1px solid #fecaca' }}>
+                  ⚠️ Scan failed: {scanError}
+                </div>
+              )}
+
+              {deviceScanStatus === 'waiting' && (
+                <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 10, padding: '14px 18px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <span style={{ fontSize: 24 }}>📱</span>
+                  <div>
+                    <div style={{ fontWeight: 700, color: '#1d4ed8', fontSize: 14 }}>Waiting for photo from your device</div>
+                    <div style={{ fontSize: 12, color: '#3b82f6', marginTop: 2 }}>Open the CompliTrack app → Supplier Bills → Scan Invoice. The photo will appear here automatically.</div>
+                  </div>
+                  <button onClick={() => setDeviceScanStatus(null)} style={{ marginLeft: 'auto', background: 'none', border: 'none', color: '#93c5fd', cursor: 'pointer', fontSize: 18 }}>x</button>
+                </div>
+              )}
+              {deviceScanStatus === 'received' && (
+                <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, padding: '14px 18px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <span style={{ fontSize: 24 }}>⚡</span>
+                  <div style={{ fontWeight: 700, color: '#166534', fontSize: 14 }}>Photo received — running AI scan...</div>
+                </div>
+              )}
+
+              {/* Invoice form */}
+              {showInvForm && (
+                <div style={{ ...card, border: '2px solid #1a5c38', marginBottom: 24 }}>
+                  <h3 style={{ margin: '0 0 20px', fontSize: 16, fontWeight: 700 }}>{editInv ? 'Edit' : 'New'} Supplier Invoice</h3>
+                  {error && <div style={{ background: '#fef2f2', color: '#dc2626', padding: '8px 12px', borderRadius: 8, marginBottom: 12, fontSize: 13 }}>{error}</div>}
+
+                  {/* Header fields */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 20 }}>
+                    <div>
+                      <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Supplier *</label>
+                      <select onChange={e => {
+                        const name = e.target.value === '_other' ? '' : e.target.value
+                        const sup = suppliers.find(s => s.name === name)
+                        setInvForm(f => ({ ...f, supplier: name, due_date: sup && f.invoice_date ? addDays(f.invoice_date, sup.payment_terms_days ?? 7) : f.due_date }))
+                      }} value={suppliers.some(s => s.name === invForm.supplier) ? invForm.supplier : (invForm.supplier ? '_other' : '')} style={inp}>
+                        <option value="">{'— Select Supplier —'}</option>
+                        {suppliers.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
+                        <option value="_other">+ Other (type name below)</option>
+                      </select>
+                      {!suppliers.some(s => s.name === invForm.supplier) && (
+                        <input type="text" placeholder="Type supplier name" value={invForm.supplier} onChange={e => setInvForm(f => ({ ...f, supplier: e.target.value }))} style={{ ...inp, marginTop: 8 }} />
+                      )}
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Invoice Number</label>
+                      <input type="text" placeholder="INV-001" value={invForm.invoice_number} onChange={e => setInvForm(f => ({ ...f, invoice_number: e.target.value }))} style={inp} />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Status</label>
+                      <select value={invForm.status} onChange={e => setInvForm(f => ({ ...f, status: e.target.value }))} style={inp}>
+                        {INVOICE_STATUSES.map(s => <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Invoice Date *</label>
+                      <input type="date" value={invForm.invoice_date} onChange={e => {
+                        const date = e.target.value
+                        const sup = suppliers.find(s => s.name === invForm.supplier)
+                        setInvForm(f => ({ ...f, invoice_date: date, due_date: sup && date ? addDays(date, sup.payment_terms_days ?? 7) : f.due_date }))
+                      }} style={inp} />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Due Date {suppliers.find(s => s.name === invForm.supplier) && <span style={{ fontWeight: 400, color: '#9ca3af' }}>(auto)</span>}</label>
+                      <input type="date" value={invForm.due_date} onChange={e => setInvForm(f => ({ ...f, due_date: e.target.value }))} style={inp} />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Payment Method</label>
+                      <select value={invForm.payment_method} onChange={e => setInvForm(f => ({ ...f, payment_method: e.target.value }))} style={inp}>
+                        {PAYMENT_METHODS.map(m => <option key={m} value={m}>{m.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</option>)}
+                      </select>
+                    </div>
+                    <div style={{ gridColumn: 'span 3' }}>
+                      <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Notes</label>
+                      <input type="text" placeholder="Optional notes" value={invForm.notes} onChange={e => setInvForm(f => ({ ...f, notes: e.target.value }))} style={inp} />
                     </div>
                   </div>
-                  {counts.filter(c => c.count_type === countTypeFilter).length === 0
-                    ? <div style={{ padding: '40px', textAlign: 'center', color: '#9ca3af' }}>No {countTypeFilter} counts yet</div>
-                    : counts.filter(c => c.count_type === countTypeFilter).map(count => (
-                      <div key={count.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 24px', borderTop: '1px solid #f3f4f6' }}>
-                        <div><div style={{ fontWeight: 700, fontSize: '14px', color: '#111' }}>{formatDate(count.count_date)}</div><div style={{ fontSize: '12px', color: '#9ca3af' }}>{count.count_type}</div></div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                          {count.status === 'in_progress' && <button onClick={() => resumeCount(count)} style={{ fontSize: '12px', fontWeight: 700, padding: '4px 12px', background: '#f59e0b', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer' }}>▶ Resume</button>}
-                          {count.status === 'completed' && <button onClick={() => viewCount(count)} style={{ fontSize: '12px', fontWeight: 700, padding: '4px 12px', background: '#dbeafe', color: '#1d4ed8', border: 'none', borderRadius: '8px', cursor: 'pointer' }}>👁 View</button>}
-                          <span style={{ fontSize: '11px', fontWeight: 700, padding: '3px 10px', borderRadius: '100px', background: count.status === 'completed' ? '#dcfce7' : '#fef3c7', color: count.status === 'completed' ? '#166534' : '#92400e' }}>{count.status}</span>
-                          <button onClick={() => deleteCount(count)} title="Delete this count" style={{ fontSize: '13px', padding: '4px 8px', background: '#fee2e2', color: '#dc2626', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 700 }}>🗑️</button>
-                        </div>
-                      </div>
-                    ))}
-                </div>
-              </>)}
-            </div>
-          )}
 
-          {/* PURCHASES */}
-          {tab === 'purchases' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div><div style={{ fontSize: '18px', fontWeight: 800, color: '#111' }}>Daily Purchases</div><div style={{ fontSize: '13px', color: '#9ca3af' }}>Log what you bought each day</div></div>
-                <button onClick={() => setShowAddPurchase(true)} style={{ padding: '10px 20px', background: '#1a5c38', color: 'white', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: 800, cursor: 'pointer' }}>+ Log Purchase</button>
-              </div>
-              <div style={{ background: 'white', borderRadius: '20px', border: '1.5px solid #eef2ee', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
-                {purchases.length === 0 ? <div style={{ padding: '48px', textAlign: 'center', color: '#9ca3af' }}>No purchases logged yet</div> : (<>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 90px 90px 100px 110px 90px', padding: '12px 20px', background: '#f9fafb', fontSize: '11px', fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                    <span>Item</span><span>Date</span><span>Qty</span><span>Unit Cost</span><span>Total</span><span>Invoice</span>
-                  </div>
-                  {(purchases || []).map(p => (
-                    <div key={p.id} style={{ display: 'grid', gridTemplateColumns: '1fr 90px 90px 100px 110px 90px', padding: '14px 20px', borderTop: '1px solid #f3f4f6', alignItems: 'center' }}>
-                      <div><div style={{ fontWeight: 700, fontSize: '14px', color: '#111' }}>{p.item_name}</div>{p.supplier_name && <div style={{ fontSize: '12px', color: '#9ca3af' }}>{p.supplier_name}</div>}</div>
-                      <div style={{ fontSize: '12px', color: '#6b7280' }}>{formatDate(p.purchase_date)}</div>
-                      <div style={{ fontSize: '13px', color: '#374151' }}>{p.quantity} {p.unit}</div>
-                      <div style={{ fontSize: '13px', color: '#374151' }}>{formatCurrency(p.unit_cost)}</div>
-                      <div style={{ fontSize: '14px', fontWeight: 800, color: '#1a5c38' }}>{formatCurrency(Number(p.total_cost) || 0)}</div>
-                      <div style={{ fontSize: '12px', color: '#9ca3af' }}>{p.invoice_number || '—'}</div>
+                  {/* Line items */}
+                  <div style={{ background: '#f9fafb', borderRadius: 10, padding: 16, marginBottom: 16 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                      <h4 style={{ margin: 0, fontSize: 14, fontWeight: 700 }}>Line Items</h4>
+                      <button style={btn()} onClick={addLine}>+ Add Line</button>
                     </div>
-                  ))}
-                  <div style={{ padding: '14px 20px', borderTop: '2px solid #e5e7eb', display: 'flex', justifyContent: 'flex-end', gap: '24px' }}>
-                    <div style={{ fontSize: '13px', color: '#9ca3af' }}>Today: <strong style={{ color: '#1a5c38' }}>{formatCurrency(todayPurchases.reduce((s, p) => s + p.total_cost, 0))}</strong></div>
-                    <div style={{ fontSize: '13px', color: '#9ca3af' }}>All shown: <strong style={{ color: '#111' }}>{formatCurrency(purchases.reduce((s, p) => s + p.total_cost, 0))}</strong></div>
-                  </div>
-                </>)}
-              </div>
-            </div>
-          )}
+                    {(() => {
+                      const activeCols = getInvoiceColumns()
+                      const sup = suppliers.find(s => s.name === invForm.supplier)
+                      const hasTemplate = sup?.invoice_columns?.length && activeCols !== DEFAULT_COLS
+                      // CSS grid: Category column + one per template col + delete button
+                      const gridCols = `1.4fr ${activeCols.map(() => '1fr').join(' ')} auto`
 
-          {/* WASTAGE */}
-          {tab === 'issues' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-              <div><div style={{ fontSize: '18px', fontWeight: 800, color: '#111' }}>Issue Stock</div><div style={{ fontSize: '13px', color: '#9ca3af' }}>Record stock taken out for use — kitchen, prep, front counter etc.</div></div>
-              <div style={{ background: 'white', borderRadius: '20px', border: '1.5px solid #eef2ee', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
-                {!issueForm.stock_item_id ? (
-                  <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-                    <input
-                      value={issueSearch}
-                      onChange={e => { setIssueSearch(e.target.value); if (e.target.value.trim()) setIssueCategory(null) }}
-                      placeholder="Search items..."
-                      style={INPUT}
-                    />
-                    {issueSearch.trim() ? (
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '12px' }}>
-                        {items.filter(i => (i.description || i.name || '').toLowerCase().includes(issueSearch.toLowerCase())).map(item => {
-                          const cat = categories.find(c => c.id === item.category)
-                          return (
-                            <button key={item.id} onClick={() => setIssueForm(f => ({ ...f, stock_item_id: item.id, item_name: item.description || item.name || '', unit: item.unit || f.unit, preppedBreakdown: {} }))}
-                              style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', padding: '16px 10px', border: '1.5px solid #e5e7eb', borderRadius: '14px', background: 'white', cursor: 'pointer', textAlign: 'center' as const }}>
-                              <div style={{ fontSize: '30px' }}>{getCategoryIcon(cat?.name || '')}</div>
-                              <div style={{ fontSize: '12px', fontWeight: 700, color: '#111827' }}>{item.description || item.name}</div>
-                              <div style={{ fontSize: '11px', color: '#6b7280' }}>{Number(item.current_qty || 0)} {item.unit}</div>
-                            </button>
-                          )
+                      return (
+                        <>
+                          {hasTemplate && (
+                            <div style={{ fontSize: 12, color: '#16a34a', background: '#f0fdf4', borderRadius: 6, padding: '6px 12px', marginBottom: 10 }}>
+                              ✓ Showing {sup!.name} invoice columns — matches their physical invoice layout
+                            </div>
+                          )}
+
+                          {/* Column headers */}
+                          <div style={{ display: 'grid', gridTemplateColumns: gridCols, gap: 8, marginBottom: 8 }}>
+                            <div style={{ fontSize: 12, fontWeight: 600, color: '#6b7280' }}>Category</div>
+                            {activeCols.map(col => (
+                              <div key={col.header} style={{ fontSize: 12, fontWeight: 600, color: '#6b7280' }}>{col.header}</div>
+                            ))}
+                            <div />
+                          </div>
+
+                          {/* Line rows */}
+                          {invLines.map((line, i) => {
+                            const matches = line.description.trim().length > 2 ? matchStockItems(line.description, allStockItems) : []
+                            const descCol = activeCols.find(c => c.field === 'description')
+                            return (
+                              <React.Fragment key={i}>
+                                <div style={{ marginBottom: 8 }}>
+                                <div style={{ display: 'grid', gridTemplateColumns: gridCols, gap: 8, alignItems: 'center' }}>
+                                  <div>
+                                    <select value={line.category_key} onChange={e => updateLine(i, 'category_key', e.target.value)} style={{ ...inp, padding: '8px 10px' }}>
+                                      {sortedCategories.map(c => <option key={c.key} value={c.key}>{c.name}</option>)}
+                                    </select>
+                                    {i === 0 && <button type="button" onClick={() => setShowQuickCat(true)} style={{ fontSize: '11px', color: '#1a5c38', background: 'none', border: 'none', cursor: 'pointer', padding: '2px 0', fontWeight: '600' }}>+ New Category</button>}
+                                  </div>
+                                  {activeCols.map(col => {
+                                    // Read-only computed columns (e.g. Exclusive Value = qty x unit_price)
+                                    if (col.type === 'readonly') {
+                                      const val = col.compute ? col.compute(line) : 0
+                                      return (
+                                        <div key={col.header} style={{ ...inp, padding: '8px 10px', background: '#f9fafb', color: '#374151', fontWeight: 700, display: 'flex', alignItems: 'center' }}>
+                                          {val > 0 ? val.toFixed(2) : 'n/a'}
+                                        </div>
+                                      )
+                                    }
+                                    // UoM column gets a dropdown for consistency
+                                    if (col.field === 'uom') return (
+                                      <select
+                                        key={col.header}
+                                        value={line.uom || ''}
+                                        onChange={e => updateLine(i, 'uom', e.target.value)}
+                                        style={{ ...inp, padding: '8px 10px' }}
+                                      >
+                                        <option value="">n/a select n/a</option>
+                                        {['each','kg','g','L','ml','box','case','bag','bottle','can','tray','bunch','carton','pkt','pair','roll','sheet','set'].map(u => <option key={u} value={u}>{u}</option>)}
+                                      </select>
+                                    )
+                                    // Number fields: controlled with separate editing state to allow free typing
+                                    if (col.type === 'number') {
+                                      const editKey = `${i}-${col.field}`
+                                      const isEditing = editKey in editingValues
+                                      const displayVal = isEditing
+                                        ? editingValues[editKey]
+                                        : (Number(line[col.field]) > 0 || Number(line[col.field]) < 0
+                                            ? Number(line[col.field]).toFixed(2)
+                                            : '')
+                                      return (
+                                        <input
+                                          key={`${col.header}-${i}`}
+                                          type="text"
+                                          inputMode="decimal"
+                                          placeholder={col.placeholder}
+                                          value={displayVal}
+                                          onChange={e => {
+                                            const raw = e.target.value.replace(',', '.')
+                                            setEditingValues(ev => ({ ...ev, [editKey]: raw }))
+                                          }}
+                                          onFocus={e => {
+                                            // Enter editing mode with raw value
+                                            const raw = Number(line[col.field]) > 0 || Number(line[col.field]) < 0
+                                              ? String(line[col.field])
+                                              : ''
+                                            setEditingValues(ev => ({ ...ev, [editKey]: raw }))
+                                            e.target.select()
+                                          }}
+                                          onBlur={e => {
+                                            // Commit value and exit editing mode
+                                            const val = parseFloat(e.target.value.replace(',', '.'))
+                                            updateLine(i, col.field, isNaN(val) ? 0 : val)
+                                            setEditingValues(ev => { const n = { ...ev }; delete n[editKey]; return n })
+                                          }}
+                                          style={{ ...inp, padding: '8px 10px' }}
+                                        />
+                                      )
+                                    }
+                                    // Text fields: controlled as normal
+                                    return (
+                                      <input
+                                        key={col.header}
+                                        type="text"
+                                        placeholder={col.placeholder}
+                                        value={line[col.field] as string || ''}
+                                        onChange={e => updateLine(i, col.field, e.target.value)}
+                                        style={{ ...inp, padding: '8px 10px' }}
+                                      />
+                                    )
+                                  })}
+                                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, minWidth: 48 }}>
+                                    <button onClick={() => removeLine(i)} disabled={invLines.length === 1}
+                                      style={{ background: '#fef2f2', color: '#dc2626', border: 'none', borderRadius: 6, padding: '8px 12px', cursor: 'pointer', fontSize: 16, fontWeight: 700 }}>x</button>
+                                    <div onClick={() => updateLine(i, 'zero_vat' as any, !line.zero_vat)}
+                                      style={{ display: 'flex', alignItems: 'center', gap: 3, cursor: 'pointer', userSelect: 'none', fontSize: 11, fontWeight: line.zero_vat ? 700 : 400, color: line.zero_vat ? '#dc2626' : '#9ca3af', padding: '2px 4px', borderRadius: 4, background: line.zero_vat ? '#fef2f2' : 'transparent', border: `1px solid ${line.zero_vat ? '#fecaca' : '#e5e7eb'}` }}>
+                                      <span style={{ fontSize: 13 }}>{line.zero_vat ? '☑' : '☐'}</span>
+                                      <span>0%</span>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                              {matches.length > 0 && (
+                                <div style={{ display: 'grid', gridTemplateColumns: `1.4fr ${activeCols.map(() => '1fr').join(' ')} auto`, gap: 8, marginTop: 4 }}>
+                                  <div />
+                                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', gridColumn: descCol ? '2' : '2' }}>
+                                    <span style={{ fontSize: 11, color: '#9ca3af' }}>Match to your stock sheet:</span>
+                                    {matches.map(m => (
+                                      <button key={m.id} type="button" onClick={() => updateLine(i, 'description', m.description)}
+                                        style={{ fontSize: 11, background: '#eff6ff', color: '#2563eb', border: '1px solid #bfdbfe', borderRadius: 12, padding: '3px 10px', cursor: 'pointer', fontWeight: 600 }}>
+                                        {m.description}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                              </React.Fragment>
+                            )
                         })}
-                      </div>
-                    ) : !issueCategory ? (
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '12px' }}>
-                        {categories.map(cat => {
-                          const count = items.filter(i => i.category === cat.id).length
-                          if (!count) return null
-                          return (
-                            <button key={cat.id} onClick={() => setIssueCategory(cat.id)}
-                              style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', padding: '22px 10px', border: '1.5px solid #e5e7eb', borderRadius: '16px', background: '#f9fafb', cursor: 'pointer', textAlign: 'center' as const }}>
-                              <div style={{ fontSize: '36px' }}>{getCategoryIcon(cat.name)}</div>
-                              <div style={{ fontSize: '14px', fontWeight: 800, color: '#1a5c38' }}>{cat.name}</div>
-                              <div style={{ fontSize: '11px', color: '#6b7280' }}>{count} item{count === 1 ? '' : 's'}</div>
-                            </button>
-                          )
-                        })}
-                      </div>
-                    ) : (
-                      <div>
-                        <button onClick={() => setIssueCategory(null)} style={{ background: 'none', border: 'none', color: '#1a5c38', fontWeight: 700, fontSize: '13px', cursor: 'pointer', padding: 0, marginBottom: '14px' }}>&larr; Categories</button>
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '12px' }}>
-                          {items.filter(i => i.category === issueCategory).map(item => (
-                            <button key={item.id} onClick={() => setIssueForm(f => ({ ...f, stock_item_id: item.id, item_name: item.description || item.name || '', unit: item.unit || f.unit, preppedBreakdown: {} }))}
-                              style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', padding: '16px 10px', border: '1.5px solid #e5e7eb', borderRadius: '14px', background: 'white', cursor: 'pointer', textAlign: 'center' as const }}>
-                              <div style={{ fontSize: '30px' }}>{getCategoryIcon(categories.find(c => c.id === issueCategory)?.name || '')}</div>
-                              <div style={{ fontSize: '12px', fontWeight: 700, color: '#111827' }}>{item.description || item.name}</div>
-                              <div style={{ fontSize: '11px', color: '#6b7280' }}>{Number(item.current_qty || 0)} {item.unit}</div>
-                            </button>
-                          ))}
+                        </>
+                      )
+                    })()}                    <div style={{ borderTop: '2px solid #e5e7eb', marginTop: 8, paddingTop: 12, display: 'flex', justifyContent: 'flex-end', gap: 24, fontSize: 14 }}>
+                      <span style={{ color: '#6b7280' }}>Subtotal (excl. VAT): <strong>{fmt(lineTotal - lineVatTotal)}</strong></span>
+                      <span style={{ color: '#c0392b' }}>VAT: <strong>{fmt(lineVatTotal)}</strong></span>
+                      <span style={{ fontWeight: 800, fontSize: 16 }}>Total (incl. VAT): <span style={{ color: '#1a5c38' }}>{fmt(lineTotal)}</span></span>
+                    </div>
+                  </div>
+
+                  {/* Warning banner when editing an already-received invoice */}
+                  {editInv && (editInv.status === 'received' || editInv.status === 'paid') && (
+                    <div style={{ background: '#fef9c3', border: '1.5px solid #fde68a', borderRadius: 10, padding: '10px 14px', marginBottom: 12, fontSize: 13, color: '#92400e' }}>
+                      ⚠️ <strong>This invoice has already been received.</strong> Saving will update the invoice record only n/a stock quantities and prices will <strong>not</strong> be changed again.
+                    </div>
+                  )}
+
+                  <div style={{ display: 'flex', gap: 10 }}>
+                    <button style={btn('#6b7280')} onClick={() => saveInvoice(false)} disabled={saving}>{saving ? 'Saving…' : '💾 Save as Draft'}</button>
+                    {(() => {
+                      const alreadyReceived = editInv && (editInv.status === 'received' || editInv.status === 'paid')
+                      const sup = suppliers.find(s => s.name === invForm.supplier)
+                      const deliversStock = !sup || sup.delivers_stock !== false
+                      // Already received n/a show Save Changes only, never re-open GRV
+                      if (alreadyReceived) return (
+                        <button style={btn('#374151')} onClick={() => saveInvoice(false)} disabled={saving}>
+                          {saving ? 'Saving…' : '✓ Save Changes'}
+                        </button>
+                      )
+                      return (
+                        <button style={btn()} onClick={() => saveInvoice(true)} disabled={saving}>
+                          {saving ? 'Saving…' : deliversStock ? '✓ Submit & Receive Stock' : '✓ Submit Bill'}
+                        </button>
+                      )
+                    })()}
+                    <button style={btn('#6b7280')} onClick={() => { setShowInvForm(false); setEditInv(null) }}>Cancel</button>
+                  </div>
+                  <p style={{ fontSize: 12, color: '#9ca3af', marginTop: 8 }}>
+                    {(() => {
+                      const alreadyReceived = editInv && (editInv.status === 'received' || editInv.status === 'paid')
+                      if (alreadyReceived) return 'Editing a received invoice updates the record only n/a no stock changes will be made.'
+                      const sup = suppliers.find(s => s.name === invForm.supplier)
+                      return (!sup || sup.delivers_stock !== false)
+                        ? 'Save as Draft keeps this invoice editable without touching your stock sheet. Submit & Receive Stock saves it and opens Receive Goods to update stock and pricing.'
+                        : 'Save as Draft keeps this invoice editable. Submit Bill marks it as received n/a no stock update needed since this supplier delivers a service, not stock.'
+                    })()}
+                  </p>
+                </div>
+              )}
+
+              {/* Invoice list */}
+              {invoices.length === 0 && !showInvForm
+                ? <div style={{ ...card, textAlign: 'center', padding: 48, color: '#6b7280' }}>
+                  <div style={{ fontSize: 40, marginBottom: 8 }}>📄</div>
+                  <p>No supplier invoices for {month}.</p>
+                  <button style={{ ...btn(), marginTop: 12 }} onClick={openNewInvoice}>+ New Invoice</button>
+                </div>
+                : invSearch.trim() && invoices.filter(inv => `${inv.invoice_number} ${inv.supplier} ${inv.notes || ''}`.toLowerCase().includes(invSearch.trim().toLowerCase())).length === 0 && !showInvForm
+                ? <div style={{ ...card, textAlign: 'center', padding: 48, color: '#6b7280' }}>
+                  <div style={{ fontSize: 32, marginBottom: 8 }}>🔍</div>
+                  <p>No invoices match <strong>"{invSearch}"</strong></p>
+                  <button style={{ ...smBtn('#f3f4f6', '#374151'), marginTop: 8 }} onClick={() => setInvSearch('')}>Clear search</button>
+                </div>
+                : (() => {
+                  const searchedInvoices = invSearch.trim()
+                    ? invoices.filter(inv => {
+                        const q = invSearch.trim().toLowerCase()
+                        return `${inv.invoice_number} ${inv.supplier} ${inv.notes || ''}`.toLowerCase().includes(q)
+                      })
+                    : invoices
+                  const drafts = searchedInvoices.filter(i => i.status === 'draft')
+                  const submitted = searchedInvoices.filter(i => i.status !== 'draft')
+                  const renderInvoiceCard = (inv: Invoice) => (
+                  <div key={inv.id} style={card}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                        <div>
+                          <div style={{ fontWeight: 700, fontSize: 15 }}>{inv.supplier}</div>
+                          <div style={{ fontSize: 12, color: '#6b7280' }}>
+                            {inv.invoice_number && <span style={{ marginRight: 10 }}>#{inv.invoice_number}</span>}
+                            {inv.invoice_date}
+                            {inv.due_date && <span style={{ marginLeft: 10 }}>Due: {inv.due_date}</span>}
+                          </div>
                         </div>
+                        {statusBadge(inv.status, 13)}
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <span style={{ fontWeight: 800, fontSize: 17, color: '#dc2626' }}>{fmt(Number(inv.total_amount))}</span>
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          {(inv.status === 'draft' || inv.status === 'approved') && <button onClick={() => openGRV(inv)} style={smBtn('#fef3c7', '#d97706')}>📦 Receive Goods</button>}
+                          {inv.status === 'received' && <button onClick={() => updateInvoiceStatus(inv.id, 'paid')} style={smBtn('#eff6ff', '#2563eb')}>Mark Paid</button>}
+                          <button onClick={() => openEditInvoice(inv)} style={smBtn('#f3f4f6', '#374151')}>Edit</button>
+                          <button onClick={() => setExpandedInv(expandedInv === inv.id ? null : inv.id)} style={smBtn('#f3f4f6', '#374151')}>
+                            {expandedInv === inv.id ? '▲ Hide' : '▼ Lines'}
+                          </button>
+                          <button onClick={() => deleteInvoice(inv.id)} style={smBtn('#fef2f2', '#dc2626')}>Del</button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Expanded lines */}
+                    {expandedInv === inv.id && (
+                      <div style={{ marginTop: 16, borderTop: '1px solid #f3f4f6', paddingTop: 12 }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                          <thead>
+                            <tr style={{ borderBottom: '1px solid #e5e7eb' }}>
+                              {['Category', 'Description', 'Amount', 'VAT'].map(h => (
+                                <th key={h} style={{ padding: '6px 10px', textAlign: h === 'Amount' || h === 'VAT' ? 'right' : 'left', color: '#6b7280', fontWeight: 600 }}>{h}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(inv.invoice_lines || []).map((line, i) => {
+                              const cat = CAT_MAP[line.category_key]
+                              return (
+                                <tr key={i} style={{ borderBottom: '1px solid #f9fafb' }}>
+                                  <td style={{ padding: '7px 10px' }}>
+                                    <span style={{ background: (cat?.colour || '#6b7280') + '20', color: cat?.colour || '#6b7280', padding: '2px 8px', borderRadius: 20, fontSize: 11, fontWeight: 600 }}>
+                                      {cat?.name || line.category_key}
+                                    </span>
+                                  </td>
+                                  <td style={{ padding: '7px 10px', color: '#374151' }}>{line.description || 'n/a'}</td>
+                                  <td style={{ padding: '7px 10px', textAlign: 'right', fontWeight: 600 }}>{fmt(Number(line.amount))}</td>
+                                  <td style={{ padding: '7px 10px', textAlign: 'right', color: '#6b7280' }}>{fmt(Number(line.vat_amount || 0))}</td>
+                                </tr>
+                              )
+                            })}
+                            <tr style={{ borderTop: '1px solid #e5e7eb', background: '#f9fafb' }}>
+                              <td colSpan={2} style={{ padding: '7px 10px', color: '#6b7280' }}>Subtotal (excl. VAT)</td>
+                              <td style={{ padding: '7px 10px', textAlign: 'right', color: '#374151', fontWeight: 600 }}>{fmt(Number(inv.total_amount) - Number(inv.total_vat || 0))}</td>
+                              <td style={{ padding: '7px 10px', textAlign: 'right', color: '#6b7280' }}></td>
+                            </tr>
+                            <tr style={{ background: '#fdf2f2' }}>
+                              <td colSpan={2} style={{ padding: '7px 10px', color: '#c0392b' }}>VAT (15%)</td>
+                              <td style={{ padding: '7px 10px', textAlign: 'right', color: '#c0392b', fontWeight: 600 }}>{fmt(Number(inv.total_vat || 0))}</td>
+                              <td style={{ padding: '7px 10px', textAlign: 'right', color: '#6b7280' }}>{fmt(Number(inv.total_vat || 0))}</td>
+                            </tr>
+                            <tr style={{ borderTop: '2px solid #e5e7eb', background: '#f9fafb' }}>
+                              <td colSpan={2} style={{ padding: '8px 10px', fontWeight: 800 }}>Total (incl. VAT)</td>
+                              <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 800, color: '#dc2626', fontSize: 14 }}>{fmt(Number(inv.total_amount))}</td>
+                              <td style={{ padding: '8px 10px', textAlign: 'right', color: '#6b7280' }}></td>
+                            </tr>
+                          </tbody>
+                        </table>
                       </div>
                     )}
                   </div>
-                ) : (
-                  <>
-                    <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '14px', maxWidth: '520px' }}>
-                      <button onClick={() => setIssueForm(f => ({ ...f, stock_item_id: '', preppedBreakdown: {} }))} style={{ background: 'none', border: 'none', color: '#1a5c38', fontWeight: 700, fontSize: '13px', cursor: 'pointer', padding: 0, alignSelf: 'flex-start' }}>&larr; Change Item</button>
-                      {(() => {
-                        const sel = items.find(i => i.id === issueForm.stock_item_id)
-                        const cat = categories.find(c => c.id === sel?.category)
-                        return (
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', background: '#f0fdf4', border: '1.5px solid #bbf7d0', borderRadius: '12px', padding: '12px 16px' }}>
-                            <div style={{ fontSize: '28px' }}>{getCategoryIcon(cat?.name || '')}</div>
-                            <div>
-                              <div style={{ fontWeight: 800, fontSize: '14px', color: '#111827' }}>{issueForm.item_name}</div>
-                              <div style={{ fontSize: '12px', color: '#6b7280' }}>On hand: <strong>{Number(sel?.current_qty || 0)} {sel?.unit}</strong></div>
-                            </div>
+                  )
+                  return (
+                    <>
+                      {drafts.length > 0 && (
+                        <div style={{ marginBottom: 24 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                            <span style={{ fontSize: 15, fontWeight: 800, color: '#92400e' }}>📝 Drafts {'—'} not yet submitted</span>
+                            <span style={{ fontSize: 12, background: '#fef3c7', color: '#92400e', padding: '2px 10px', borderRadius: 20, fontWeight: 700 }}>{drafts.length}</span>
                           </div>
-                        )
-                      })()}
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                        <div><label style={LABEL}>Quantity Issued</label><input type="number" step="0.1" value={issueForm.quantity} onChange={e => setIssueForm(f => ({ ...f, quantity: e.target.value }))} placeholder="0" style={INPUT} autoFocus /></div>
-                        <div><label style={LABEL}>Unit</label><select value={issueForm.unit} onChange={e => setIssueForm(f => ({ ...f, unit: e.target.value }))} style={INPUT}>{UNITS.map(u => <option key={u}>{u}</option>)}</select></div>
-                      </div>
-                      {(() => {
-                        const children = items.filter(i => i.parent_item_id === issueForm.stock_item_id)
-                        if (!children.length) return null
-                        const parentUnit = items.find(i => i.id === issueForm.stock_item_id)?.unit || ''
-                        const portionedWeight = children.reduce((sum, c) => sum + (parseFloat(issueForm.preppedBreakdown[c.id] || '0') * Number(c.portion_size || 0)), 0)
+                          {drafts.map(renderInvoiceCard)}
+                        </div>
+                      )}
+                      {submitted.length > 0 && (() => {
+                        // Group by invoice_date
+                        const byDate: Record<string, typeof submitted> = {}
+                        submitted.forEach(inv => {
+                          const d = inv.invoice_date || 'Unknown'
+                          if (!byDate[d]) byDate[d] = []
+                          byDate[d].push(inv)
+                        })
+                        const sortedDates = Object.keys(byDate).sort((a, b) => b.localeCompare(a))
                         return (
-                          <div style={{ background: '#f5f3ff', border: '1.5px solid #ddd6fe', borderRadius: '12px', padding: '14px' }}>
-                            <div style={{ fontWeight: 700, fontSize: '13px', color: '#6d28d9', marginBottom: '4px' }}>Prepped Into (optional)</div>
-                            <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '10px' }}>How many of each portion did this make? Leave blank for any you didn't prep.</div>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                              {children.map(c => (
-                                <div key={c.id} style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '10px', alignItems: 'center' }}>
-                                  <div style={{ fontSize: '13px', fontWeight: 600, color: '#374151' }}>{c.description || c.name} <span style={{ color: '#9ca3af', fontWeight: 400 }}>({c.portion_size}{parentUnit} each)</span></div>
-                                  <input type="number" step="1" min="0" value={issueForm.preppedBreakdown[c.id] || ''} onChange={e => setIssueForm(f => ({ ...f, preppedBreakdown: { ...f.preppedBreakdown, [c.id]: e.target.value } }))} placeholder="0 portions" style={INPUT} />
+                          <div>
+                            {drafts.length > 0 && <div style={{ fontSize: 15, fontWeight: 800, color: '#374151', marginBottom: 12 }}>Submitted Invoices</div>}
+                            {sortedDates.map(dateKey => {
+                              const dayInvs = byDate[dateKey]
+                              const dayTotal = dayInvs.reduce((s, i) => s + (Number(i.total_amount) || 0), 0)
+                              const isOpen = expandedDates.has(dateKey)
+                              const dateLabel = dateKey !== 'Unknown'
+                                ? new Date(dateKey + 'T00:00:00').toLocaleDateString('en-ZA', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+                                : 'Unknown Date'
+                              return (
+                                <div key={dateKey} style={{ marginBottom: 12 }}>
+                                  {/* Day header — clickable */}
+                                  <button
+                                    onClick={() => {
+                                      const next = new Set(expandedDates)
+                                      if (next.has(dateKey)) next.delete(dateKey)
+                                      else next.add(dateKey)
+                                      setExpandedDates(next)
+                                    }}
+                                    style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                                      background: isOpen ? '#1a5c38' : '#f0fdf4', border: `2px solid ${isOpen ? '#1a5c38' : '#bbf7d0'}`,
+                                      borderRadius: isOpen ? '14px 14px 0 0' : 14, padding: '12px 18px', cursor: 'pointer',
+                                      transition: 'all 0.15s' }}
+                                  >
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                      <span style={{ fontSize: 18 }}>📅</span>
+                                      <div style={{ textAlign: 'left' }}>
+                                        <div style={{ fontWeight: 800, fontSize: 14, color: isOpen ? '#fff' : '#14532d' }}>{dateLabel}</div>
+                                        <div style={{ fontSize: 12, color: isOpen ? 'rgba(255,255,255,0.7)' : '#16a34a', marginTop: 1 }}>
+                                          {dayInvs.length} invoice{dayInvs.length !== 1 ? 's' : ''}
+                                        </div>
+                                      </div>
+                                    </div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                                      <span style={{ fontWeight: 800, fontSize: 16, color: isOpen ? '#fff' : '#dc2626' }}>
+                                        R {dayTotal.toLocaleString('en-ZA', { minimumFractionDigits: 2 })}
+                                      </span>
+                                      <span style={{ fontSize: 18, color: isOpen ? '#fff' : '#16a34a' }}>{isOpen ? '▲' : '▼'}</span>
+                                    </div>
+                                  </button>
+                                  {/* Day invoices — expanded */}
+                                  {isOpen && (
+                                    <div style={{ border: '2px solid #1a5c38', borderTop: 'none', borderRadius: '0 0 14px 14px',
+                                      padding: '8px 8px', background: '#fff' }}>
+                                      {dayInvs.map(renderInvoiceCard)}
+                                    </div>
+                                  )}
                                 </div>
-                              ))}
-                            </div>
-                            {portionedWeight > 0 && (
-                              <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '10px' }}>
-                                Portioned: <strong>{portionedWeight.toFixed(2)}{parentUnit}</strong> of {parseFloat(issueForm.quantity || '0').toFixed(2)}{parentUnit} issued
-                                {portionedWeight > parseFloat(issueForm.quantity || '0') && <span style={{ color: '#dc2626', fontWeight: 700 }}> — exceeds quantity issued</span>}
-                              </div>
-                            )}
+                              )
+                            })}
                           </div>
                         )
                       })()}
-                      <div><label style={LABEL}>Issued To</label><select value={issueForm.issued_to} onChange={e => setIssueForm(f => ({ ...f, issued_to: e.target.value }))} style={INPUT}>{ISSUE_DESTINATIONS.map(d => <option key={d}>{d}</option>)}</select></div>
-                      <div><label style={LABEL}>Notes</label><input value={issueForm.notes} onChange={e => setIssueForm(f => ({ ...f, notes: e.target.value }))} placeholder="Optional" style={INPUT} /></div>
-                      <button onClick={saveIssue} disabled={saving} style={{ background: '#1a5c38', color: 'white', border: 'none', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: 800, cursor: 'pointer', marginTop: '4px' }}>Issue Stock</button>
-                    </div>
-                  </>
-                )}
-              </div>
-
-              <div>
-                <div style={{ fontWeight: 800, fontSize: '15px', color: '#111', marginBottom: '10px' }}>History</div>
-                <div style={{ background: 'white', borderRadius: '20px', border: '1.5px solid #eef2ee', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
-                  {issues.length === 0 ? <div style={{ padding: '48px', textAlign: 'center', color: '#9ca3af' }}>No stock issued yet</div> : (<>
-                    {(issues || []).map(iss => (
-                      <div key={iss.id} style={{ display: 'flex', alignItems: 'center', gap: '16px', padding: '14px 20px', borderTop: '1px solid #f3f4f6' }}>
-                        <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: '#dcfce7', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px', flexShrink: 0 }}>🍳</div>
-                        <div style={{ flex: 1 }}>
-                          <div style={{ fontWeight: 700, fontSize: '14px', color: '#111' }}>{iss.item_name}</div>
-                          <div style={{ fontSize: '12px', color: '#9ca3af' }}>{iss.quantity} {iss.unit} → {iss.issued_to} • {formatDate(iss.issue_date)}{iss.notes ? ' • ' + iss.notes : ''}</div>
-                        </div>
-                      </div>
-                    ))}
-                  </>)}
-                </div>
-              </div>
+                    </>
+                  )
+                })()}
             </div>
           )}
 
-          {tab === 'wastage' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div><div style={{ fontSize: '18px', fontWeight: 800, color: '#111' }}>Wastage Log</div><div style={{ fontSize: '13px', color: '#9ca3af' }}>Track expired, damaged or discarded stock</div></div>
-                <button onClick={() => setShowAddWastage(true)} style={{ padding: '10px 20px', background: '#dc2626', color: 'white', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: 800, cursor: 'pointer' }}>+ Log Wastage</button>
-              </div>
-              <div style={{ background: 'white', borderRadius: '20px', border: '1.5px solid #eef2ee', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
-                {wastage.length === 0 ? <div style={{ padding: '48px', textAlign: 'center', color: '#9ca3af' }}>No wastage logged yet</div> : (<>
-                  {(wastage || []).map(w => (
-                    <div key={w.id} style={{ display: 'flex', alignItems: 'center', gap: '16px', padding: '14px 20px', borderTop: '1px solid #f3f4f6' }}>
-                      <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: '#fee2e2', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px', flexShrink: 0 }}>🗑️</div>
-                      <div style={{ flex: 1 }}><div style={{ fontWeight: 700, fontSize: '14px', color: '#111' }}>{w.item_name}</div><div style={{ fontSize: '12px', color: '#9ca3af' }}>{w.quantity} {w.unit} • {w.reason} • {formatDate(w.wastage_date)}</div></div>
-                      <div style={{ fontWeight: 800, fontSize: '15px', color: '#dc2626' }}>{formatCurrency(Number(w.total_cost) || 0)}</div>
-                    </div>
-                  ))}
-                  <div style={{ padding: '14px 20px', borderTop: '2px solid #e5e7eb', display: 'flex', justifyContent: 'flex-end', gap: '24px' }}>
-                    <div style={{ fontSize: '13px', color: '#9ca3af' }}>Today: <strong style={{ color: '#dc2626' }}>{formatCurrency(todayWastage.reduce((s, w) => s + w.total_cost, 0))}</strong></div>
-                    <div style={{ fontSize: '13px', color: '#9ca3af' }}>All shown: <strong style={{ color: '#111' }}>{formatCurrency(wastage.reduce((s, w) => s + w.total_cost, 0))}</strong></div>
-                  </div>
-                </>)}
-              </div>
-            </div>
-          )}
-
-          {/* ORDERS */}
-          {tab === 'orders' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div><div style={{ fontSize: '18px', fontWeight: 800, color: '#111' }}>Supplier Orders</div><div style={{ fontSize: '13px', color: '#9ca3af' }}>Track orders and deliveries</div></div>
-                <button onClick={() => setShowAddOrder(true)} style={{ padding: '10px 20px', background: '#1a5c38', color: 'white', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: 800, cursor: 'pointer' }}>+ New Order</button>
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                {orders.length === 0 ? <div style={{ background: 'white', borderRadius: '20px', border: '1.5px solid #eef2ee', padding: '48px', textAlign: 'center', color: '#9ca3af' }}>No orders yet</div>
-                  : orders.map(order => {
-                    const s = sc(order.status)
-                    return (
-                      <div key={order.id} style={{ background: 'white', borderRadius: '16px', border: '1.5px solid #eef2ee', padding: '18px 20px', display: 'flex', alignItems: 'center', gap: '16px', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
-                        <div style={{ flex: 1 }}>
-                          <div style={{ fontWeight: 800, fontSize: '15px', color: '#111' }}>{order.supplier_name}</div>
-                          <div style={{ fontSize: '12px', color: '#9ca3af', marginTop: '2px' }}>Ordered: {formatDate(order.order_date)}{order.expected_delivery ? ` • Expected: ${formatDate(order.expected_delivery)}` : ''}</div>
-                          {order.notes && <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px', fontStyle: 'italic' }}>{order.notes}</div>}
-                        </div>
-                        <span style={{ fontSize: '11px', fontWeight: 700, padding: '4px 12px', borderRadius: '100px', background: s.bg, color: s.color }}>{order.status}</span>
-                        {order.status === 'pending' && (
-                          <div style={{ display: 'flex', gap: '6px' }}>
-                            <button onClick={() => updateOrderStatus(order.id, 'delivered')} style={{ fontSize: '12px', color: '#166534', background: '#dcfce7', border: 'none', borderRadius: '8px', padding: '5px 10px', cursor: 'pointer', fontWeight: 600 }}>✓ Delivered</button>
-                            <button onClick={() => updateOrderStatus(order.id, 'partial')} style={{ fontSize: '12px', color: '#1e40af', background: '#dbeafe', border: 'none', borderRadius: '8px', padding: '5px 10px', cursor: 'pointer', fontWeight: 600 }}>Partial</button>
-                            <button onClick={() => updateOrderStatus(order.id, 'cancelled')} style={{ fontSize: '12px', color: '#dc2626', background: '#fee2e2', border: 'none', borderRadius: '8px', padding: '5px 8px', cursor: 'pointer', fontWeight: 600 }}>✕</button>
-                          </div>
-                        )}
-                      </div>
-                    )
-                  })}
-              </div>
-            </div>
-          )}
-
-          {/* STOCK ITEMS */}
-
-          {tab === 'suppliers' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          {/* ── QUICK EXPENSES ── */}
+          {tab === 3 && (
+            <div>
+              {/* Header + actions */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                 <div>
-                  <div style={{ fontSize: '18px', fontWeight: 800, color: '#111' }}>Suppliers</div>
-                  <div style={{ fontSize: '13px', color: '#9ca3af' }}>Manage your suppliers — used across stock items, orders and counts</div>
+                  <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Quick Expenses</h2>
+                  <p style={{ margin: '4px 0 0', fontSize: 13, color: '#6b7280' }}>Small cash items without a formal invoice n/a petrol, airtime, staff meals, etc.</p>
                 </div>
-                <button onClick={() => { setEditSupplier(null); setSupplierForm({ name: '', contact_name: '', phone: '', email: '', order_day: '', notes: '', payment_terms_days: '7', delivers_stock: true }); setInvoiceColumns([]); setInvoiceVatIncluded(true); setShowSupplierForm(true) }}
-                  style={{ padding: '10px 18px', background: '#1a5c38', color: 'white', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: 800, cursor: 'pointer' }}>+ Add Supplier</button>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button style={btn('#6b7280')} onClick={() => setShowCatManager(true)}>⚙ Categories</button>
+                  <button style={btn()} onClick={() => { setEditQ(null); setQForm(emptyQuick()); setShowQForm(true) }}>+ Add Expense</button>
+                </div>
               </div>
-              {suppliers.length === 0 ? (
-                <div style={{ background: 'white', borderRadius: '20px', padding: '48px', textAlign: 'center', color: '#9ca3af' }}>
-                  <div style={{ fontSize: '40px', marginBottom: '12px' }}>🚛</div>
-                  <div style={{ fontWeight: 700, marginBottom: '6px' }}>No suppliers yet</div>
-                  <button onClick={() => setShowSupplierForm(true)} style={{ marginTop: '12px', padding: '10px 20px', background: '#1a5c38', color: 'white', border: 'none', borderRadius: '10px', fontWeight: 700, cursor: 'pointer' }}>+ Add First Supplier</button>
-                </div>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                  {suppliers.map(s => (
-                    <div key={s.id} style={{ background: 'white', borderRadius: '16px', padding: '16px 20px', boxShadow: '0 1px 4px rgba(0,0,0,0.06)', display: 'flex', alignItems: 'center', gap: '16px' }}>
-                      <div style={{ width: '42px', height: '42px', borderRadius: '12px', background: '#f0fdf4', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px', flexShrink: 0 }}>🚛</div>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontWeight: 700, fontSize: '15px', color: '#111' }}>{s.name}</div>
-                        <div style={{ fontSize: '13px', color: '#6b7280', marginTop: '2px' }}>
-                          {s.contact_name && <span style={{ marginRight: '12px' }}>👤 {s.contact_name}</span>}
-                          {s.phone && <span style={{ marginRight: '12px' }}>📞 {s.phone}</span>}
-                          {s.order_day && <span style={{ marginRight: '12px' }}>📅 Orders: {s.order_day}</span>}
-                          {s.email && <span>✉️ {s.email}</span>}
-                        </div>
-                        {s.notes && <div style={{ fontSize: '12px', color: '#9ca3af', marginTop: '4px' }}>{s.notes}</div>}
-                      </div>
-                      <div style={{ fontSize: '12px', color: '#9ca3af' }}>{items.filter(i => i.supplier === s.name).length} items</div>
-                      <div style={{ display: 'flex', gap: '8px' }}>
-                        <button onClick={() => { setEditSupplier(s); setSupplierForm({ name: s.name, contact_name: s.contact_name||'', phone: s.phone||'', email: s.email||'', order_day: s.order_day||'', notes: s.notes||'', payment_terms_days: String(s.payment_terms_days ?? 7) }); setInvoiceColumns(s.invoice_columns || []); setInvoiceVatIncluded(s.invoice_vat_included !== false); setSupplierForm(f => ({ ...f, delivers_stock: s.delivers_stock !== false })); setShowSupplierForm(true) }}
-                          style={{ background: '#eff6ff', color: '#2563eb', border: 'none', borderRadius: '8px', padding: '6px 12px', cursor: 'pointer', fontSize: '12px', fontWeight: 600 }}>Edit</button>
-                        <button onClick={() => deleteSupplier(s.id)}
-                          style={{ background: '#fef2f2', color: '#dc2626', border: 'none', borderRadius: '8px', padding: '6px 12px', cursor: 'pointer', fontSize: '12px', fontWeight: 600 }}>Remove</button>
+
+              {/* Category Manager Modal */}
+              {showCatManager && (
+                <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <div style={{ background: '#fff', borderRadius: 16, padding: 28, width: 520, maxHeight: '80vh', overflow: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                      <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Expense Categories</h3>
+                      <button onClick={() => setShowCatManager(false)} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#6b7280' }}>✕</button>
+                    </div>
+                    {/* Add new */}
+                    <div style={{ background: '#f9fafb', borderRadius: 10, padding: 16, marginBottom: 20 }}>
+                      <p style={{ margin: '0 0 10px', fontWeight: 600, fontSize: 14 }}>Add new category</p>
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                        <input type="text" placeholder="Category name" value={quickCatForm.name}
+                          onChange={e => setQuickCatForm(f => ({ ...f, name: e.target.value }))}
+                          style={{ ...inp, flex: 1 }} />
+                        <input type="color" value={quickCatForm.colour}
+                          onChange={e => setQuickCatForm(f => ({ ...f, colour: e.target.value }))}
+                          style={{ width: 44, height: 38, borderRadius: 8, border: '1px solid #e5e7eb', cursor: 'pointer', padding: 2 }} />
+                        <button style={btn()} onClick={async () => { await saveQuickCategory(); load(); }}>Add</button>
                       </div>
                     </div>
-                  ))}
+                    {/* Existing categories */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      {sortedCategories.map(cat => (
+                        <div key={cat.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: '#f9fafb', borderRadius: 10, border: '1px solid #e5e7eb' }}>
+                          {editingCat?.id === cat.id ? (
+                            <>
+                              <input type="text" value={catEditForm.name} onChange={e => setCatEditForm(f => ({ ...f, name: e.target.value }))}
+                                style={{ ...inp, flex: 1, fontSize: 13 }} />
+                              <input type="color" value={catEditForm.colour} onChange={e => setCatEditForm(f => ({ ...f, colour: e.target.value }))}
+                                style={{ width: 36, height: 32, borderRadius: 6, border: 'none', cursor: 'pointer', padding: 2 }} />
+                              <button style={btn(undefined, true)} onClick={() => updateCategoryInDB(cat)}>Save</button>
+                              <button style={btn('#6b7280', true)} onClick={() => setEditingCat(null)}>Cancel</button>
+                            </>
+                          ) : (
+                            <>
+                              <span style={{ width: 12, height: 12, borderRadius: '50%', background: cat.colour, display: 'inline-block', flexShrink: 0 }} />
+                              <span style={{ flex: 1, fontWeight: 600, fontSize: 14 }}>{cat.name}</span>
+                              <span style={{ fontSize: 11, color: '#9ca3af', fontFamily: 'monospace' }}>{cat.key}</span>
+                              <button style={btn('#1a5c38', true)} onClick={() => { setEditingCat(cat); setCatEditForm({ name: cat.name, colour: cat.colour }) }}>Edit</button>
+                              <button style={btn('#dc2626', true)} onClick={() => { if (confirm('Archive this category?')) archiveCategoryInDB(cat.id) }}>Archive</button>
+                            </>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               )}
-            </div>
-          )}
 
-          {tab === 'items' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div><div style={{ fontSize: '18px', fontWeight: 800, color: '#111' }}>Stock Items</div><div style={{ fontSize: '13px', color: '#9ca3af' }}>{itemSearch ? (items.filter(i=>(i.description||i.name||'').toLowerCase().includes(itemSearch.toLowerCase())).length + ' results for ' + itemSearch) : (items.length + ' items')}</div></div>
-                <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                  <div style={{ position: 'relative' }}>
-                    <input type="text" placeholder="Search items..." value={itemSearch} onChange={e => setItemSearch(e.target.value)}
-                      style={{ padding: '10px 36px 10px 14px', border: '1.5px solid #e5e7eb', borderRadius: '10px', fontSize: '13px', width: '200px', outline: 'none' }} />
-                    {itemSearch && <button onClick={() => setItemSearch('')} style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#9ca3af', fontSize: '16px' }}>✕</button>}
+              {/* Multi-line quick expense form */}
+              {showQForm && (
+                <div style={{ ...card, border: '2px solid #1a5c38', marginBottom: 24, marginTop: 16 }}>
+                  <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 700 }}>{editQ ? 'Edit' : 'New'} Quick Expense</h3>
+                  {error && <div style={{ background: '#fef2f2', color: '#dc2626', padding: '8px 12px', borderRadius: 8, marginBottom: 12, fontSize: 13 }}>{error}</div>}
+
+                  {/* Header fields */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 16 }}>
+                    <div>
+                      <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Date *</label>
+                      <input type="date" value={qForm.expense_date} onChange={e => setQForm((f: any) => ({ ...f, expense_date: e.target.value }))} style={inp} />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Payment Method</label>
+                      <select value={qForm.payment_method} onChange={e => setQForm((f: any) => ({ ...f, payment_method: e.target.value }))} style={inp}>
+                        {PAYMENT_METHODS.map(m => <option key={m} value={m}>{m.replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase())}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Supplier (optional)</label>
+                      <select value={qForm.supplier} onChange={e => setQForm((f: any) => ({ ...f, supplier: e.target.value }))} style={inp}>
+                        <option value="">n/a Select supplier n/a</option>
+                        {suppliers.map((s: any) => <option key={s.id} value={s.name}>{s.name}</option>)}
+                        <option value="other">Other</option>
+                      </select>
+                    </div>
                   </div>
-                <button onClick={() => { setEditItem(null); setItemForm({ name: '', description: '', category_id: categories[0]?.id || '', unit: 'each', cost_price: '', par_level: '', supplier: 'Other', on_daily_sheet: false, is_catch_weight: false, kg_price: '', avg_weight_kg: '', is_prepped_item: false, parent_item_id: '', portion_size: '' }); setShowAddItem(true) }} style={{ padding: '10px 18px', background: '#1a5c38', color: 'white', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: 800, cursor: 'pointer' }}>+ Add Item</button>
+
+                  {/* Line items */}
+                  <div style={{ marginBottom: 8 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '180px 1fr 120px 36px', gap: 8, marginBottom: 6 }}>
+                      {['Category', 'Description', 'Amount (R)', ''].map(h => (
+                        <div key={h} style={{ fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{h}</div>
+                      ))}
+                    </div>
+                    {(qForm.lines || []).map((line: any, idx: number) => (
+                      <div key={idx} style={{ display: 'grid', gridTemplateColumns: '180px 1fr 120px 36px', gap: 8, marginBottom: 6 }}>
+                        <select value={line.category_key} onChange={e => setQForm((f: any) => {
+                          const lines = [...f.lines]; lines[idx] = { ...lines[idx], category_key: e.target.value }; return { ...f, lines }
+                        })} style={{ ...inp, fontSize: 13 }}>
+                          {sortedCategories.map((c: any) => <option key={c.key} value={c.key}>{c.name}</option>)}
+                        </select>
+                        <input type="text" placeholder="Description" value={line.description} onChange={e => setQForm((f: any) => {
+                          const lines = [...f.lines]; lines[idx] = { ...lines[idx], description: e.target.value }; return { ...f, lines }
+                        })} style={{ ...inp, fontSize: 13 }} />
+                        <input type="number" step="0.01" placeholder="0.00" value={line.amount} onChange={e => setQForm((f: any) => {
+                          const lines = [...f.lines]; lines[idx] = { ...lines[idx], amount: e.target.value }; return { ...f, lines }
+                        })} style={{ ...inp, fontSize: 13 }} />
+                        <button onClick={() => setQForm((f: any) => ({ ...f, lines: f.lines.filter((_: any, i: number) => i !== idx) }))}
+                          style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 6, color: '#dc2626', cursor: 'pointer', fontWeight: 700 }}
+                          disabled={(qForm.lines || []).length <= 1}>✕</button>
+                      </div>
+                    ))}
+                    <button onClick={() => setQForm((f: any) => ({ ...f, lines: [...f.lines, emptyQLine()] }))}
+                      style={{ background: 'none', border: '1px dashed #d1d5db', borderRadius: 8, padding: '7px 16px', cursor: 'pointer', color: '#1a5c38', fontWeight: 600, fontSize: 13, marginTop: 4 }}>
+                      + Add line
+                    </button>
+                  </div>
+
+                  {/* Total */}
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '10px 0', borderTop: '1px solid #e5e7eb', marginTop: 8, fontSize: 15, fontWeight: 700 }}>
+                    Total: R {(qForm.lines || []).reduce((s: number, l: any) => s + (parseFloat(l.amount) || 0), 0).toFixed(2)}
+                  </div>
+
+                  <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
+                    <button style={btn()} onClick={saveQuick} disabled={saving}>{saving ? 'Saving…' : `Save ${(qForm.lines || []).filter((l: any) => l.description && l.amount).length} line(s)`}</button>
+                    <button style={btn('#6b7280')} onClick={() => { setShowQForm(false); setEditQ(null) }}>Cancel</button>
+                  </div>
                 </div>
-              </div>
-              {/* Supplier filter — excludes non-stock suppliers (e.g. rent/landlord) since
-                  they never have stock items to filter by */}
-              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                {['All', ...suppliers.filter(s => s.delivers_stock !== false).map(s => s.name)].map(s => (
-                  <button key={s} onClick={() => setSupplierFilter(s)}
-                    style={{ padding: '6px 14px', borderRadius: '20px', fontSize: '12px', fontWeight: 600, cursor: 'pointer', border: 'none',
-                      background: supplierFilter === s ? '#1a5c38' : '#f3f4f6', color: supplierFilter === s ? '#fff' : '#374151' }}>
-                    {s} {s !== 'All' ? `(${items.filter(i => (i.supplier || 'Other') === s).length})` : `(${items.length})`}
-                  </button>
-                ))}
-              </div>
-              {(() => {
-                // Instore / Prepped Items: pulled out of their normal category into their own
-                // section, regardless of what category they're filed under, so the main stock
-                // sheet only shows bulk/orderable stock. Still fully counted toward stock value.
-                const filteredBySupplier = supplierFilter === 'All' ? items : items.filter(i => (i.supplier || 'Other') === supplierFilter)
-                const searchFiltered = itemSearch ? (filteredBySupplier || []).filter(i => (i.description || i.name || '').toLowerCase().includes(itemSearch.toLowerCase())) : (filteredBySupplier || [])
-                const preppedItems = searchFiltered.filter(i => i.parent_item_id)
-                if (!preppedItems.length) return null
-                const preppedStockValue = preppedItems.reduce((sum, item) => sum + Number(item.current_qty || 0) * (Number(item.cost_price) || Number(item.price) || 0), 0)
-                return (
-                  <div style={{ background: 'white', borderRadius: '20px', border: '1.5px solid #e9d5ff', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
-                    <div style={{ padding: '12px 20px', background: '#faf5ff', display: 'flex', alignItems: 'center', gap: '10px', borderBottom: '1px solid #e9d5ff' }}>
-                      <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#7c3aed' }} />
-                      <div style={{ fontWeight: 700, fontSize: '14px', color: '#111' }}>🍽️ Instore / Prepped Items</div>
-                      <span style={{ fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '100px', background: '#7c3aed20', color: '#7c3aed' }}>{preppedItems.length}</span>
-                    </div>
-                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                      <thead><tr style={{ background: '#fafafa' }}>{['Item', 'Unit', 'On Hand', 'Cost Price', 'Par Level', ''].map(h => <th key={h} style={{ padding: '10px 16px', textAlign: 'left', fontSize: '11px', fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{h}</th>)}</tr></thead>
-                      <tbody>
-                        {preppedItems.map(item => {
-                          const parent = items.find(i => i.id === item.parent_item_id)
-                          return (
-                            <tr key={item.id} style={{ borderTop: '1px solid #f3f4f6' }}>
-                              <td style={{ padding: '12px 16px' }}>
-                                <div style={{ fontWeight: 700, fontSize: '14px', color: '#111' }}>{item.description || item.name}</div>
-                                <div style={{ display: 'flex', gap: '6px', marginTop: '4px', flexWrap: 'wrap' as const }}>
-                                  {parent && <span style={{ fontSize: '11px', fontWeight: 600, background: '#f3e8ff', color: '#7c3aed', padding: '2px 8px', borderRadius: '20px' }}>🔗 from {parent.description || parent.name}</span>}
-                                  {item.on_daily_sheet && <span style={{ fontSize: '11px', fontWeight: 600, background: '#f0fdf4', color: '#16a34a', padding: '2px 8px', borderRadius: '20px' }}>📋 Daily</span>}
-                                  {(itemSections[item.id] || []).map(sid => { const sec = sections.find(s => s.id === sid); return sec ? <span key={sid} style={{ fontSize: '11px', fontWeight: 600, padding: '2px 8px', borderRadius: '20px', background: sec.color + '20', color: sec.color }}>{sec.icon} {sec.name}</span> : null })}
-                                </div>
-                              </td>
-                              <td style={{ padding: '12px 16px', fontSize: '13px', color: '#6b7280' }}>{item.unit}</td>
-                              <td style={{ padding: '12px 16px', fontSize: '13px' }}>
-                                <span style={{ fontWeight: 700, color: item.par_level && Number(item.current_qty || 0) < Number(item.par_level) ? '#dc2626' : '#111' }}>
-                                  {Number(item.current_qty || 0)} {item.unit}
-                                </span>
-                              </td>
-                              <td style={{ padding: '12px 16px', fontSize: '13px', color: '#374151' }}>{formatCurrency(Number(item.cost_price) || Number(item.price) || 0)}</td>
-                              <td style={{ padding: '12px 16px', fontSize: '13px', color: '#374151' }}>{item.par_level ? `${Number(item.par_level)} ${item.unit}` : '—'}</td>
-                              <td style={{ padding: '12px 16px' }}>
-                                <div style={{ display: 'flex', gap: '6px' }}>
-                                  <button onClick={() => {
-                                    setEditItem(item)
-                                    const catMatch = categories.find(c => c.id === item.category)
-                                      || categories.find(c => c.name.toLowerCase() === (item.category || '').toLowerCase())
-                                      || categories.find(c => c.name.toLowerCase().includes((item.category || '').toLowerCase().replace(/_/g,' ')))
-                                    setItemForm({
-                                      name: item.description || item.name || '',
-                                      description: item.description || '',
-                                      category_id: catMatch?.id || item.category || categories[0]?.id || '',
-                                      unit: item.unit || 'each',
-                                      cost_price: String(Number(item.price) || 0),
-                                      par_level: String(Number(item.par_level) || 0),
-                                      supplier: item.supplier || 'Other',
-                                      on_daily_sheet: item.on_daily_sheet || false,
-                                      is_catch_weight: item.is_catch_weight || false,
-                                      kg_price: String(Number(item.kg_price) || ''),
-                                      avg_weight_kg: String(Number(item.avg_weight_kg) || ''),
-                                      is_prepped_item: !!item.parent_item_id,
-                                      parent_item_id: item.parent_item_id || '',
-                                      portion_size: item.portion_size != null ? String(item.portion_size) : ''
-                                    })
-                                    setItemFormSections(itemSections[item.id] || [])
-                                    setShowAddItem(true)
-                                  }} style={{ fontSize: '12px', color: '#1d4ed8', background: '#eff6ff', border: 'none', borderRadius: '8px', padding: '5px 10px', cursor: 'pointer', fontWeight: 600 }}>Edit</button>
-                                  <button onClick={() => { setAdjustItem(item); setAdjustQty(''); setAdjustMode('set'); setAdjustReason(''); setAdjustNotes(''); loadAdjustHistory(item.id) }} style={{ fontSize: '12px', color: '#7c3aed', background: '#ede9fe', border: 'none', borderRadius: '8px', padding: '5px 10px', cursor: 'pointer', fontWeight: 600 }}>Adjust</button>
-                                  <button onClick={() => deleteItem(item.id)} style={{ fontSize: '12px', color: '#dc2626', background: '#fee2e2', border: 'none', borderRadius: '8px', padding: '5px 8px', cursor: 'pointer', fontWeight: 700 }}>✕</button>
-                                </div>
-                              </td>
-                            </tr>
-                          )
-                        })}
-                      </tbody>
-                    </table>
-                    <div style={{ padding: '12px 20px', background: '#faf5ff', borderTop: '1px solid #e9d5ff', display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '8px' }}>
-                      <span style={{ fontSize: '12px', fontWeight: 700, color: '#a78bfa', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Section Stock Value</span>
-                      <span style={{ fontSize: '15px', fontWeight: 800, color: '#111' }}>{formatCurrency(preppedStockValue)}</span>
-                    </div>
-                  </div>
-                )
-              })()}
-              {categories.map(cat => {
-                const filteredBySupplier = supplierFilter === 'All' ? items : items.filter(i => (i.supplier || 'Other') === supplierFilter)
-                const searchFiltered = itemSearch ? (filteredBySupplier || []).filter(i => (i.description || i.name || '').toLowerCase().includes(itemSearch.toLowerCase())) : (filteredBySupplier || [])
-                // Match items by UUID (new items) or by legacy name/slug (old items)
-                const catItems = searchFiltered.filter(i =>
-                  !i.parent_item_id && (
-                  i.category === cat.id ||
-                  (i.category && cat.name && i.category.toLowerCase() === cat.name.toLowerCase()) ||
-                  (i.category && cat.name && cat.name.toLowerCase().replace(/[^a-z]/g,'').includes((i.category||'').toLowerCase().replace(/[^a-z]/g,'')))
-                  )
-                )
-                if (!catItems.length) return null
-                const catColor = cat.color || '#6b7280'
-                // Stock value for this section = on-hand qty x cost price, summed across its items.
-                const catStockValue = catItems.reduce((sum, item) => sum + Number(item.current_qty || 0) * (Number(item.cost_price) || Number(item.price) || 0), 0)
-                return (
-                  <div key={cat.id} style={{ background: 'white', borderRadius: '20px', border: '1.5px solid #eef2ee', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
-                    <div style={{ padding: '12px 20px', background: '#f9fafb', display: 'flex', alignItems: 'center', gap: '10px', borderBottom: '1px solid #e5e7eb' }}>
-                      <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: catColor }} />
-                      <div style={{ fontWeight: 700, fontSize: '14px', color: '#111' }}>{cat.name}</div>
-                      <span style={{ fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '100px', background: catColor + '20', color: catColor }}>{catItems.length}</span>
-                    </div>
-                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                      <thead><tr style={{ background: '#fafafa' }}>{['Item', 'Unit', 'On Hand', 'Cost Price', 'Par Level', ''].map(h => <th key={h} style={{ padding: '10px 16px', textAlign: 'left', fontSize: '11px', fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{h}</th>)}</tr></thead>
-                      <tbody>
-                        {catItems.map(item => (
-                          <tr key={item.id} style={{ borderTop: '1px solid #f3f4f6' }}>
-                            <td style={{ padding: '12px 16px' }}>
-                              <div style={{ fontWeight: 700, fontSize: '14px', color: '#111' }}>{item.description || item.name}</div>
-                              <div style={{ display: 'flex', gap: '6px', marginTop: '4px', flexWrap: 'wrap' as const }}>
-                                {item.supplier && <span style={{ fontSize: '11px', fontWeight: 600, background: '#eff6ff', color: '#2563eb', padding: '2px 8px', borderRadius: '20px' }}>{item.supplier}</span>}
-                                {item.on_daily_sheet && <span style={{ fontSize: '11px', fontWeight: 600, background: '#f0fdf4', color: '#16a34a', padding: '2px 8px', borderRadius: '20px' }}>📋 Daily</span>}
-                                {item.is_food_cost === false && <span style={{ fontSize: '11px', fontWeight: 600, background: '#fee2e2', color: '#dc2626', padding: '2px 8px', borderRadius: '20px' }}>🚫 Excl. Food Cost</span>}
-                              </div>
-                            </td>
-                            <td style={{ padding: '12px 16px', fontSize: '13px', color: '#6b7280' }}>{item.unit}</td>
-                            <td style={{ padding: '12px 16px', fontSize: '13px' }}>
-                              <span style={{
-                                fontWeight: 700,
-                                color: item.par_level && Number(item.current_qty || 0) < Number(item.par_level) ? '#dc2626' : '#111'
-                              }}>
-                                {Number(item.current_qty || 0)} {item.unit}
+              )}
+
+              {quickExp.length === 0
+                ? <div style={{ ...card, textAlign: 'center', padding: 48, color: '#6b7280', marginTop: 16 }}>
+                  <div style={{ fontSize: 40, marginBottom: 8 }}>💵</div>
+                  <p>No quick expenses for {month}.</p>
+                </div>
+                : <div style={{ ...card, marginTop: 16 }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+                    <thead>
+                      <tr style={{ borderBottom: '2px solid #e5e7eb' }}>
+                        {['Date', 'Category', 'Description', 'Supplier', 'Method', 'Amount', ''].map(h => (
+                          <th key={h} style={{ textAlign: h === 'Amount' ? 'right' : 'left', padding: '8px 10px', color: '#6b7280', fontWeight: 600, fontSize: 12 }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {quickExp.map(e => {
+                        const cat = CAT_MAP[e.category_key] || categories.find(c => c.name === e.category_name)
+                        return (
+                          <tr key={e.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                            <td style={{ padding: '9px 10px' }}>{e.expense_date}</td>
+                            <td style={{ padding: '9px 10px' }}>
+                              <span style={{ background: (cat?.colour || '#6b7280') + '20', color: cat?.colour || '#6b7280', padding: '2px 8px', borderRadius: 20, fontSize: 12, fontWeight: 600 }}>
+                                {cat?.name || e.category_name || 'n/a'}
                               </span>
                             </td>
-                            <td style={{ padding: '12px 16px', fontSize: '13px', color: '#374151' }}>{formatCurrency(Number(item.cost_price) || Number(item.price) || 0)}</td>
-                            <td style={{ padding: '12px 16px', fontSize: '13px', color: '#374151' }}>
-                              {item.par_level ? `${Number(item.par_level)} ${item.unit}` : '—'}
-                            </td>
-                            <td style={{ padding: '12px 16px' }}>
-                              <div style={{ display: 'flex', gap: '6px' }}>
-                                <button onClick={() => {
-                                  setEditItem(item)
-                                  // item.category may be a UUID (new) or a name/slug (old).
-                                  // Try to match to a known category by id first, then by name.
-                                  const catMatch = categories.find(c => c.id === item.category)
-                                    || categories.find(c => c.name.toLowerCase() === (item.category || '').toLowerCase())
-                                    || categories.find(c => c.name.toLowerCase().includes((item.category || '').toLowerCase().replace(/_/g,' ')))
-                                  setItemForm({
-                                    name: item.description || item.name || '',
-                                    description: item.description || '',
-                                    category_id: catMatch?.id || item.category || categories[0]?.id || '',
-                                    unit: item.unit || 'each',
-                                    cost_price: String(Number(item.cost_price) || Number(item.price) || 0),
-                                    par_level: String(Number(item.par_level) || 0),
-                                    supplier: item.supplier || 'Other',
-                                    on_daily_sheet: item.on_daily_sheet || false,
-                                    is_catch_weight: item.is_catch_weight || false,
-                                    kg_price: String(Number(item.kg_price) || ''),
-                                    avg_weight_kg: String(Number(item.avg_weight_kg) || ''),
-                                    is_prepped_item: !!item.parent_item_id,
-                                    parent_item_id: item.parent_item_id || '',
-                                    portion_size: item.portion_size != null ? String(item.portion_size) : ''
-                                  })
-                                  setItemFormSections(itemSections[item.id] || [])
-                                  setShowAddItem(true)
-                                }} style={{ fontSize: '12px', color: '#1d4ed8', background: '#eff6ff', border: 'none', borderRadius: '8px', padding: '5px 10px', cursor: 'pointer', fontWeight: 600 }}>Edit</button>
-                                <button onClick={() => { setAdjustItem(item); setAdjustQty(''); setAdjustMode('set'); setAdjustReason(''); setAdjustNotes(''); loadAdjustHistory(item.id) }} style={{ fontSize: '12px', color: '#7c3aed', background: '#ede9fe', border: 'none', borderRadius: '8px', padding: '5px 10px', cursor: 'pointer', fontWeight: 600 }}>Adjust</button>
-                                <button onClick={() => toggleFoodCost(item.id, item.is_food_cost !== false)} title={item.is_food_cost === false ? 'Excluded from food cost — click to include' : 'Included in food cost — click to exclude'} style={{ fontSize: '11px', fontWeight: 700, padding: '5px 8px', borderRadius: '8px', border: 'none', cursor: 'pointer', background: item.is_food_cost === false ? '#fee2e2' : '#f0fdf4', color: item.is_food_cost === false ? '#dc2626' : '#16a34a' }}>{item.is_food_cost === false ? '🚫 FC' : '🍽️ FC'}</button>
-                                <button onClick={() => deleteItem(item.id)} style={{ fontSize: '12px', color: '#dc2626', background: '#fee2e2', border: 'none', borderRadius: '8px', padding: '5px 8px', cursor: 'pointer', fontWeight: 700 }}>✕</button>
+                            <td style={{ padding: '9px 10px' }}>{e.description}</td>
+                            <td style={{ padding: '9px 10px', color: '#6b7280', fontSize: 12 }}>{e.supplier || 'n/a'}</td>
+                            <td style={{ padding: '9px 10px', color: '#6b7280', fontSize: 12 }}>{(e.payment_method || '').replace(/_/g, ' ')}</td>
+                            <td style={{ padding: '9px 10px', textAlign: 'right', fontWeight: 700, color: '#dc2626' }}>{fmt(Number(e.amount))}</td>
+                            <td style={{ padding: '9px 10px' }}>
+                              <div style={{ display: 'flex', gap: 6 }}>
+                                <button onClick={() => { setEditQ(e); setQForm({ expense_date: e.expense_date, category_key: e.category_key || 'other', description: e.description, amount: String(e.amount), vat_amount: String(e.vat_amount || ''), supplier: e.supplier || '', invoice_number: e.invoice_number || '', payment_method: e.payment_method || 'cash', notes: e.notes || '' }); setShowQForm(true) }} style={smBtn('#eff6ff', '#2563eb')}>Edit</button>
+                                <button onClick={() => deleteQuick(e.id)} style={smBtn('#fef2f2', '#dc2626')}>Del</button>
                               </div>
                             </td>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                    <div style={{ padding: '12px 20px', background: '#f9fafb', borderTop: '1px solid #e5e7eb', display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '8px' }}>
-                      <span style={{ fontSize: '12px', fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Section Stock Value</span>
-                      <span style={{ fontSize: '15px', fontWeight: 800, color: '#111' }}>{formatCurrency(catStockValue)}</span>
+                        )
+                      })}
+                      <tr style={{ borderTop: '2px solid #e5e7eb', background: '#fef2f2' }}>
+                        <td colSpan={5} style={{ padding: '10px', fontWeight: 700 }}>Month Total</td>
+                        <td style={{ padding: '10px', textAlign: 'right', fontWeight: 800, color: '#dc2626', fontSize: 15 }}>{fmt(totalQuick)}</td>
+                        <td />
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>}
+            </div>
+          )}
+
+          {/* ── FOOD COST ── */}
+          {tab === 4 && (() => {
+            const [periodStart, periodEnd] = fcPeriodRange()
+            const costOfSales = fcData ? fcData.openingValue + fcData.purchases - fcData.closingValue - fcData.wastage : 0
+            // Purchases and stock are ex-VAT n/a divide sales by 1.15 for apples-to-apples comparison
+            const salesExclVat = fcData ? fcData.sales / 1.15 : 0
+            const foodCostPct = fcData && salesExclVat > 0 ? (costOfSales / salesExclVat) * 100 : null
+            const row = (label: string, value: number, sign: '+' | '-' | '=' | '') => (
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid #f3f4f6', fontSize: 14 }}>
+                <span style={{ color: '#6b7280' }}>{sign && <span style={{ display: 'inline-block', width: 16, fontWeight: 700, color: '#9ca3af' }}>{sign}</span>}{label}</span>
+                <span style={{ fontWeight: 700 }}>{fmt(value)}</span>
+              </div>
+            )
+            return (
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
+                  <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Food Cost Analysis</h2>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <div style={{ display: 'flex', background: '#f3f4f6', borderRadius: 10, padding: 3 }}>
+                      {(['month', 'week'] as const).map(m => (
+                        <button key={m} onClick={() => setFcMode(m)} style={{ padding: '6px 16px', borderRadius: 8, border: 'none', background: fcMode === m ? '#1a5c38' : 'transparent', color: fcMode === m ? '#fff' : '#6b7280', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>{m === 'month' ? 'Month' : 'Week'}</button>
+                      ))}
+                    </div>
+                    {fcMode === 'week' && <input type="date" value={fcWeekStart} onChange={e => setFcWeekStart(e.target.value)} style={inp} />}
+                  </div>
+                </div>
+                <p style={{ fontSize: 13, color: '#9ca3af', marginBottom: 16 }}>
+                  {fcMode === 'week' ? `Week of ${periodStart} n/a ${periodEnd}` : `${new Date(periodStart).toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' })}`}
+                </p>
+
+                {fcLoading ? (
+                  <div style={{ textAlign: 'center', padding: 60, color: '#6b7280' }}>Calculating…</div>
+                ) : !fcData ? null : (
+                  <>
+                    {fcOverrideCountThisQuarter >= 3 && (
+                      <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 10, padding: '12px 16px', marginBottom: 16, fontSize: 13, color: '#991b1b', display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ fontSize: 18 }}>🚩</span>
+                        <span><b>Data quality flag:</b> this store has used {fcOverrideCountThisQuarter} manual stock value overrides in the last 90 days. Food Cost % here is being driven by estimates, not physical counts n/a worth flagging if reviewed from head office.</span>
+                      </div>
+                    )}
+                    {(fcData.openingMissing || fcData.closingMissing) && (
+                      <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 10, padding: '12px 16px', marginBottom: 16, fontSize: 13, color: '#c2410c' }}>
+                        ⚠️ {fcData.openingMissing && 'No completed stock count found before this period n/a opening value is treated as R0, which will distort the result. '}
+                        {fcData.closingMissing && 'No completed stock count found for this period n/a closing value is treated as R0. '}
+                        Run a stock count in Stock Management close to the start and end of each period for an accurate Food Cost %, or set a manual opening/closing value below.
+                      </div>
+                    )}
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1.3fr 1fr', gap: 20 }}>
+                      <div style={card}>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: '#374151', marginBottom: 4 }}>Cost of Sales Breakdown</div>
+
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid #f3f4f6' }}>
+                          <div>
+                            <div style={{ fontSize: 14, color: '#6b7280' }}>Opening Stock Value</div>
+                            <div style={{ fontSize: 11, color: fcData.openingManual ? '#c2410c' : '#9ca3af', fontWeight: fcData.openingManual ? 700 : 400 }}>
+                              {fcData.openingManual ? `⚠️ Manual entry${fcData.openingReason ? ` n/a ${fcData.openingReason}` : ''}` : fcData.openingDate ? `From count on ${fcData.openingDate}` : 'No count found'}
+                            </div>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <span style={{ fontWeight: 700 }}>{fmt(fcData.openingValue)}</span>
+                            {fcData.openingManual ? (
+                              <button onClick={() => clearFoodCostOverride('opening')} style={smBtn('#fef2f2', '#dc2626')}>Clear</button>
+                            ) : (
+                              <button onClick={() => { setFcOverrideField('opening'); setFcOverrideForm({ value: String(fcData.openingValue || ''), reason: '' }) }} style={smBtn('#f3f4f6', '#374151')}>Override</button>
+                            )}
+                          </div>
+                        </div>
+
+                        {row('Purchases (Stock module)', fcData.purchases, '+')}
+
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid #f3f4f6' }}>
+                          <div>
+                            <div style={{ fontSize: 14, color: '#6b7280' }}><span style={{ display: 'inline-block', width: 16, fontWeight: 700, color: '#9ca3af' }}>-</span>Closing Stock Value</div>
+                            <div style={{ fontSize: 11, color: fcData.closingManual ? '#c2410c' : '#9ca3af', fontWeight: fcData.closingManual ? 700 : 400 }}>
+                              {fcData.closingManual ? `⚠️ Manual entry${fcData.closingReason ? ` n/a ${fcData.closingReason}` : ''}` : fcData.closingDate ? `From count on ${fcData.closingDate}` : 'No count found'}
+                            </div>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <span style={{ fontWeight: 700 }}>{fmt(fcData.closingValue)}</span>
+                            {fcData.closingManual ? (
+                              <button onClick={() => clearFoodCostOverride('closing')} style={smBtn('#fef2f2', '#dc2626')}>Clear</button>
+                            ) : (
+                              <button onClick={() => { setFcOverrideField('closing'); setFcOverrideForm({ value: String(fcData.closingValue || ''), reason: '' }) }} style={smBtn('#f3f4f6', '#374151')}>Override</button>
+                            )}
+                          </div>
+                        </div>
+
+                        {row('Wastage', fcData.wastage, '-')}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '14px 0 0', fontSize: 16, fontWeight: 800 }}>
+                          <span>Cost of Sales</span>
+                          <span style={{ color: '#1a5c38' }}>{fmt(costOfSales)}</span>
+                        </div>
+                      </div>
+
+                      <div style={{ ...card, textAlign: 'center', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                        <div style={{ fontSize: 12, color: '#9ca3af', fontWeight: 600, marginBottom: 6 }}>FOOD COST %</div>
+                        <div style={{ fontSize: 44, fontWeight: 800, color: foodCostPct === null ? '#9ca3af' : foodCostPct <= 33 ? '#16a34a' : foodCostPct <= 38 ? '#d97706' : '#dc2626' }}>
+                          {foodCostPct === null ? 'n/a' : `${foodCostPct.toFixed(1)}%`}
+                        </div>
+                        <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 4 }}>{fmt(costOfSales)} / {fmt(salesExclVat)} sales (ex-VAT)</div>
+                        {fcData.sales === 0 && <div style={{ fontSize: 11, color: '#dc2626', marginTop: 8 }}>No sales recorded for this period</div>}
+                        {(fcData.openingManual || fcData.closingManual) && <div style={{ fontSize: 11, color: '#c2410c', marginTop: 8, fontWeight: 600 }}>⚠️ Based on a manual entry, not a physical count</div>}
+                        <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 16, borderTop: '1px solid #f3f4f6', paddingTop: 12 }}>Typical restaurant target: 28–35%</div>
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                <div style={{ marginTop: 20, textAlign: 'center' }}>
+                  <button style={btn('#6b7280')} onClick={() => router.push('/stock')}>Go to Stock Management →</button>
+                </div>
+
+                {fcOverrideField && (
+                  <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={() => setFcOverrideField(null)}>
+                    <div style={{ background: '#fff', borderRadius: 16, padding: 24, width: 420, maxWidth: '90vw' }} onClick={e => e.stopPropagation()}>
+                      <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>Manual {fcOverrideField === 'opening' ? 'Opening' : 'Closing'} Stock Value</div>
+                      <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 8, padding: '10px 12px', fontSize: 12, color: '#c2410c', marginBottom: 16 }}>
+                        ⚠️ This overrides the value from your stock counts. It's flagged on screen as a manual entry, and counts toward a data-quality flag if used often. Only use this to bootstrap a new store or correct a known bad count.
+                      </div>
+                      <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Value (R)</label>
+                      <input type="number" step="0.01" value={fcOverrideForm.value} onChange={e => setFcOverrideForm(f => ({ ...f, value: e.target.value }))} style={{ ...inp, marginBottom: 12 }} autoFocus />
+                      <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Reason</label>
+                      <input type="text" placeholder="e.g. New store, no count yet" value={fcOverrideForm.reason} onChange={e => setFcOverrideForm(f => ({ ...f, reason: e.target.value }))} style={{ ...inp, marginBottom: 16 }} />
+                      <div style={{ display: 'flex', gap: 10 }}>
+                        <button style={btn('#6b7280')} onClick={() => setFcOverrideField(null)}>Cancel</button>
+                        <button style={btn()} onClick={saveFoodCostOverride}>Save Override</button>
+                      </div>
                     </div>
                   </div>
-                )
-              })}
-              {items.length === 0 && <div style={{ background: 'white', borderRadius: '20px', border: '1.5px solid #eef2ee', padding: '48px', textAlign: 'center', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}><div style={{ fontSize: '48px', marginBottom: '12px' }}>📦</div><div style={{ fontSize: '16px', fontWeight: 700, color: '#111', marginBottom: '6px' }}>No stock items yet</div><div style={{ fontSize: '13px', color: '#9ca3af', marginBottom: '20px' }}>Add items to build your stock sheet</div><button onClick={() => setShowAddItem(true)} style={{ padding: '12px 24px', background: '#1a5c38', color: 'white', border: 'none', borderRadius: '12px', fontSize: '14px', fontWeight: 800, cursor: 'pointer' }}>+ Add First Item</button></div>}
-            </div>
-          )}
-        </>)}
-
-        <div style={{ marginTop: '48px', textAlign: 'center' }}><p style={{ fontSize: '12px', color: '#9ca3af' }}>CompliTrack © 2026 • Store Management Platform • South Africa 🇿🇦</p></div>
-      </main>
-
-      {/* AI Import Modal */}
-      <Modal show={showAIImport} onClose={() => { setShowAIImport(false); setAIResults([]) }} title="🤖 AI Stock Import" maxWidth="560px">
-        <div style={{ padding: '20px 28px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          <div style={{ fontSize: '13px', color: '#9ca3af' }}>Paste your paper stock sheet — AI will extract items and quantities automatically</div>
-          <textarea value={aiText} onChange={e => setAIText(e.target.value)} placeholder="e.g. Chicken 5kg, Tomatoes 3kg, Cheese 2 pack..." rows={6} style={{ ...INPUT, resize: 'vertical' }} />
-          {aiResults.length > 0 && (
-            <div style={{ background: '#f0fdf4', borderRadius: '12px', padding: '14px 16px' }}>
-              <div style={{ fontSize: '13px', fontWeight: 700, color: '#166534', marginBottom: '10px' }}>✓ Found {aiResults.length} items</div>
-              {aiResults.map((r, i) => <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: '#374151', padding: '4px 0', borderTop: i > 0 ? '1px solid #dcfce7' : 'none' }}><span>{r.name}</span><span style={{ fontWeight: 700 }}>{r.qty} {r.unit}</span></div>)}
-            </div>
-          )}
-        </div>
-        <div style={{ padding: '16px 28px 24px', display: 'flex', gap: '12px' }}>
-          <button onClick={() => { setShowAIImport(false); setAIResults([]) }} style={{ flex: 1, border: '1.5px solid #e5e7eb', color: '#374151', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: 700, cursor: 'pointer', background: 'white' }}>Cancel</button>
-          {aiResults.length === 0
-            ? <button onClick={runAIImport} disabled={aiLoading || !aiText.trim()} style={{ flex: 1, background: aiLoading || !aiText.trim() ? '#d1d5db' : '#7c3aed', color: 'white', border: 'none', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: 800, cursor: aiLoading ? 'not-allowed' : 'pointer' }}>{aiLoading ? '🤖 Reading...' : '🤖 Extract Items'}</button>
-            : <button onClick={applyAIResults} style={{ flex: 1, background: '#1a5c38', color: 'white', border: 'none', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: 800, cursor: 'pointer' }}>✓ Apply to Count Sheet</button>}
-        </div>
-      </Modal>
-
-      {/* Add/Edit Item Modal */}
-      <Modal show={showAddItem} onClose={() => { setShowAddItem(false); setEditItem(null); setShowInlineCat(false); setNewCatName(''); setParentItemSearch('') }} title={editItem ? 'Edit Item' : 'Add Stock Item'} maxWidth="680px">
-        <div style={{ padding: '20px 28px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          <div><label style={LABEL}>Item Name *</label><input value={itemForm.name} onChange={e => setItemForm(f => ({ ...f, name: e.target.value, description: e.target.value }))} placeholder="e.g. Chicken Breasts" style={INPUT} /></div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-            <div>
-              <label style={LABEL}>Category</label>
-              <select value={itemForm.category_id} onChange={e => setItemForm(f => ({ ...f, category_id: e.target.value }))} style={INPUT}>
-                {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
-              {!showInlineCat ? (
-                <button type="button" onClick={() => setShowInlineCat(true)} style={{ fontSize: '11px', color: '#1a5c38', background: 'none', border: 'none', cursor: 'pointer', padding: '4px 0', fontWeight: 700 }}>+ New Category</button>
-              ) : (
-                <div style={{ display: 'flex', gap: 6, marginTop: 6, alignItems: 'center' }}>
-                  <input autoFocus value={newCatName} onChange={e => setNewCatName(e.target.value)} onKeyDown={e => e.key === 'Enter' && saveInlineCategory()} placeholder="Category name" style={{ ...INPUT, padding: '6px 10px', fontSize: '13px', flex: 1 }} />
-                  <button onClick={saveInlineCategory} disabled={savingCat || !newCatName.trim()} style={{ background: '#1a5c38', color: '#fff', border: 'none', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>{savingCat ? '…' : 'Add'}</button>
-                  <button onClick={() => { setShowInlineCat(false); setNewCatName('') }} style={{ background: '#f0f0f0', color: '#666', border: 'none', borderRadius: 8, padding: '6px 10px', cursor: 'pointer', fontSize: 13 }}>✕</button>
-                </div>
-              )}
-            </div>
-            <div>
-              <label style={LABEL}>Supplier</label>
-              {itemForm.is_prepped_item ? (
-                <div style={{ ...INPUT, background: '#faf5ff', color: '#7c3aed', fontWeight: 700, display: 'flex', alignItems: 'center' }}>🍽️ Instore</div>
-              ) : (
-                <select value={itemForm.supplier} onChange={e => setItemForm(f => ({ ...f, supplier: e.target.value }))} style={INPUT}>
-                  <option value="">— Select Supplier —</option>
-                  {suppliers.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
-                </select>
-              )}
-            </div>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 16px', background: '#f0fdf4', borderRadius: '10px', border: '1.5px solid #bbf7d0' }}>
-            <input type="checkbox" id="dailySheet" checked={itemForm.on_daily_sheet} onChange={e => setItemForm(f => ({ ...f, on_daily_sheet: e.target.checked }))} style={{ width: '18px', height: '18px', cursor: 'pointer' }} />
-            <label htmlFor="dailySheet" style={{ cursor: 'pointer', fontWeight: 600, fontSize: '14px', color: '#166534' }}>📋 Daily Sheet — include in daily buy list</label>
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
-            <div><label style={LABEL}>Unit</label><select value={itemForm.unit} onChange={e => setItemForm(f => ({ ...f, unit: e.target.value }))} style={INPUT}>{UNITS.map(u => <option key={u}>{u}</option>)}</select></div>
-            <div>
-              <label style={LABEL}>Unit Cost (R)</label>
-              <input type="number" step="0.01" value={itemForm.cost_price} onChange={e => setItemForm(f => ({ ...f, cost_price: e.target.value }))} placeholder="0.00" style={INPUT} disabled={itemForm.is_catch_weight || itemForm.is_prepped_item} />
-              {itemForm.is_catch_weight && <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px' }}>Auto-calculated from kg price × avg weight</div>}
-              {itemForm.is_prepped_item && <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px' }}>Auto-calculated from source item price × portion size</div>}
-            </div>
-            <div><label style={LABEL}>Par Level</label><input type="number" step="0.1" value={itemForm.par_level} onChange={e => setItemForm(f => ({ ...f, par_level: e.target.value }))} placeholder="0" style={INPUT} /></div>
-          </div>
-          {/* Catch Weight */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 16px', background: '#fefce8', borderRadius: '10px', border: '1.5px solid #fde68a' }}>
-            <input type="checkbox" id="catchWeight" checked={itemForm.is_catch_weight} onChange={e => setItemForm(f => ({ ...f, is_catch_weight: e.target.checked, cost_price: e.target.checked ? String((parseFloat(f.kg_price||'0') * parseFloat(f.avg_weight_kg||'0')).toFixed(2)) : f.cost_price }))} style={{ width: '18px', height: '18px', cursor: 'pointer' }} />
-            <label htmlFor="catchWeight" style={{ cursor: 'pointer', fontWeight: 600, fontSize: '14px', color: '#92400e' }}>⚖️ Catch Weight — bought by kg, counted by unit</label>
-          </div>
-          {itemForm.is_catch_weight && (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px', padding: '14px 16px', background: '#fefce8', borderRadius: '10px', border: '1px solid #fde68a' }}>
-              <div>
-                <label style={LABEL}>Supplier Kg Price (R)</label>
-                <input type="number" step="0.01" placeholder="45.00" value={itemForm.kg_price} onChange={e => { const kg=e.target.value; const avg=itemForm.avg_weight_kg; setItemForm(f => ({ ...f, kg_price: kg, cost_price: kg && avg ? String((parseFloat(kg)*parseFloat(avg)).toFixed(2)) : f.cost_price })) }} style={INPUT} />
-              </div>
-              <div>
-                <label style={LABEL}>Avg Weight (kg)</label>
-                <input type="number" step="0.001" placeholder="1.425" value={itemForm.avg_weight_kg} onChange={e => { const avg=e.target.value; const kg=itemForm.kg_price; setItemForm(f => ({ ...f, avg_weight_kg: avg, cost_price: kg && avg ? String((parseFloat(kg)*parseFloat(avg)).toFixed(2)) : f.cost_price })) }} style={INPUT} />
-              </div>
-              <div>
-                <label style={LABEL}>Calculated Unit Cost</label>
-                <div style={{ padding: '10px 12px', background: '#fff', border: '1.5px solid #fde68a', borderRadius: '10px', fontWeight: 800, fontSize: '16px', color: '#92400e' }}>
-                  R {itemForm.kg_price && itemForm.avg_weight_kg ? (parseFloat(itemForm.kg_price)*parseFloat(itemForm.avg_weight_kg)).toFixed(2) : '0.00'}
-                </div>
-              </div>
-              <div style={{ gridColumn: 'span 3', fontSize: '12px', color: '#92400e', background: '#fef3c7', padding: '8px 12px', borderRadius: '8px' }}>
-                💡 Unit cost auto-updates when you change kg price or avg weight. Update quarterly when supplier rates change.
-              </div>
-            </div>
-          )}
-          {/* Instore / Prepped Item */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 16px', background: '#faf5ff', borderRadius: '10px', border: '1.5px solid #e9d5ff' }}>
-            <input type="checkbox" id="preppedItem" checked={itemForm.is_prepped_item} onChange={e => setItemForm(f => ({ ...f, is_prepped_item: e.target.checked }))} style={{ width: '18px', height: '18px', cursor: 'pointer' }} />
-            <label htmlFor="preppedItem" style={{ cursor: 'pointer', fontWeight: 600, fontSize: '14px', color: '#7c3aed' }}>🍽️ Instore / Prepped Item — portioned in-house from another stock item</label>
-          </div>
-          {itemForm.is_prepped_item && (() => {
-            const parentOptions = items.filter(i => !i.parent_item_id && i.id !== editItem?.id)
-            const selectedParent = parentOptions.find(i => i.id === itemForm.parent_item_id)
-            const parentCost = selectedParent ? (Number(selectedParent.cost_price) || Number(selectedParent.price) || 0) : 0
-            const calcCost = parentCost * (parseFloat(itemForm.portion_size || '0') || 0)
-            return (
-              <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: '12px', padding: '14px 16px', background: '#faf5ff', borderRadius: '10px', border: '1px solid #e9d5ff' }}>
-                <div>
-                  <label style={LABEL}>Made From</label>
-                  <input
-                    type="text"
-                    placeholder="🔍 Search stock items…"
-                    value={parentItemSearch}
-                    onChange={e => setParentItemSearch(e.target.value)}
-                    style={{ ...INPUT, marginBottom: 6 }}
-                  />
-                  <select value={itemForm.parent_item_id} onChange={e => setItemForm(f => ({ ...f, parent_item_id: e.target.value }))} style={INPUT} size={parentItemSearch.trim() ? 6 : undefined}>
-                    <option value="">— Select source item —</option>
-                    {parentOptions
-                      .filter(i => i.id === itemForm.parent_item_id || !parentItemSearch.trim() || (i.description || i.name || '').toLowerCase().includes(parentItemSearch.trim().toLowerCase()))
-                      .sort((a, b) => (a.description || a.name || '').localeCompare(b.description || b.name || ''))
-                      .map(i => <option key={i.id} value={i.id}>{i.description || i.name} ({i.unit})</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label style={LABEL}>Portion Size {selectedParent ? `(${selectedParent.unit})` : ''}</label>
-                  <input type="number" step="0.001" placeholder="0.03" value={itemForm.portion_size} onChange={e => setItemForm(f => ({ ...f, portion_size: e.target.value }))} style={INPUT} />
-                </div>
-                <div>
-                  <label style={LABEL}>Calculated Unit Cost</label>
-                  <div style={{ padding: '10px 12px', background: '#fff', border: '1.5px solid #e9d5ff', borderRadius: '10px', fontWeight: 800, fontSize: '16px', color: '#7c3aed' }}>
-                    R {calcCost.toFixed(2)}
-                  </div>
-                </div>
-                <div style={{ gridColumn: 'span 3', fontSize: '12px', color: '#7c3aed', background: '#f3e8ff', padding: '8px 12px', borderRadius: '8px' }}>
-                  💡 Cost auto-updates from the source item's price × portion size. This item is excluded from Orders and Purchases (you order/purchase the source item instead) and is grouped under its own "Instore" section on the stock sheet — it still counts fully toward stock value and shows up in stock counts, wastage and issuing.
-                </div>
+                )}
               </div>
             )
           })()}
-          {/* Counting Sections multi-select */}
-          {sections.length > 0 && (
-            <div style={{ padding: '14px 16px', background: '#f0f9f4', borderRadius: '10px', border: '1.5px solid #bbf7d0' }}>
-              <div style={{ fontWeight: 700, fontSize: '13px', color: '#1a5c38', marginBottom: '10px' }}>📍 Count in Sections</div>
-              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                {sections.map(sec => {
-                  const selected = itemFormSections.includes(sec.id)
-                  return (
-                    <button key={sec.id} type="button" onClick={() => setItemFormSections(prev => selected ? prev.filter(id => id !== sec.id) : [...prev, sec.id])}
-                      style={{ padding: '6px 14px', borderRadius: '20px', border: `2px solid ${sec.color}`, cursor: 'pointer', fontWeight: 700, fontSize: '13px', background: selected ? sec.color : 'white', color: selected ? 'white' : sec.color, transition: 'all 0.15s' }}>
-                      {sec.icon} {sec.name}
-                    </button>
-                  )
-                })}
+
+          {tab === 5 && (
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
+                <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Invoice History</h2>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <input type="text" placeholder="Search supplier, invoice #, notes…" value={historySearch} onChange={e => setHistorySearch(e.target.value)} style={{ ...inp, width: 220 }} />
+                  <select value={historySupplier} onChange={e => setHistorySupplier(e.target.value)} style={inp}>
+                    <option value="All">All Suppliers</option>
+                    {suppliers.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
+                  </select>
+                  <select value={historyStatus} onChange={e => setHistoryStatus(e.target.value)} style={inp}>
+                    {['All', 'draft', 'received', 'paid'].map(s => <option key={s} value={s}>{s === 'All' ? 'All Statuses' : s.charAt(0).toUpperCase() + s.slice(1)}</option>)}
+                  </select>
+                </div>
               </div>
-              <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '8px' }}>Select every area where this item is counted (e.g. Coke: Front Fridge + Cooler). Leave blank to always show in all sections.</div>
-            </div>
-          )}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
-          </div>
-        </div>
-        <div style={{ padding: '16px 28px 24px', display: 'flex', gap: '12px' }}>
-          <button onClick={() => { setShowAddItem(false); setEditItem(null); setParentItemSearch(''); setItemFormSections([]) }} style={{ flex: 1, border: '1.5px solid #e5e7eb', color: '#374151', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: 700, cursor: 'pointer', background: 'white' }}>Cancel</button>
-          <button onClick={saveItem} disabled={saving || !itemForm.name} style={{ flex: 1, background: !itemForm.name ? '#d1d5db' : '#1a5c38', color: 'white', border: 'none', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: 800, cursor: 'pointer' }}>{editItem ? 'Save Changes' : 'Add Item'}</button>
-        </div>
-      </Modal>
-
-      {/* Add Category Modal */}
-      <Modal show={showAddCategory} onClose={() => setShowAddCategory(false)} title="Add Category" maxWidth="400px">
-        <div style={{ padding: '20px 28px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          <div><label style={LABEL}>Category Name *</label><input value={categoryForm.name} onChange={e => setCategoryForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Frozen Items" style={INPUT} /></div>
-          <div><label style={LABEL}>Colour</label><input type="color" value={categoryForm.color} onChange={e => setCategoryForm(f => ({ ...f, color: e.target.value }))} style={{ ...INPUT, height: '44px', padding: '4px 8px' }} /></div>
-        </div>
-        <div style={{ padding: '16px 28px 24px', display: 'flex', gap: '12px' }}>
-          <button onClick={() => setShowAddCategory(false)} style={{ flex: 1, border: '1.5px solid #e5e7eb', color: '#374151', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: 700, cursor: 'pointer', background: 'white' }}>Cancel</button>
-          <button onClick={saveCategory} disabled={!categoryForm.name} style={{ flex: 1, background: !categoryForm.name ? '#d1d5db' : '#1a5c38', color: 'white', border: 'none', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: 800, cursor: 'pointer' }}>Add Category</button>
-        </div>
-      </Modal>
-
-      {/* Log Purchase Modal */}
-      <Modal show={showAddPurchase} onClose={() => setShowAddPurchase(false)} title="Log Purchase">
-        <div style={{ padding: '20px 28px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-          <div><label style={LABEL}>Date</label><input type="date" value={purchaseForm.purchase_date} onChange={e => setPurchaseForm(f => ({ ...f, purchase_date: e.target.value }))} style={INPUT} /></div>
-          <div><label style={LABEL}>Stock Item (optional)</label>
-            <select value={purchaseForm.stock_item_id} onChange={e => { const item = items.find(i => i.id === e.target.value); setPurchaseForm(f => ({ ...f, stock_item_id: e.target.value, item_name: (item?.description || item?.name) || f.item_name, unit: item?.unit || f.unit, unit_cost: item ? String(Number(item.cost_price) || Number(item.price) || 0) : f.unit_cost })) }} style={INPUT}>
-              <option value="">Select from stock list</option>
-              {suppliers.map(sup => { const supItems = items.filter(i => (i.supplier||'Other')===sup.name && !i.parent_item_id); return supItems.length ? <optgroup key={sup.id} label={sup.name}>{supItems.map(i => <option key={i.id} value={i.id}>{i.description||i.name}</option>)}</optgroup> : null })}
-            </select></div>
-          <div><label style={LABEL}>Item Name *</label><input value={purchaseForm.item_name} onChange={e => setPurchaseForm(f => ({ ...f, item_name: e.target.value }))} placeholder="or type manually" style={INPUT} /></div>
-          <div><label style={LABEL}>Supplier</label><select value={purchaseForm.supplier_name} onChange={e => setPurchaseForm(f => ({ ...f, supplier_name: e.target.value }))} style={INPUT}><option value="">— Select Supplier —</option>{suppliers.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}<option value="_other">Other</option></select></div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
-            <div><label style={LABEL}>Quantity</label><input type="number" step="0.1" value={purchaseForm.quantity} onChange={e => setPurchaseForm(f => ({ ...f, quantity: e.target.value }))} placeholder="0" style={INPUT} /></div>
-            <div><label style={LABEL}>Unit</label><select value={purchaseForm.unit} onChange={e => setPurchaseForm(f => ({ ...f, unit: e.target.value }))} style={INPUT}>{UNITS.map(u => <option key={u}>{u}</option>)}</select></div>
-            <div><label style={LABEL}>Unit Cost (R)</label><input type="number" step="0.01" value={purchaseForm.unit_cost} onChange={e => setPurchaseForm(f => ({ ...f, unit_cost: e.target.value }))} placeholder="0.00" style={INPUT} /></div>
-          </div>
-          {purchaseForm.quantity && purchaseForm.unit_cost && <div style={{ background: '#f0fdf4', borderRadius: '10px', padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}><span style={{ fontSize: '13px', color: '#166534' }}>Total</span><span style={{ fontSize: '18px', fontWeight: 800, color: '#166534' }}>{formatCurrency(parseFloat(purchaseForm.quantity) * parseFloat(purchaseForm.unit_cost))}</span></div>}
-          <div><label style={LABEL}>Invoice Number</label><input value={purchaseForm.invoice_number} onChange={e => setPurchaseForm(f => ({ ...f, invoice_number: e.target.value }))} style={INPUT} /></div>
-        </div>
-        <div style={{ padding: '16px 28px 24px', display: 'flex', gap: '12px' }}>
-          <button onClick={() => setShowAddPurchase(false)} style={{ flex: 1, border: '1.5px solid #e5e7eb', color: '#374151', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: 700, cursor: 'pointer', background: 'white' }}>Cancel</button>
-          <button onClick={savePurchase} disabled={saving} style={{ flex: 1, background: '#1a5c38', color: 'white', border: 'none', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: 800, cursor: 'pointer' }}>Log Purchase</button>
-        </div>
-      </Modal>
-
-      {/* Log Wastage Modal */}
-      <Modal show={showAddWastage} onClose={() => setShowAddWastage(false)} title="Log Wastage">
-        <div style={{ padding: '20px 28px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-          <div><label style={LABEL}>Date</label><input type="date" value={wastageForm.wastage_date} onChange={e => setWastageForm(f => ({ ...f, wastage_date: e.target.value }))} style={INPUT} /></div>
-          <div><label style={LABEL}>Stock Item</label><select value={wastageForm.stock_item_id} onChange={e => { const item = items.find(i => i.id === e.target.value); setWastageForm(f => ({ ...f, stock_item_id: e.target.value, item_name: (item?.description||item?.name)||'', unit: item?.unit||f.unit, unit_cost: item ? String(Number(item.cost_price)||Number(item.price)||0) : f.unit_cost })) }} style={INPUT}><option value="">Select stock item</option>{suppliers.map(sup => { const supItems = items.filter(i => (i.supplier||'Other')===sup.name); return supItems.length ? <optgroup key={sup.id} label={sup.name}>{supItems.map(i => <option key={i.id} value={i.id}>{i.description||i.name}</option>)}</optgroup> : null })}</select></div>
-          <div><label style={LABEL}>Item Name</label><input value={wastageForm.item_name} onChange={e => setWastageForm(f => ({ ...f, item_name: e.target.value }))} placeholder="or type manually" style={INPUT} /></div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
-            <div><label style={LABEL}>Quantity</label><input type="number" step="0.1" value={wastageForm.quantity} onChange={e => setWastageForm(f => ({ ...f, quantity: e.target.value }))} placeholder="0" style={INPUT} /></div>
-            <div><label style={LABEL}>Unit</label><select value={wastageForm.unit} onChange={e => setWastageForm(f => ({ ...f, unit: e.target.value }))} style={INPUT}>{UNITS.map(u => <option key={u}>{u}</option>)}</select></div>
-            <div><label style={LABEL}>Unit Cost (R)</label><input type="number" step="0.01" value={wastageForm.unit_cost} onChange={e => setWastageForm(f => ({ ...f, unit_cost: e.target.value }))} placeholder="0.00" style={INPUT} /></div>
-          </div>
-          <div><label style={LABEL}>Reason</label><select value={wastageForm.reason} onChange={e => setWastageForm(f => ({ ...f, reason: e.target.value }))} style={INPUT}>{WASTAGE_REASONS.map(r => <option key={r}>{r}</option>)}</select></div>
-        </div>
-        <div style={{ padding: '16px 28px 24px', display: 'flex', gap: '12px' }}>
-          <button onClick={() => setShowAddWastage(false)} style={{ flex: 1, border: '1.5px solid #e5e7eb', color: '#374151', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: 700, cursor: 'pointer', background: 'white' }}>Cancel</button>
-          <button onClick={saveWastage} disabled={saving} style={{ flex: 1, background: '#dc2626', color: 'white', border: 'none', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: 800, cursor: 'pointer' }}>Log Wastage</button>
-        </div>
-      </Modal>
-
-
-      {/* New Order Modal - Purchase Order */}
-      <Modal show={showAddOrder} onClose={() => setShowAddOrder(false)} title="New Purchase Order" maxWidth="700px">
-        <div style={{ padding: '20px 28px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
-            <div><label style={LABEL}>Supplier *</label>
-              <select value={orderForm.supplier_name} onChange={e => setOrderForm(f => ({ ...f, supplier_name: e.target.value }))} style={INPUT}>
-                <option value="">— Select Supplier —</option>
-                {suppliers.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
-              </select>
-            </div>
-            <div><label style={LABEL}>Order Date</label><input type="date" value={orderForm.order_date} onChange={e => setOrderForm(f => ({ ...f, order_date: e.target.value }))} style={INPUT} /></div>
-            <div><label style={LABEL}>Expected Delivery</label><input type="date" value={orderForm.expected_delivery} onChange={e => setOrderForm(f => ({ ...f, expected_delivery: e.target.value }))} style={INPUT} /></div>
-          </div>
-          {orderForm.supplier_name && (
-            <div style={{ background: '#f9fafb', borderRadius: '12px', padding: '16px' }}>
-              <div style={{ fontWeight: 700, fontSize: '14px', marginBottom: '12px', color: '#1a5c38' }}>
-                Order Items — {orderForm.supplier_name}
-                <span style={{ fontWeight: 400, fontSize: '12px', color: '#6b7280', marginLeft: '8px' }}>
-                  {items.filter(i => (i.supplier || 'Other') === orderForm.supplier_name && !i.parent_item_id).length} items
-                </span>
-              </div>
-              {items.filter(i => (i.supplier || 'Other') === orderForm.supplier_name && !i.parent_item_id).length === 0 ? (
-                <p style={{ color: '#6b7280', fontSize: '13px', margin: 0 }}>No items assigned to this supplier. Go to Stock Items tab to assign items to suppliers.</p>
+              <p style={{ fontSize: 12, color: '#9ca3af', marginBottom: 16 }}>Every invoice across all months, most recent first. Showing the last 300 n/a narrow the filters above for older records.</p>
+              {historyLoading ? (
+                <div style={{ textAlign: 'center', padding: 60, color: '#6b7280' }}>Loading…</div>
+              ) : filteredHistory.length === 0 ? (
+                <div style={{ ...card, textAlign: 'center', padding: 48, color: '#6b7280' }}>
+                  <div style={{ fontSize: 40, marginBottom: 8 }}>📄</div>
+                  <p>No invoices match these filters.</p>
+                </div>
               ) : (
-                <div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: '8px', marginBottom: '8px', fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase' as const }}>
-                    <div>Item</div><div>Unit</div><div>Order Qty</div>
-                  </div>
-                  <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
-                    {items.filter(i => (i.supplier || 'Other') === orderForm.supplier_name && !i.parent_item_id).map(item => (
-                      <div key={item.id} style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: '8px', marginBottom: '8px', alignItems: 'center' }}>
-                        <div style={{ fontSize: '13px', fontWeight: 600 }}>{item.description || item.name}</div>
-                        <div style={{ fontSize: '12px', color: '#6b7280' }}>{item.unit}</div>
-                        <input type="number" min="0" step="0.1" placeholder="0"
-                          value={(orderForm as Record<string,string>)[`qty_${item.id}`] || ''}
-                          onChange={e => setOrderForm(f => ({ ...f, [`qty_${item.id}`]: e.target.value }))}
-                          style={{ padding: '6px 10px', border: `1.5px solid ${parseFloat((orderForm as Record<string,string>)[`qty_${item.id}`] || '0') > 0 ? '#16a34a' : '#e5e7eb'}`, borderRadius: '8px', fontSize: '14px', outline: 'none', background: parseFloat((orderForm as Record<string,string>)[`qty_${item.id}`] || '0') > 0 ? '#f0fdf4' : '#fff' }} />
-                      </div>
-                    ))}
-                  </div>
-                  <div style={{ marginTop: '8px', fontSize: '12px', color: '#6b7280', textAlign: 'right' as const }}>
-                    {items.filter(i => (i.supplier||'Other')===orderForm.supplier_name && !i.parent_item_id && parseFloat((orderForm as Record<string,string>)[`qty_${i.id}`]||'0')>0).length} of {items.filter(i => (i.supplier||'Other')===orderForm.supplier_name && !i.parent_item_id).length} items ordered
-                  </div>
+                <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #e5e7eb', overflow: 'hidden' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                    <thead>
+                      <tr style={{ background: '#f9fafb', borderBottom: '1px solid #e5e7eb' }}>
+                        {['Date', 'Supplier', 'Invoice #', 'Status', 'Due', 'Amount'].map(h => (
+                          <th key={h} style={{ padding: '10px 14px', textAlign: h === 'Amount' ? 'right' : 'left', color: '#6b7280', fontWeight: 700, fontSize: 11, textTransform: 'uppercase' as const }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredHistory.map(inv => (
+                        <tr key={inv.id} style={{ borderBottom: '1px solid #f3f4f6', cursor: 'pointer' }} onClick={() => openEditInvoice(inv)}>
+                          <td style={{ padding: '10px 14px' }}>{inv.invoice_date}</td>
+                          <td style={{ padding: '10px 14px', fontWeight: 600 }}>{inv.supplier}</td>
+                          <td style={{ padding: '10px 14px', color: '#6b7280' }}>{inv.invoice_number || 'n/a'}</td>
+                          <td style={{ padding: '10px 14px' }}>{statusBadge(inv.status, 11)}</td>
+                          <td style={{ padding: '10px 14px', color: '#6b7280' }}>{inv.due_date || 'n/a'}</td>
+                          <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 700 }}>{fmt(Number(inv.total_amount))}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               )}
             </div>
           )}
-          <div><label style={LABEL}>Notes</label><textarea value={orderForm.notes} onChange={e => setOrderForm(f => ({ ...f, notes: e.target.value }))} placeholder="Special instructions..." style={{ ...INPUT, height: '60px', resize: 'vertical' as const }} /></div>
-        </div>
-        <div style={{ padding: '16px 28px 24px', display: 'flex', gap: '12px' }}>
-          <button onClick={() => setShowAddOrder(false)} style={{ flex: 1, border: '1.5px solid #e5e7eb', color: '#374151', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: 700, cursor: 'pointer', background: 'white' }}>Cancel</button>
-          <button onClick={printOrder} disabled={!orderForm.supplier_name} style={{ flex: 1, background: !orderForm.supplier_name ? '#d1d5db' : '#f0fdf4', color: '#16a34a', border: '1.5px solid #16a34a', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: 700, cursor: 'pointer' }}>🖨️ Print</button>
-          <button onClick={shareOrderWhatsApp} disabled={!orderForm.supplier_name} style={{ flex: 1, background: !orderForm.supplier_name ? '#d1d5db' : '#dcfce7', color: '#16a34a', border: '1.5px solid #16a34a', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: 700, cursor: 'pointer' }}>💬 WhatsApp</button>
-          <button onClick={saveOrder} disabled={saving || !orderForm.supplier_name} style={{ flex: 1, background: !orderForm.supplier_name ? '#d1d5db' : '#1a5c38', color: 'white', border: 'none', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: 800, cursor: 'pointer' }}>{saving ? 'Saving…' : '✓ Save Order'}</button>
-        </div>
-      </Modal>
-      {/* Supplier Management Modal */}
-      <Modal show={showSupplierForm} onClose={() => { setShowSupplierForm(false); setEditSupplier(null) }} title={editSupplier ? 'Edit Supplier' : 'Add Supplier'} maxWidth="500px">
-        <div style={{ padding: '20px 28px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-          <div><label style={LABEL}>Supplier Name *</label><input value={supplierForm.name} onChange={e => setSupplierForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. SAR, Mochachos" style={INPUT} /></div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-            <div><label style={LABEL}>Contact Name</label><input value={supplierForm.contact_name} onChange={e => setSupplierForm(f => ({ ...f, contact_name: e.target.value }))} placeholder="Rep name" style={INPUT} /></div>
-            <div><label style={LABEL}>Phone</label><input value={supplierForm.phone} onChange={e => setSupplierForm(f => ({ ...f, phone: e.target.value }))} placeholder="e.g. 082 000 0000" style={INPUT} /></div>
-          </div>
-          <div><label style={LABEL}>Email</label><input type="email" value={supplierForm.email} onChange={e => setSupplierForm(f => ({ ...f, email: e.target.value }))} placeholder="orders@supplier.co.za" style={INPUT} /></div>
-          <div><label style={LABEL}>Order Day</label>
-            <select value={supplierForm.order_day} onChange={e => setSupplierForm(f => ({ ...f, order_day: e.target.value }))} style={INPUT}>
-              <option value="">— Select —</option>
-              {['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'].map(d => <option key={d} value={d}>{d}</option>)}
-            </select>
-          </div>
-          <div><label style={LABEL}>Payment Terms (days)</label><input type="number" min="0" step="1" value={supplierForm.payment_terms_days} onChange={e => setSupplierForm(f => ({ ...f, payment_terms_days: e.target.value }))} placeholder="7" style={INPUT} /><div style={{ fontSize: '12px', color: '#9ca3af', marginTop: '4px' }}>Used to auto-calculate the Due Date on invoices from this supplier</div></div>
-          <div><label style={LABEL}>Notes</label><input value={supplierForm.notes} onChange={e => setSupplierForm(f => ({ ...f, notes: e.target.value }))} placeholder="e.g. Order by 10am" style={INPUT} /></div>
-
-          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, padding: '14px 16px', background: supplierForm.delivers_stock ? '#f0fdf4' : '#f8f9ff', borderRadius: 10, border: `1.5px solid ${supplierForm.delivers_stock ? '#bbf7d0' : '#e0e7ff'}` }}>
-            <input type="checkbox" id="delivers_stock" checked={supplierForm.delivers_stock} onChange={e => setSupplierForm(f => ({ ...f, delivers_stock: e.target.checked }))} style={{ marginTop: 3, width: 16, height: 16, cursor: 'pointer', accentColor: '#1a5c38' }} />
-            <label htmlFor="delivers_stock" style={{ cursor: 'pointer', flex: 1 }}>
-              <div style={{ fontWeight: 700, fontSize: 14, color: '#111', marginBottom: 3 }}>📦 Delivers stock</div>
-              <div style={{ fontSize: 12, color: '#6b7280', lineHeight: 1.4 }}>
-                {supplierForm.delivers_stock
-                  ? 'Submitting a bill from this supplier will open the Receive Goods screen to update your stock quantities and prices.'
-                  : 'Bills from this supplier will be submitted without a GRV — no stock is received. Use this for rent, software, insurance, bank charges, etc.'}
-              </div>
-            </label>
-          </div>
-
-          <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: 16, marginTop: 4 }}>
-            <div style={{ fontSize: '13px', fontWeight: 700, color: '#1a5c38', marginBottom: 8 }}>📋 Invoice Column Template</div>
-            <div style={{ fontSize: '12px', color: '#9ca3af', marginBottom: 12 }}>Define the columns on this supplier's invoice so the AI knows exactly where to find the excl-VAT price. Add columns left to right as they appear on the invoice.</div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-              <label style={{ fontSize: '13px', fontWeight: 600, color: '#374151' }}>Prices on invoice are:</label>
-              <select value={invoiceVatIncluded ? 'incl' : 'excl'} onChange={e => setInvoiceVatIncluded(e.target.value === 'incl')} style={{ ...INPUT, width: 'auto', padding: '6px 10px' }}>
-                <option value="incl">Incl & Excl VAT shown (most common)</option>
-                <option value="excl">Excl VAT only</option>
-              </select>
-            </div>
-            {invoiceColumns.map((col, i) => (
-              <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 1.5fr auto', gap: 6, marginBottom: 6, alignItems: 'center' }}>
-                <input
-                  value={col.name}
-                  onChange={e => setInvoiceColumns(cols => cols.map((c, idx) => idx === i ? { ...c, name: e.target.value } : c))}
-                  placeholder={`Column ${i + 1} name`}
-                  style={{ ...INPUT, padding: '6px 10px', fontSize: '13px' }}
-                />
-                <select
-                  value={col.maps_to || ''}
-                  onChange={e => setInvoiceColumns(cols => cols.map((c, idx) => idx === i ? { ...c, maps_to: e.target.value || null } : c))}
-                  style={{ ...INPUT, padding: '6px 10px', fontSize: '12px' }}
-                >
-                  {MAPS_TO_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                </select>
-                <button onClick={() => setInvoiceColumns(cols => cols.filter((_, idx) => idx !== i))} style={{ background: '#fef2f2', color: '#dc2626', border: 'none', borderRadius: 8, width: 30, height: 30, cursor: 'pointer', fontWeight: 700 }}>×</button>
-              </div>
-            ))}
-            <button onClick={() => setInvoiceColumns(cols => [...cols, { name: '', maps_to: null }])} style={{ fontSize: '13px', color: '#1a5c38', background: '#f0f7f4', border: '1px dashed #1a5c38', borderRadius: 8, padding: '6px 14px', cursor: 'pointer', fontWeight: 600, marginTop: 4 }}>+ Add Column</button>
-            {invoiceColumns.length > 0 && invoiceColumns.some(c => c.maps_to === 'unit_price_excl') && (
-              <div style={{ fontSize: '12px', color: '#16a34a', marginTop: 8, background: '#f0fdf4', borderRadius: 6, padding: '6px 10px' }}>✓ AI will extract unit price from "{invoiceColumns.find(c => c.maps_to === 'unit_price_excl')?.name}" column</div>
-            )}
-          </div>
-        </div>
-        <div style={{ padding: '16px 28px 24px', display: 'flex', gap: '12px' }}>
-          <button onClick={() => { setShowSupplierForm(false); setEditSupplier(null) }} style={{ flex: 1, border: '1.5px solid #e5e7eb', color: '#374151', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: 700, cursor: 'pointer', background: 'white' }}>Cancel</button>
-          <button onClick={saveSupplier} disabled={saving || !supplierForm.name} style={{ flex: 1, background: !supplierForm.name ? '#d1d5db' : '#1a5c38', color: 'white', border: 'none', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: 800, cursor: 'pointer' }}>{saving ? 'Saving…' : editSupplier ? 'Save Changes' : 'Add Supplier'}</button>
-        </div>
-      </Modal>
-      {adjustItem && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 3000, padding: 20 }} onClick={() => setAdjustItem(null)}>
-          <div style={{ background: '#fff', borderRadius: 20, width: 480, maxWidth: '100%', maxHeight: '80vh', overflow: 'auto' }} onClick={e => e.stopPropagation()}>
-            <div style={{ padding: '20px 24px 16px', borderBottom: '1px solid #f0f0f0' }}>
-              <div style={{ fontSize: 18, fontWeight: 800 }}>⚖️ Adjust Stock</div>
-              <div style={{ fontSize: 14, color: '#6b7280', marginTop: 2 }}>{adjustItem.description || adjustItem.name}</div>
-              <div style={{ marginTop: 8, display: 'inline-block', background: '#f3f4f6', borderRadius: 8, padding: '6px 12px', fontSize: 14 }}>Current qty: <strong>{Number(adjustItem.current_qty || 0).toFixed(3)} {adjustItem.unit}</strong></div>
+        </>)}
+      </div>
+      {/* Quick Add Category Modal */}
+      {showQuickCat && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: '16px' }}>
+          <div style={{ background: '#fff', borderRadius: '16px', width: '100%', maxWidth: '400px', boxShadow: '0 24px 60px rgba(0,0,0,0.2)' }}>
+            <div style={{ padding: '20px 24px 16px', borderBottom: '1px solid #f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <h2 style={{ fontSize: '16px', fontWeight: '800', color: '#111', margin: 0 }}>🏷️ New Expense Category</h2>
+              <button onClick={() => setShowQuickCat(false)} style={{ background: '#f3f4f6', border: 'none', borderRadius: '8px', width: '32px', height: '32px', cursor: 'pointer', fontSize: '16px' }}>✕</button>
             </div>
             <div style={{ padding: '20px 24px' }}>
-              <div style={{ marginBottom: 16 }}>
-                <label style={{ fontSize: 12, fontWeight: 700, color: '#374151', display: 'block', marginBottom: 6 }}>Adjustment type</label>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  {(['set','add','subtract'] as const).map(mode => (
-                    <button key={mode} onClick={() => setAdjustMode(mode)} style={{ flex: 1, padding: '8px 4px', borderRadius: 8, border: `2px solid ${adjustMode === mode ? '#7c3aed' : '#e5e7eb'}`, background: adjustMode === mode ? '#ede9fe' : '#fff', color: adjustMode === mode ? '#7c3aed' : '#6b7280', fontWeight: 700, fontSize: 11, cursor: 'pointer' }}>
-                      {mode === 'set' ? 'Set exact qty' : mode === 'add' ? 'Add to current' : 'Subtract from current'}
-                    </button>
+              <div style={{ marginBottom: '16px' }}>
+                <label style={{ fontSize: '13px', fontWeight: '600', display: 'block', marginBottom: '6px' }}>Category Name *</label>
+                <input type="text" placeholder="e.g. Royalties, Cleaning, Gas" value={quickCatForm.name}
+                  onChange={e => setQuickCatForm(f => ({ ...f, name: e.target.value }))}
+                  style={{ width: '100%', padding: '10px 12px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '14px', boxSizing: 'border-box' as const }} />
+              </div>
+              <div style={{ marginBottom: '20px' }}>
+                <label style={{ fontSize: '13px', fontWeight: '600', display: 'block', marginBottom: '8px' }}>Colour</label>
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                  <input type="color" value={quickCatForm.colour} onChange={e => setQuickCatForm(f => ({ ...f, colour: e.target.value }))}
+                    style={{ width: '40px', height: '40px', border: '1.5px solid #e5e7eb', borderRadius: '8px', cursor: 'pointer', padding: '2px' }} />
+                  {COLOUR_PALETTE.map(c => (
+                    <div key={c} onClick={() => setQuickCatForm(f => ({ ...f, colour: c }))}
+                      style={{ width: '22px', height: '22px', borderRadius: '4px', background: c, cursor: 'pointer', border: quickCatForm.colour === c ? '2px solid #111' : '2px solid transparent' }} />
                   ))}
                 </div>
               </div>
-              <div style={{ marginBottom: 16 }}>
-                <label style={{ fontSize: 12, fontWeight: 700, color: '#374151', display: 'block', marginBottom: 6 }}>{adjustMode === 'set' ? `New quantity (${adjustItem.unit})` : adjustMode === 'add' ? `Quantity to add (${adjustItem.unit})` : `Quantity to remove (${adjustItem.unit})`}</label>
-                <input type="number" step="0.001" min="0" autoFocus value={adjustQty} onChange={e => setAdjustQty(e.target.value)} placeholder="0.000" style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1.5px solid #e5e7eb', fontSize: 16, fontWeight: 700 }} />
-                {adjustQty && <div style={{ marginTop: 6, fontSize: 13, color: '#7c3aed', fontWeight: 600 }}>
-                  {adjustMode === 'set' && `Will set to ${parseFloat(adjustQty).toFixed(3)} ${adjustItem.unit} (${parseFloat(adjustQty) - Number(adjustItem.current_qty) >= 0 ? '+' : ''}${(parseFloat(adjustQty) - Number(adjustItem.current_qty)).toFixed(3)})`}
-                  {adjustMode === 'add' && `New qty: ${(Number(adjustItem.current_qty) + parseFloat(adjustQty)).toFixed(3)} ${adjustItem.unit}`}
-                  {adjustMode === 'subtract' && `New qty: ${Math.max(0, Number(adjustItem.current_qty) - parseFloat(adjustQty)).toFixed(3)} ${adjustItem.unit}`}
-                </div>}
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <button onClick={saveQuickCategory} disabled={savingCat || !quickCatForm.name}
+                  style={{ flex: 1, background: quickCatForm.name ? '#1a5c38' : '#d1d5db', color: '#fff', border: 'none', borderRadius: '8px', padding: '12px', cursor: quickCatForm.name ? 'pointer' : 'not-allowed', fontSize: '14px', fontWeight: '700' }}>
+                  {savingCat ? 'Saving…' : 'Add Category'}
+                </button>
+                <button onClick={() => setShowQuickCat(false)}
+                  style={{ background: '#f3f4f6', color: '#374151', border: 'none', borderRadius: '8px', padding: '12px 16px', cursor: 'pointer', fontSize: '14px', fontWeight: '700' }}>
+                  Cancel
+                </button>
               </div>
-              <div style={{ marginBottom: 16 }}>
-                <label style={{ fontSize: 12, fontWeight: 700, color: '#374151', display: 'block', marginBottom: 6 }}>Reason *</label>
-                <select value={adjustReason} onChange={e => setAdjustReason(e.target.value)} style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1.5px solid #e5e7eb', fontSize: 14 }}>
-                  <option value="">— Select reason —</option>
-                  <option value="Entry Error">Entry Error (GRV or count was wrong)</option>
-                  <option value="Count Correction">Physical count correction</option>
-                  <option value="Damaged">Damaged / unusable</option>
-                  <option value="Expired">Expired / thrown out</option>
-                  <option value="Theft">Theft / shrinkage</option>
-                  <option value="Internal Use">Internal use / staff meal</option>
-                  <option value="Transfer">Transfer to another location</option>
-                  <option value="Other">Other</option>
-                </select>
+              <p style={{ margin: '12px 0 0', fontSize: '12px', color: '#9ca3af', textAlign: 'center' }}>
+                Manage all categories in <a href="/settings" style={{ color: '#1a5c38' }}>Settings → Expense Categories</a>
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* GRV Modal */}
+      {showGRV && grvInvoice && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: '16px' }}>
+          <div style={{ background: '#fff', borderRadius: 16, width: '100%', maxWidth: 800, maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 24px 60px rgba(0,0,0,0.2)' }}>
+            <div style={{ padding: '20px 24px 16px', borderBottom: '1px solid #f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div>
+                <h2 style={{ margin: 0, fontSize: 18, fontWeight: 800 }}>📦 Receive Goods — {grvInvoice.supplier}</h2>
+                <p style={{ margin: '4px 0 0', fontSize: 13, color: '#6b7280' }}>Invoice {grvInvoice.invoice_number || 'n/a'} • {grvInvoice.invoice_date} • Enter quantities received</p>
               </div>
-              <div style={{ marginBottom: 20 }}>
-                <label style={{ fontSize: 12, fontWeight: 700, color: '#374151', display: 'block', marginBottom: 6 }}>Notes (optional)</label>
-                <input value={adjustNotes} onChange={e => setAdjustNotes(e.target.value)} placeholder="e.g. Pita bread GRV was entered twice" style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1.5px solid #e5e7eb', fontSize: 13 }} />
-              </div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button onClick={() => setAdjustItem(null)} style={{ flex: 1, padding: '11px', background: '#f3f4f6', color: '#374151', border: 'none', borderRadius: 10, fontWeight: 700, cursor: 'pointer' }}>Cancel</button>
-                <button onClick={saveAdjustment} disabled={adjusting || !adjustQty || !adjustReason} style={{ flex: 2, padding: '11px', background: (!adjustQty || !adjustReason) ? '#d1d5db' : '#7c3aed', color: '#fff', border: 'none', borderRadius: 10, fontWeight: 800, cursor: 'pointer', fontSize: 14 }}>{adjusting ? 'Saving…' : '✓ Apply Adjustment'}</button>
-              </div>
-              {adjustHistory.length > 0 && (
-                <div style={{ marginTop: 20, borderTop: '1px solid #f0f0f0', paddingTop: 14 }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', marginBottom: 8 }}>Recent adjustments</div>
-                  {adjustHistory.map(h => (
-                    <div key={h.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid #f9fafb', fontSize: 12 }}>
-                      <div>
-                        <span style={{ color: h.adjustment >= 0 ? '#16a34a' : '#dc2626', fontWeight: 700 }}>{h.adjustment >= 0 ? '+' : ''}{Number(h.adjustment).toFixed(3)} {h.unit}</span>
-                        <span style={{ color: '#6b7280', marginLeft: 8 }}>{h.reason}</span>
-                        {h.notes && <span style={{ color: '#9ca3af', marginLeft: 8 }}>— {h.notes}</span>}
-                      </div>
-                      <span style={{ color: '#9ca3af' }}>{new Date(h.created_at).toLocaleDateString('en-ZA')}</span>
+              <button onClick={() => setShowGRV(false)} style={{ background: '#f3f4f6', border: 'none', borderRadius: 8, width: 32, height: 32, cursor: 'pointer', fontSize: 16 }}>✕</button>
+            </div>
+            <div style={{ padding: '16px 24px' }}>
+              {grvLines.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: 40, color: '#6b7280' }}>
+                  <div style={{ fontSize: 36, marginBottom: 8 }}>📦</div>
+                  <p>No stock items found for <strong>{grvInvoice.supplier}</strong>.</p>
+                  <p style={{ fontSize: 13 }}>Go to Stock Items tab and assign items to this supplier first.</p>
+                </div>
+              ) : (
+                <>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1.7fr 65px 65px 75px 70px 80px 90px', gap: 6, marginBottom: 4, fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase' as const }}>
+                    <div>Item</div><div style={{textAlign:'center'}}>Cases</div><div style={{textAlign:'center'}}>Kg/Case</div><div>Case Price</div><div style={{textAlign:'center'}}>→ Qty</div><div>→ R/unit</div><div></div>
+                  </div>
+                  <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 8 }}>For case/box items: fill in Cases, Kg per Case, and Case Price — Qty and R/unit will work out automatically. For simple items, just type Qty and R/unit directly.</div>
+                  <div style={{ maxHeight: 420, overflowY: 'auto' }}>
+                    {grvLines.map((line, i) => {
+                       // Catch weight: stock tracked in "each" but received/priced by kg
+                       // e.g. Chicken - bought 141.46 kg at R38.70/kg, but you received 100 birds
+                       const isCatchWeight = ['each','unit','units','pcs','pieces'].includes((line.unit||'').toLowerCase())
+                         && (line.case_qty === '' && parseFloat(line.qty_received) > 0 && parseFloat(line.qty_received) !== Math.round(parseFloat(line.qty_received)))
+                       return (
+                       <div key={line.stock_item_id} style={{ borderTop: '1px solid #f3f4f6', padding: '10px 0' }}>
+                         <div style={{ display: 'grid', gridTemplateColumns: '1.7fr 65px 65px 75px 70px 80px 90px', gap: 6, alignItems: 'center' }}>
+                           <div>
+                             <div style={{ fontWeight: 600, fontSize: 14 }}>{line.description}</div>
+                             <div style={{ fontSize: 12, color: '#6b7280' }}>{line.unit}</div>
+                           </div>
+                           <input type="number" step="1" min="0" placeholder="n/a"
+                             value={line.case_qty}
+                             onChange={e => setGrvLines(ls => ls.map((l,idx) => idx===i ? recalcGrvCase({ ...l, case_qty: e.target.value }) : l))}
+                             title="Number of cases/boxes received"
+                             style={{ width: '100%', padding: '6px 6px', border: '1.5px solid #fde68a', borderRadius: 8, fontSize: 13, outline: 'none', background: '#fefce8', textAlign: 'center' as const }} />
+                           <input type="number" step="0.1" min="0" placeholder="n/a"
+                             value={line.units_per_case}
+                             onChange={e => setGrvLines(ls => ls.map((l,idx) => idx===i ? recalcGrvCase({ ...l, units_per_case: e.target.value }) : l))}
+                             title="Kg (or units) per case/box"
+                             style={{ width: '100%', padding: '6px 6px', border: '1.5px solid #fde68a', borderRadius: 8, fontSize: 13, outline: 'none', background: '#fefce8', textAlign: 'center' as const }} />
+                           <input type="number" step="0.01" min="0" placeholder="R / case"
+                             value={line.case_price}
+                             onChange={e => setGrvLines(ls => ls.map((l,idx) => idx===i ? recalcGrvCase({ ...l, case_price: e.target.value }) : l))}
+                             title="Total price paid for one case/box"
+                             style={{ width: '100%', padding: '6px 6px', border: '1.5px solid #fde68a', borderRadius: 8, fontSize: 13, outline: 'none', background: '#fefce8' }} />
+                           <input type="number" step="0.1" min="0" placeholder="0"
+                             value={line.qty_received}
+                             onChange={e => setGrvLines(ls => ls.map((l,idx) => idx===i ? {...l, qty_received: e.target.value} : l))}
+                             title="Quantity that goes onto your stock sheet n/a for catch weight items, enter number of UNITS (birds/pieces), not kg"
+                             style={{ padding: '6px 6px', border: `1.5px solid ${parseFloat(line.qty_received) > 0 ? '#16a34a' : '#e5e7eb'}`, borderRadius: 8, fontSize: 14, textAlign: 'center' as const, outline: 'none', background: parseFloat(line.qty_received) > 0 ? '#f0fdf4' : '#fff' }} />
+                           <input type="number" step="0.01" min="0" placeholder="unit cost"
+                             value={line.unit_cost}
+                             onChange={e => setGrvLines(ls => ls.map((l,idx) => idx===i ? {...l, unit_cost: e.target.value} : l))}
+                             title="Cost per unit on your stock sheet"
+                             style={{ padding: '6px 6px', border: '1.5px solid #e5e7eb', borderRadius: 8, fontSize: 13, outline: 'none' }} />
+                           {parseFloat(line.unit_cost) > 0 ? (
+                             <button onClick={async () => {
+                               const { createClient } = await import('@supabase/supabase-js')
+                               const sb = createClient('https://fdixocuxhpafxkfytvxu.supabase.co', process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '')
+                               await sb.from('stock_items').update({ price: parseFloat(line.unit_cost), cost_price: parseFloat(line.unit_cost) }).eq('id', line.stock_item_id)
+                               setGrvLines(ls => ls.map((l,idx) => idx===i ? {...l, price_updated: true} : l))
+                               alert('Stock price updated to R' + parseFloat(line.unit_cost).toFixed(4) + ' per ' + line.unit)
+                             }} style={{ background: line.price_updated ? '#1d4ed8' : '#1a5c38', color: 'white', border: 'none', borderRadius: 8, padding: '6px 8px', fontSize: 11, cursor: 'pointer', fontWeight: 700, transition: 'background 0.3s' }}>
+                               {line.price_updated ? '✓ Updated' : 'Update price'}
+                             </button>
+                           ) : <div />}
+                         </div>
+                         {/* Catch weight toggle button n/a shown on any "each" item */}
+                         {['each','unit','units','pcs'].includes((line.unit||'').toLowerCase()) && (
+                           <button
+                             onClick={() => setGrvLines(ls => ls.map((l,idx) => idx===i ? {...l, is_catch_weight: !l.is_catch_weight} : l))}
+                             style={{ marginTop: 6, fontSize: 11, fontWeight: 700, color: line.is_catch_weight ? '#92400e' : '#6b7280', background: line.is_catch_weight ? '#fef9c3' : '#f9fafb', border: `1px solid ${line.is_catch_weight ? '#fde68a' : '#e5e7eb'}`, borderRadius: 6, padding: '3px 10px', cursor: 'pointer' }}
+                             title="Toggle catch weight mode n/a use when item is bought by kg but counted by unit (e.g. whole chickens)"
+                           >
+                             ⚖️ {line.is_catch_weight ? 'Catch weight ON' : 'Catch weight?'}
+                           </button>
+                         )}
+                         {/* Catch weight helper panel n/a only when toggled on */}
+                         {line.is_catch_weight && (
+                           <div style={{ marginTop: 8, background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, padding: '10px 12px' }}>
+                             <div style={{ fontSize: 12, fontWeight: 700, color: '#92400e', marginBottom: 6 }}>
+                               ⚖️ Catch Weight {'—'} stock tracked in <strong>{line.unit}</strong>
+                             </div>
+                             <div style={{ fontSize: 12, color: '#78350f', marginBottom: 8 }}>
+                               Invoice shows <strong>{line.qty_received} {line.unit}s</strong> at <strong>R{parseFloat(line.catch_rpu||line.unit_cost||'0').toFixed(2)}/{line.unit}</strong>.
+                               Weigh the delivery, enter total KG and number of {line.unit}s to calculate the true cost per {line.unit}.
+                              </div>
+                              <div style={{ background: "#fff8ec", border: "1px solid #f59e0b", borderRadius: 8, padding: "10px 12px", fontSize: 13 }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                                  <div>
+                                    <div style={{ fontSize: 11, color: "#92400e", marginBottom: 3 }}>Total KG received</div>
+                                    <input type="number" step="0.01" placeholder="kg"
+                                      defaultValue={line.catch_kg ?? line.qty_received}
+                                      onChange={e => {
+                                        const kg = parseFloat(e.target.value) || 0
+                                        const rpu = parseFloat((line as any).catch_rpu || line.unit_cost || "0")
+                                        const u = parseFloat((line as any).catch_units || "0")
+                                        const cpu = (u > 0 && kg > 0 && rpu > 0) ? ((kg / u) * rpu) : 0
+                                        setGrvLines(ls => ls.map((l2, idx) => idx === i ? { ...l2, catch_kg: String(kg), ...(cpu > 0 ? { qty_received: String(u), unit_cost: cpu.toFixed(4) } : {}) } : l2))
+                                      }}
+                                      style={{ width: 90, padding: "5px 8px", border: "1.5px solid #f59e0b", borderRadius: 6, fontSize: 13 }} />
+                                  </div>
+                                  <div style={{ color: "#92400e", fontWeight: 700, marginTop: 16 }}>divided by</div>
+                                  <div>
+                                    <div style={{ fontSize: 11, color: "#92400e", marginBottom: 3 }}>Num {line.unit}s received</div>
+                                    <input type="number" step="1" min="1" placeholder="e.g. 200"
+                                      defaultValue={(line as any).catch_units ?? ""}
+                                      onChange={e => {
+                                        const u = parseFloat(e.target.value) || 0
+                                        const kg = parseFloat((line as any).catch_kg || line.qty_received || "0")
+                                        const rpu = parseFloat((line as any).catch_rpu || line.unit_cost || "0")
+                                        const cpu = (u > 0 && kg > 0 && rpu > 0) ? ((kg / u) * rpu) : 0
+                                        setGrvLines(ls => ls.map((l2, idx) => idx === i ? { ...l2, catch_units: String(u), qty_received: String(u), ...(cpu > 0 ? { unit_cost: cpu.toFixed(4) } : {}) } : l2))
+                                      }}
+                                      style={{ width: 80, padding: "5px 8px", border: "1.5px solid #f59e0b", borderRadius: 6, fontSize: 13 }} />
+                                  </div>
+                                  <div style={{ color: "#92400e", fontWeight: 700, marginTop: 16 }}>x</div>
+                                  <div>
+                                    <div style={{ fontSize: 11, color: "#92400e", marginBottom: 3 }}>Invoice R per {line.unit}</div>
+                                    <input type="number" step="0.01" placeholder="R/unit"
+                                      defaultValue={(line as any).catch_rpu ?? line.unit_cost}
+                                      onChange={e => {
+                                        const rpu = parseFloat(e.target.value) || 0
+                                        const kg = parseFloat((line as any).catch_kg || line.qty_received || "0")
+                                        const u = parseFloat((line as any).catch_units || "0")
+                                        const cpu = (u > 0 && kg > 0 && rpu > 0) ? ((kg / u) * rpu) : 0
+                                        setGrvLines(ls => ls.map((l2, idx) => idx === i ? { ...l2, catch_rpu: String(rpu), ...(cpu > 0 ? { unit_cost: cpu.toFixed(4) } : {}) } : l2))
+                                      }}
+                                      style={{ width: 90, padding: "5px 8px", border: "1.5px solid #f59e0b", borderRadius: 6, fontSize: 13 }} />
+                                  </div>
+                                  <div style={{ color: "#92400e", fontWeight: 700, marginTop: 16 }}>=</div>
+                                  <div>
+                                    <div style={{ fontSize: 11, color: "#92400e", marginBottom: 3 }}>Cost per {line.unit}</div>
+                                    <div style={{ padding: "6px 10px", background: "#1a5c38", color: "#fff", borderRadius: 6, fontSize: 14, fontWeight: 700, minWidth: 80 }}>
+                                      {parseFloat(line.unit_cost) > 0 ? ("R" + parseFloat(line.unit_cost).toFixed(2)) : "fill in fields"}
+                                    </div>
+                                  </div>
+                                </div>
+                                <div style={{ fontSize: 11, color: "#92400e", marginTop: 6 }}>
+                                  (Total KG received / Num units) x Invoice R per unit = Cost per {line.unit}
+                                </div>
+                              </div>
+                           </div>
+                         )}
+                       </div>
+                       )
+                    })}
+                  </div>
+                  <div style={{ borderTop: '2px solid #e5e7eb', marginTop: 16, paddingTop: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: 13, color: '#6b7280' }}>
+                      {grvLines.filter(l => parseFloat(l.qty_received) > 0).length} of {grvLines.length} items received
+                    </span>
+                    <div style={{ display: 'flex', gap: 10 }}>
+                      <button onClick={() => setShowGRV(false)} style={{ background: '#f3f4f6', color: '#374151', border: 'none', borderRadius: 10, padding: '10px 18px', cursor: 'pointer', fontWeight: 700 }}>Cancel</button>
+                      <button onClick={saveGRV} disabled={savingGRV}
+                        style={{ background: '#1a5c38', color: '#fff', border: 'none', borderRadius: 10, padding: '10px 18px', cursor: 'pointer', fontWeight: 700, fontSize: 14 }}>
+                        {savingGRV ? 'Saving...' : '✓ Confirm Receipt & Update Stock'}
+                      </button>
                     </div>
-                  ))}
-                </div>
+                  </div>
+                </>
               )}
             </div>
           </div>
         </div>
       )}
-      {pinModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={() => setPinModal(null)}>
-          <div style={{ background: '#fff', borderRadius: 20, padding: 32, width: 340, textAlign: 'center' }} onClick={e => e.stopPropagation()}>
-            <div style={{ fontSize: 36, marginBottom: 8 }}>{pinModal.mode === 'override' ? '🔒' : '🔑'}</div>
-            <div style={{ fontWeight: 800, fontSize: 18, marginBottom: 8, color: pinModal.mode === 'override' ? '#dc2626' : '#111' }}>
-              {pinModal.mode === 'override' ? 'Manager PIN Required' : 'Enter Your PIN'}
+
+      {showScanChoice && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000, padding: 20 }} onClick={() => setShowScanChoice(false)}>
+          <div style={{ background: '#fff', borderRadius: 20, padding: 32, width: 440, maxWidth: '100%' }} onClick={e => e.stopPropagation()}>
+            <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 6 }}>📷 Scan Invoice</div>
+
+            {/* Step 1 n/a Supplier selection */}
+            <div style={{ marginBottom: 20 }}>
+              <label style={{ fontSize: 13, fontWeight: 700, color: '#374151', display: 'block', marginBottom: 6 }}>
+                1. Which supplier is this invoice from?
+              </label>
+              <select
+                value={scanSupplier}
+                onChange={e => {
+                  const val = e.target.value
+                  setScanSupplier(val)
+                  scanSupplierRef.current = val
+                  if (val && val !== '__other__') {
+                    const sup = suppliers.find(s => s.name === val)
+                    // Open the invoice form immediately and set supplier + payment terms
+                    setShowInvForm(true)
+                    setInvForm(f => ({
+                      ...f,
+                      supplier: val,
+                      // Auto-set due date if invoice date is already filled
+                      due_date: sup && f.invoice_date ? addDays(f.invoice_date, sup.payment_terms_days ?? 7) : f.due_date,
+                    }))
+                  } else if (val === '__other__') {
+                    setInvForm(f => ({ ...f, supplier: '' }))
+                  }
+                }}
+                style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: `2px solid ${scanSupplier ? '#1a5c38' : '#e5e7eb'}`, fontSize: 14, background: '#fff' }}
+                autoFocus
+              >
+                <option value="">n/a Select supplier first n/a</option>
+                {suppliers.map(s => <option key={s.id} value={s.name}>{s.name}{s.invoice_columns?.length ? ' ✓' : ''}</option>)}
+                <option value="__other__">Other / Unknown</option>
+              </select>
+              {scanSupplier && scanSupplier !== '__other__' && (() => {
+                const sup = suppliers.find(s => s.name === scanSupplier)
+                const priceCol = sup?.invoice_columns?.find(c => c.maps_to === 'unit_price_excl')
+                return sup?.invoice_columns?.length ? (
+                  <div style={{ fontSize: 12, color: '#16a34a', marginTop: 6, background: '#f0fdf4', borderRadius: 6, padding: '5px 10px' }}>
+                    ✓ {sup.invoice_columns.length}-column template loaded{priceCol?.name ? ` — price from "${priceCol.name}" column` : ''}
+                  </div>
+                ) : (
+                  <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 6 }}>
+                    No column template set for this supplier — AI will use general rules. Set one in Stock → Suppliers → Edit.
+                  </div>
+                )
+              })()}
             </div>
-            <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 20 }}>
-              {pinModal.mode === 'override' ? 'Stock will go negative. Enter a Manager or Franchisee PIN to override.' : 'Enter your 4-digit PIN to record this issue.'}
+
+            {/* Step 2 n/a Scan method */}
+            <label style={{ fontSize: 13, fontWeight: 700, color: '#374151', display: 'block', marginBottom: 8 }}>2. How do you want to capture it?</label>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <button
+                onClick={() => {
+                  if (scanSupplierRef.current && scanSupplierRef.current !== '__other__') setInvForm(f => ({ ...f, supplier: scanSupplierRef.current }))
+                  setShowScanChoice(false)
+                  fileInputRef.current?.click()
+                }}
+                disabled={!scanSupplier}
+                style={{ display: 'flex', alignItems: 'center', gap: 16, background: scanSupplier ? '#f8faf8' : '#f3f4f6', border: `1.5px solid ${scanSupplier ? '#e5e7eb' : '#f0f0f0'}`, borderRadius: 14, padding: '14px 18px', cursor: scanSupplier ? 'pointer' : 'not-allowed', textAlign: 'left', width: '100%', opacity: scanSupplier ? 1 : 0.5 }}
+              >
+                <span style={{ fontSize: 28 }}>🖥️</span>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 14, color: '#111' }}>Upload from PC / Drive</div>
+                  <div style={{ fontSize: 12, color: '#888', marginTop: 1 }}>Pick a photo or PDF from your computer</div>
+                </div>
+              </button>
+
+              <button
+                onClick={() => {
+                  if (scanSupplierRef.current && scanSupplierRef.current !== '__other__') setInvForm(f => ({ ...f, supplier: scanSupplierRef.current }))
+                  startDeviceScan()
+                }}
+                disabled={!scanSupplier}
+                style={{ display: 'flex', alignItems: 'center', gap: 16, background: scanSupplier ? '#eff6ff' : '#f3f4f6', border: `1.5px solid ${scanSupplier ? '#bfdbfe' : '#f0f0f0'}`, borderRadius: 14, padding: '14px 18px', cursor: scanSupplier ? 'pointer' : 'not-allowed', textAlign: 'left', width: '100%', opacity: scanSupplier ? 1 : 0.5 }}
+              >
+                <span style={{ fontSize: 28 }}>📱</span>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 14, color: '#1d4ed8' }}>Photo Scan from Device</div>
+                  <div style={{ fontSize: 12, color: '#3b82f6', marginTop: 1 }}>Take a photo with your phone n/a appears here in seconds</div>
+                </div>
+              </button>
             </div>
-            <input type="password" maxLength={4} value={pinInput} autoFocus
-              onChange={e => setPinInput(e.target.value.replace(/[^0-9]/g, ''))}
-              placeholder="● ● ● ●"
-              style={{ width: '100%', textAlign: 'center', fontSize: 28, letterSpacing: 12, padding: '12px', border: `2px solid ${pinError ? '#dc2626' : '#e5e7eb'}`, borderRadius: 12, outline: 'none', boxSizing: 'border-box' as const, marginBottom: 8 }} />
-            {pinError && <div style={{ color: '#dc2626', fontSize: 13, marginBottom: 8 }}>{pinError}</div>}
-            <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
-              <button onClick={() => setPinModal(null)} style={{ flex: 1, padding: '12px', background: '#f3f4f6', border: 'none', borderRadius: 10, fontWeight: 700, cursor: 'pointer' }}>Cancel</button>
-              <button onClick={async () => {
-                if (pinInput.length !== 4) { setPinError('Enter your 4-digit PIN'); return }
-                const ok = await verifyPin(pinInput, pinModal.mode === 'override')
-                if (!ok) { setPinError(pinModal.mode === 'override' ? 'Manager or Franchisee PIN required' : 'Incorrect PIN'); setPinInput(''); return }
-                pinModal.onSuccess()
-              }} style={{ flex: 1, padding: '12px', background: '#1a5c38', color: '#fff', border: 'none', borderRadius: 10, fontWeight: 700, cursor: 'pointer' }}>Confirm</button>
-            </div>
+
+            <button onClick={() => setShowScanChoice(false)} style={{ marginTop: 16, width: '100%', padding: '10px', background: '#f3f4f6', color: '#374151', border: 'none', borderRadius: 10, fontWeight: 600, cursor: 'pointer', fontSize: 14 }}>Cancel</button>
           </div>
         </div>
       )}
+
     </div>
   )
 }
