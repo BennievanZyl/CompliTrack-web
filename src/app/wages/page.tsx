@@ -1,1337 +1,1078 @@
-'use client';
+'use client'
 import { useStoreContext } from '@/lib/store-context'
 
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabase';
+import { useState, useEffect } from 'react'
+import { supabase } from '@/lib/supabase'
+import { useRouter } from 'next/navigation'
 
-const PRIMARY = '#1a5c38';
-const DARK = '#0a1f12';
-const EMPLOYER_NAME = 'Mochachos Hartswater (Pty) Ltd';
+type Employee = { id: string; full_name: string; role: string }
+type EmployeeWage = { id: string; employee_id: string; hourly_rate: number; uif_employee: number; uif_employer: number; tax_rate: number; pay_frequency: string; bank_name?: string; bank_account?: string; bank_branch?: string; id_number?: string }
+type PayrollPeriod = { id: string; period_start: string; period_end: string; pay_frequency: string; status: string }
+type PayrollRun = { id: string; payroll_period_id: string; employee_id: string; hours_worked: number; hourly_rate: number; gross_pay: number; uif_employee: number; uif_employer: number; paye_tax: number; advances_deducted: number; savings_deducted: number; net_pay: number; status: string; normal_hours?: number; sunday_hours?: number; holiday_hours?: number; night_hours?: number }
+type EmployeeAdvance = { id: string; employee_id: string; amount: number; reason?: string; advance_date: string; repayment_status: string; deduct_from_wages: boolean }
+type EmployeeSavings = { id: string; employee_id: string; store_id: string; deduction_per_payroll: number; balance: number }
 
-type Employee = { id: string; full_name: string; role: string; is_active: boolean; hourly_rate: number | null; pay_frequency: string | null; night_allowance_rate: number | null; phone: string | null; id_number: string | null };
-type AttendanceRecord = { id: string; employee_id: string; work_date: string; clock_in: string | null; clock_out: string | null; hours_worked: number | null; is_late: boolean; notes: string | null };
-type Shift = { id: string; shift_name: string; day_type: string; start_time: string; end_time: string; is_active: boolean };
-type Leave = { id: string; employee_id: string; leave_type: string; start_date: string; end_date: string; days_taken: number; status: string; reason: string | null; paid_hours_per_day: number | null };
-type Advance = { id: string; employee_id: string; amount: number; advance_date: string; repayment_status: string; deduct_from_wages: boolean; reason: string | null };
-type Holiday = { id: string; holiday_date: string; name: string };
-type EmployeeSavings = { id: string; employee_id: string; store_id: string; deduction_per_payroll: number; balance: number };
-type WagePayment = { id: string; employee_id: string; period: string; paid_date: string; net_pay: number; payment_method: string | null };
-type PayrollSettings = { sunday_multiplier: number; holiday_multiplier: number; overtime_multiplier: number; weekly_ot_threshold: number; monthly_ot_threshold: number; night_allowance_start_hour: number; default_night_rate: number; uif_employee_rate: number; uif_employer_rate: number; uif_ceiling: number; uif_reference_number: string };
+const TAB_STYLE = (active: boolean) => ({ padding: '10px 20px', borderRadius: '10px', fontSize: '13px', fontWeight: '700', cursor: 'pointer', border: 'none', background: active ? '#1a5c38' : 'transparent', color: active ? '#fff' : '#6b7280' })
+const INPUT_STYLE = { width: '100%', border: '1.5px solid #e5e7eb', borderRadius: '10px', padding: '10px 12px', fontSize: '14px', outline: 'none', boxSizing: 'border-box' as const }
+const LABEL_STYLE = { display: 'block', fontSize: '12px', fontWeight: '700', color: '#374151', marginBottom: '6px', textTransform: 'uppercase' as const, letterSpacing: '0.5px' }
 
-const ROLE_COLORS: Record<string, { bg: string; color: string }> = {
-  'Store Manager': { bg: '#e8f5e9', color: PRIMARY },
-  'Assistant Manager': { bg: '#e3f2fd', color: '#1565c0' },
-  'Cashier': { bg: '#fff8e1', color: '#f57f17' },
-  'Kitchen Staff': { bg: '#fce4ec', color: '#c62828' },
-  'Driver': { bg: '#f3e5f5', color: '#6a1b9a' },
-  'Cleaner': { bg: '#e0f2f1', color: '#00695c' },
-  'Security': { bg: '#fbe9e7', color: '#bf360c' },
-  'Other': { bg: '#f5f5f5', color: '#424242' },
-};
+function formatCurrency(val: number) { return `R ${val.toFixed(2)}` }
+function formatHours(val: number) { return `${Math.floor(val)}h ${Math.round((val % 1) * 60)}m` }
 
-function initials(name: string) { return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2); }
-function todayDayType() { const d = new Date().getDay(); return d === 6 ? 'saturday' : d === 0 ? 'sunday' : 'weekday'; }
-function formatHM(decimalHours: number | null | undefined) {
-  if (!decimalHours) return '0h 0m';
-  const totalMinutes = Math.round(decimalHours * 60);
-  const h = Math.floor(totalMinutes / 60);
-  const m = totalMinutes % 60;
-  return `${h}h ${m}m`;
-}
+export default function WagesPage() {
+  const { storeId: STORE_ID, ready: ctxReady } = useStoreContext()
+  const router = useRouter()
+  const [tab, setTab] = useState<'payroll' | 'advances' | 'savings' | 'settings'>('payroll')
+  const [employees, setEmployees] = useState<Employee[]>([])
+  const [wages, setWages] = useState<EmployeeWage[]>([])
+  const [periods, setPeriods] = useState<PayrollPeriod[]>([])
+  const [runs, setRuns] = useState<PayrollRun[]>([])
+  const [advances, setAdvances] = useState<EmployeeAdvance[]>([])
+  const [savings, setSavings] = useState<EmployeeSavings[]>([])
+  const [savingsEditId, setSavingsEditId] = useState<string | null>(null)
+  const [savingsInput, setSavingsInput] = useState('')
+  const [withdrawId, setWithdrawId] = useState<string | null>(null)
+  const [withdrawInput, setWithdrawInput] = useState('')
+  const [withdrawDate, setWithdrawDate] = useState(new Date().toISOString().split('T')[0])
+  const [withdrawNotes, setWithdrawNotes] = useState('')
+  const [historyId, setHistoryId] = useState<string | null>(null)
+  const [ledger, setLedger] = useState<{ id: string; amount: number; transaction_type: string; notes?: string; created_at: string }[]>([])
+  const [ledgerLoading, setLedgerLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [selectedPeriod, setSelectedPeriod] = useState<PayrollPeriod | null>(null)
+  const [showNewPeriod, setShowNewPeriod] = useState(false)
+  const [showAdvanceModal, setShowAdvanceModal] = useState(false)
+  const [advanceMonth, setAdvanceMonth] = useState(() => new Date().toISOString().slice(0, 7))
+  const [showWageModal, setShowWageModal] = useState(false)
+  const [showSlip, setShowSlip] = useState<PayrollRun | null>(null)
+  const [slipBreakdown, setSlipBreakdown] = useState<{
+    normalHours: number; normalPay: number;
+    sundayHours: number; sundayPay: number;
+    holidayHours: number; holidayPay: number;
+    nightHours: number; nightPay: number;
+    overtimeHours: number; overtimePay: number;
+  } | null>(null)
+  const [calculating, setCalculating] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [periodForm, setPeriodForm] = useState({ period_start: '', period_end: '', pay_frequency: 'monthly' })
+  const [advanceForm, setAdvanceForm] = useState({ employee_id: '', amount: '', reason: '', advance_date: new Date().toISOString().split('T')[0] })
+  const [wageForm, setWageForm] = useState({ employee_id: '', hourly_rate: '', night_allowance_rate: '', uif_employee: '0.01', uif_employer: '0.01', tax_rate: '0', pay_frequency: 'monthly', bank_name: '', bank_account: '', bank_branch: '', id_number: '' })
 
-function ModalWrap({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
-  return (
-    <div style={{ position: 'fixed' as const, inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-      <div style={{ background: '#fff', borderRadius: 20, padding: 32, width: '100%', maxWidth: 500, maxHeight: '90vh', overflowY: 'auto' as const }}>{children}</div>
-    </div>
-  );
-}
+  useEffect(() => { if (ctxReady && STORE_ID) loadAll() }, [ctxReady, STORE_ID])
 
-export default function AttendancePage() {
-  const { storeId: STORE_ID, orgId: ORG_ID, ready: ctxReady } = useStoreContext()
-  const router = useRouter();
-  const [employees, setEmployees] = useState<Employee[]>([]);
-  const [todayRecords, setTodayRecords] = useState<AttendanceRecord[]>([]);
-  const [shifts, setShifts] = useState<Shift[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'today' | 'history' | 'shifts' | 'payroll'>('today');
-  const [historyRecords, setHistoryRecords] = useState<AttendanceRecord[]>([]);
-  const [historyLoading, setHistoryLoading] = useState(false);
-  const [selectedEmployee, setSelectedEmployee] = useState<string>('all');
-  const [saving, setSaving] = useState<string | null>(null);
-  const [showShiftModal, setShowShiftModal] = useState(false);
-  const [editShift, setEditShift] = useState<Shift | null>(null);
-  const [shiftForm, setShiftForm] = useState({ shift_name: '', day_type: 'weekday', start_time: '10:00', end_time: '15:00' });
-  const [shiftSaving, setShiftSaving] = useState(false);
-  const [showManualModal, setShowManualModal] = useState(false);
-  const [manualForm, setManualForm] = useState({ employee_id: '', clock_in: '', clock_out: '', is_late: false, notes: '' });
-
-  // Payroll
-  const [payrollMonth, setPayrollMonth] = useState(() => new Date().toISOString().slice(0, 7));
-  const [monthAttendance, setMonthAttendance] = useState<AttendanceRecord[]>([]);
-  const [monthLeave, setMonthLeave] = useState<Leave[]>([]);
-  const [advances, setAdvances] = useState<Advance[]>([]);
-  const [savings, setSavings] = useState<EmployeeSavings[]>([]);
-  const [holidays, setHolidays] = useState<Holiday[]>([]);
-  const [wagePayments, setWagePayments] = useState<WagePayment[]>([]);
-  const [showPayModal, setShowPayModal] = useState(false);
-  const [payForm, setPayForm] = useState({ paid_date: new Date().toISOString().split('T')[0], payment_method: 'Cash' });
-  const [paying, setPaying] = useState(false);
-  const [payrollSettings, setPayrollSettings] = useState<PayrollSettings>({ sunday_multiplier: 1.5, holiday_multiplier: 2, overtime_multiplier: 1.5, weekly_ot_threshold: 45, monthly_ot_threshold: 195, night_allowance_start_hour: 18, default_night_rate: 0.5, uif_employee_rate: 1, uif_employer_rate: 1, uif_ceiling: 17712, uif_reference_number: '' });
-  const [payrollLoaded, setPayrollLoaded] = useState(false);
-  const [selectedPayrollEmployee, setSelectedPayrollEmployee] = useState<Employee | null>(null);
-  const [editingRate, setEditingRate] = useState<string | null>(null);
-  const [rateInput, setRateInput] = useState('');
-  const [nightRateInput, setNightRateInput] = useState('');
-  const [excludedFromPayroll, setExcludedFromPayroll] = useState<Set<string>>(new Set());
-  const togglePayrollExclusion = (empId: string) => setExcludedFromPayroll(prev => { const next = new Set(prev); next.has(empId) ? next.delete(empId) : next.add(empId); return next; });
-  const [payFreqInput, setPayFreqInput] = useState('monthly');
-  const [showLeaveModal, setShowLeaveModal] = useState(false);
-  const [leaveForm, setLeaveForm] = useState({ leave_type: 'Sick', start_date: '', end_date: '', days_taken: '1', status: 'approved', reason: '', paid_hours_per_day: '' });
-  const [showSettingsModal, setShowSettingsModal] = useState(false);
-  const [settingsForm, setSettingsForm] = useState({ sunday_multiplier: '1.5', holiday_multiplier: '2', overtime_multiplier: '1.5', weekly_ot_threshold: '45', monthly_ot_threshold: '195', night_allowance_start_hour: '18', default_night_rate: '0.5', uif_employee_rate: '1', uif_employer_rate: '1', uif_ceiling: '17712', uif_reference_number: '' });
-
-  async function loadPayrollData() {
-    const [py, pm] = payrollMonth.split('-').map(Number);
-    const monthEnd = `${payrollMonth}-${String(new Date(py, pm, 0).getDate()).padStart(2, '0')}`;
-
-    // Always reload employees fresh to get latest hourly_rate and night_allowance_rate from wages settings
-    const empRes = await supabase.from('employees')
-      .select('id, full_name, role, is_active, hourly_rate, night_allowance_rate, pay_frequency, phone, id_number')
-      .eq('store_id', STORE_ID).eq('is_active', true).order('full_name');
-    if (empRes.data) setEmployees(empRes.data);
-
-    const [attRes, leaveRes, advRes, holRes, setRes, payRes, savRes] = await Promise.all([
-      supabase.from('attendance').select('*').eq('store_id', STORE_ID)
-        .gte('work_date', payrollMonth + '-01').lte('work_date', monthEnd),
-      supabase.from('employee_leave').select('*').eq('store_id', STORE_ID)
-        .lte('start_date', monthEnd).gte('end_date', payrollMonth + '-01'),
+  async function loadAll() {
+    setLoading(true)
+    const [empRes, wageRes, periodRes, runRes, advRes, savRes] = await Promise.all([
+      supabase.from('employees').select('id, full_name, role, hourly_rate, night_allowance_rate, pay_frequency, id_number').eq('store_id', STORE_ID).eq('is_active', true).order('full_name'),
+      supabase.from('employee_wages').select('*').eq('store_id', STORE_ID),
+      supabase.from('payroll_periods').select('*').eq('store_id', STORE_ID).order('period_start', { ascending: false }),
+      supabase.from('payroll_runs').select('*').eq('store_id', STORE_ID),
       supabase.from('employee_advances').select('*').eq('store_id', STORE_ID).order('advance_date', { ascending: false }),
-      supabase.from('public_holidays').select('*').eq('store_id', STORE_ID),
-      supabase.from('payroll_settings').select('*').eq('store_id', STORE_ID).maybeSingle(),
-      supabase.from('wage_payments').select('*').eq('store_id', STORE_ID).eq('period', payrollMonth),
       supabase.from('employee_savings').select('*').eq('store_id', STORE_ID),
-    ]);
-    setMonthAttendance(attRes.data || []);
-    setMonthLeave(leaveRes.data || []);
-    setAdvances(advRes.data || []);
-    setSavings(savRes.data || []);
-    setHolidays(holRes.data || []);
-    setWagePayments(payRes.data || []);
-    if (setRes.data) {
-      const s = setRes.data;
-      setPayrollSettings({
-        sunday_multiplier: s.sunday_multiplier ?? 1.5, holiday_multiplier: s.holiday_multiplier ?? 2,
-        overtime_multiplier: s.overtime_multiplier ?? 1.5, weekly_ot_threshold: s.weekly_ot_threshold ?? 45,
-        monthly_ot_threshold: s.monthly_ot_threshold ?? 195, night_allowance_start_hour: s.night_allowance_start_hour ?? 18,
-        default_night_rate: s.default_night_rate ?? 0.5,
-        uif_employee_rate: s.uif_employee_rate ?? 1, uif_employer_rate: s.uif_employer_rate ?? 1, uif_ceiling: s.uif_ceiling ?? 17712,
-        uif_reference_number: s.uif_reference_number ?? '',
-      });
-      setSettingsForm({
-        sunday_multiplier: String(s.sunday_multiplier ?? 1.5), holiday_multiplier: String(s.holiday_multiplier ?? 2),
-        overtime_multiplier: String(s.overtime_multiplier ?? 1.5), weekly_ot_threshold: String(s.weekly_ot_threshold ?? 45),
-        monthly_ot_threshold: String(s.monthly_ot_threshold ?? 195), night_allowance_start_hour: String(s.night_allowance_start_hour ?? 18),
-        default_night_rate: String(s.default_night_rate ?? 0.5),
-        uif_employee_rate: String(s.uif_employee_rate ?? 1), uif_employer_rate: String(s.uif_employer_rate ?? 1), uif_ceiling: String(s.uif_ceiling ?? 17712),
-        uif_reference_number: s.uif_reference_number || '',
-      });
-    }
-    setPayrollLoaded(true);
+    ])
+    setEmployees(empRes.data || [])
+    setWages(wageRes.data || [])
+    setPeriods(periodRes.data || [])
+    setRuns(runRes.data || [])
+    setAdvances(advRes.data || [])
+    setSavings(savRes.data || [])
+    if (periodRes.data?.length) setSelectedPeriod(periodRes.data[0])
+    setLoading(false)
   }
 
-  useEffect(() => { if (activeTab === 'payroll' && STORE_ID) loadPayrollData(); }, [activeTab, payrollMonth, STORE_ID]);
-
-  const holidaySet = new Set(holidays.map(h => h.holiday_date));
-  function dayMultiplier(dateStr: string) {
-    if (holidaySet.has(dateStr)) return { mult: payrollSettings.holiday_multiplier, label: holidays.find(h => h.holiday_date === dateStr)?.name || 'Public Holiday', type: 'holiday' as const };
-    const dow = new Date(dateStr + 'T00:00:00').getDay();
-    if (dow === 0) return { mult: payrollSettings.sunday_multiplier, label: 'Sunday', type: 'sunday' as const };
-    return { mult: 1, label: '', type: 'normal' as const };
+  async function createPeriod() {
+    if (!periodForm.period_start || !periodForm.period_end) return
+    setSaving(true)
+    const { data } = await supabase.from('payroll_periods').insert({ store_id: STORE_ID, ...periodForm, status: 'open' }).select().single()
+    if (data) { setSelectedPeriod(data); setShowNewPeriod(false); setPeriodForm({ period_start: '', period_end: '', pay_frequency: 'monthly' }) }
+    await loadAll()
+    setSaving(false)
   }
 
-  // Hours worked within the "night" window (e.g. after 18:00) for a single clock-in/out session.
-  // Assumes the session doesn't cross midnight — a session clocking out after midnight will only
-  // count night hours up to 24:00 of the clock-in day.
-  function nightHoursForSession(clockInIso: string, clockOutIso: string, startHour: number) {
-    const inDate = new Date(clockInIso);
-    const outDate = new Date(clockOutIso);
-    const nightStart = new Date(inDate); nightStart.setHours(startHour, 0, 0, 0);
-    const dayEnd = new Date(inDate); dayEnd.setHours(24, 0, 0, 0);
-    const overlapStart = Math.max(inDate.getTime(), nightStart.getTime());
-    const overlapEnd = Math.min(outDate.getTime(), dayEnd.getTime());
-    return overlapEnd > overlapStart ? (overlapEnd - overlapStart) / 3600000 : 0;
-  }
+  async function calculatePayroll() {
+    if (!selectedPeriod) return
+    setCalculating(true)
 
-  function buildRegisterDays(employeeId: string) {
-    const [y, m] = payrollMonth.split('-').map(Number);
-    const daysInMonth = new Date(y, m, 0).getDate();
-    const todayStr = new Date().toISOString().split('T')[0];
-    const isCurrentMonth = payrollMonth === todayStr.slice(0, 7);
-    const lastDay = isCurrentMonth ? new Date().getDate() : daysInMonth;
-    const rate = employees.find(e => e.id === employeeId)?.hourly_rate || 0;
-    const nightRate = employees.find(e => e.id === employeeId)?.night_allowance_rate || payrollSettings.default_night_rate;
-    const days = [];
-    for (let d = 1; d <= lastDay; d++) {
-      const dateStr = `${payrollMonth}-${String(d).padStart(2, '0')}`;
-      const sessions = monthAttendance.filter(r => r.employee_id === employeeId && r.work_date === dateStr);
-      const leave = monthLeave.find(l => l.employee_id === employeeId && dateStr >= l.start_date && dateStr <= l.end_date);
-      const { mult, label, type } = dayMultiplier(dateStr);
-      const hours = sessions.reduce((s, r) => s + (r.hours_worked || 0), 0);
-      const nightHours = sessions.reduce((s, r) => s + (r.clock_in && r.clock_out ? nightHoursForSession(r.clock_in, r.clock_out, payrollSettings.night_allowance_start_hour) : 0), 0);
-      const leaveHours = leave && leave.status === 'approved' && sessions.length === 0 ? (leave.paid_hours_per_day || 0) : 0;
-      const firstIn = sessions.length ? sessions.reduce((a, b) => (a.clock_in || '') < (b.clock_in || '') ? a : b).clock_in : null;
-      const lastSession = sessions.length ? sessions.reduce((a, b) => (a.clock_in || '') > (b.clock_in || '') ? a : b) : null;
-      const sessionRows = sessions
-        .slice()
-        .sort((a, b) => (a.clock_in || '').localeCompare(b.clock_in || ''))
-        .map(s => {
-          const sHours = s.hours_worked || 0;
-          const sNight = s.clock_in && s.clock_out ? nightHoursForSession(s.clock_in, s.clock_out, payrollSettings.night_allowance_start_hour) : 0;
-          return {
-            clockIn: s.clock_in, clockOut: s.clock_out, hours: sHours, nightHours: sNight,
-            isLate: s.is_late, isOpen: !!(s.clock_in && !s.clock_out),
-            pay: sHours * rate * mult + sNight * nightRate,
-          };
-        });
-      days.push({
-        date: dateStr,
-        dayName: new Date(dateStr + 'T00:00:00').toLocaleDateString('en-ZA', { weekday: 'short' }),
-        hours, mult, label, type, leave, leaveHours, nightHours,
-        sessionCount: sessions.length, sessions: sessionRows,
-        pay: sessions.length ? hours * rate * mult + nightHours * nightRate : leaveHours * rate,
-        clockIn: firstIn, clockOut: lastSession?.clock_out, isLate: sessions.some(r => r.is_late), isOpen: sessions.some(r => r.clock_in && !r.clock_out),
-      });
-    }
-    return days.reverse(); // most recent first
-  }
+    // Fetch public holidays for the period once (shared across all employees)
+    const { data: holidays } = await supabase
+      .from('public_holidays')
+      .select('holiday_date')
+      .gte('holiday_date', selectedPeriod.period_start)
+      .lte('holiday_date', selectedPeriod.period_end)
+    const holidaySet = new Set((holidays || []).map((h: any) => h.holiday_date))
 
-  // Per-employee totals for the selected month: ordinary pay, overtime, Sunday/holiday premiums,
-  // night allowance, and paid leave — all in one place so cards, the register drawer, and the
-  // payslip stay consistent.
-  function employeeMonthSummary(employeeId: string) {
-    const emp = employees.find(e => e.id === employeeId);
-    const rate = emp?.hourly_rate || 0;
-    const nightRate = emp?.night_allowance_rate || payrollSettings.default_night_rate;
-    const isWeeklyPaid = emp?.pay_frequency === 'weekly';
-    const days = buildRegisterDays(employeeId); // most-recent-first; fine, we don't depend on order below
+    for (const emp of employees) {
+      const wage = wages.find(w => w.employee_id === emp.id)
+      if (!wage) continue
 
-    let ordinaryHours = 0, sundayHours = 0, sundayPay = 0, holidayHours = 0, holidayPay = 0, nightHours = 0, nightPay = 0, leaveHours = 0, leavePay = 0;
-    const ordinaryByWeek: Record<string, number> = {}; // ISO week key -> hours, for weekly-paid OT
+      const { data: att } = await supabase
+        .from('attendance')
+        .select('work_date, hours_worked, clock_in, clock_out')
+        .eq('store_id', STORE_ID)
+        .eq('employee_id', emp.id)
+        .gte('work_date', selectedPeriod.period_start)
+        .lte('work_date', selectedPeriod.period_end)
+        .not('clock_out', 'is', null)
 
-    for (const day of days) {
-      nightHours += day.nightHours;
-      nightPay += day.nightHours * nightRate;
-      if (day.leave && day.sessionCount === 0) {
-        leaveHours += day.leaveHours;
-        leavePay += day.leaveHours * rate;
-        continue;
+      // Break hours into normal / Sunday / public holiday / night — same logic as the payslip breakdown
+      let normalH = 0, sunH = 0, holH = 0, nightH = 0
+      for (const r of (att || [])) {
+        const dow = new Date(r.work_date + 'T00:00:00').getDay()
+        const h = r.hours_worked || 0
+        if (holidaySet.has(r.work_date)) holH += h
+        else if (dow === 0) sunH += h
+        else normalH += h
+        // Night allowance: actual overlap with 18:00–06:00 SAST window (capped 2h/shift)
+        if (r.clock_in && r.clock_out) {
+          const toTs = (s: string) => {
+            // Handle "2026-09-30 13:00:00+00" (space) or ISO with T; ensure +HH → +HH:00
+            return new Date(s.replace(' ', 'T').replace(/([+-]\d{2})$/, '$1:00'))
+          }
+          const inTs = toTs(r.clock_in)
+          const outTs = toTs(r.clock_out)
+          if (!isNaN(inTs.getTime()) && !isNaN(outTs.getTime()) && outTs > inTs) {
+            const SAST_MS = 2 * 3600 * 1000 // UTC+2
+            const STEP_MS = 5 * 60 * 1000   // 5-min steps
+            let overlapH = 0
+            for (let t = inTs.getTime(); t < outTs.getTime(); t += STEP_MS) {
+              const stepEnd = Math.min(t + STEP_MS, outTs.getTime())
+              const midSAST = new Date((t + stepEnd) / 2 + SAST_MS)
+              const hh = midSAST.getUTCHours()
+              if (hh >= 18 || hh < 6) overlapH += (stepEnd - t) / 3600000
+            }
+            nightH += Math.min(overlapH, 2)
+          }
+        }
       }
-      if (day.type === 'sunday') {
-        sundayHours += day.hours;
-        sundayPay += day.hours * rate * day.mult;
-      } else if (day.type === 'holiday') {
-        holidayHours += day.hours;
-        holidayPay += day.hours * rate * day.mult;
+
+      const rate = wage.hourly_rate
+      const hours = normalH + sunH + holH
+      const gross = (normalH * rate) + (sunH * rate * 1.5) + (holH * rate * 2) + (nightH * 0.5)
+      const uif_emp = gross * wage.uif_employee
+      const uif_emr = gross * wage.uif_employer
+      const paye = gross * wage.tax_rate
+
+      // Only deduct advances marked as outstanding AND deduct_from_wages = true AND taken on/before period end
+      const empAdvances = advances.filter(a =>
+        a.employee_id === emp.id &&
+        a.repayment_status === 'outstanding' &&
+        a.deduct_from_wages === true &&
+        a.advance_date <= selectedPeriod.period_end
+      )
+      const advTotal = empAdvances.reduce((sum, a) => sum + a.amount, 0)
+      const empSaving = savings.find(s => s.employee_id === emp.id)
+      const savingsAmt = empSaving?.deduction_per_payroll || 0
+      const net = gross - uif_emp - paye - advTotal - savingsAmt
+
+      const breakdown = { normal_hours: normalH, sunday_hours: sunH, holiday_hours: holH, night_hours: nightH }
+      const existing = runs.find(r => r.payroll_period_id === selectedPeriod.id && r.employee_id === emp.id)
+      if (existing) {
+        await supabase.from('payroll_runs').update({
+          hours_worked: hours, hourly_rate: wage.hourly_rate, gross_pay: gross,
+          uif_employee: uif_emp, uif_employer: uif_emr, paye_tax: paye,
+          advances_deducted: advTotal, savings_deducted: savingsAmt, net_pay: net,
+          ...breakdown,
+        }).eq('id', existing.id)
       } else {
-        ordinaryHours += day.hours;
-        const dt = new Date(day.date + 'T00:00:00');
-        const isoWeekStart = new Date(dt); isoWeekStart.setDate(dt.getDate() - ((dt.getDay() + 6) % 7)); // Monday of that week
-        const weekKey = isoWeekStart.toISOString().split('T')[0];
-        ordinaryByWeek[weekKey] = (ordinaryByWeek[weekKey] || 0) + day.hours;
+        await supabase.from('payroll_runs').insert({
+          payroll_period_id: selectedPeriod.id, employee_id: emp.id, store_id: STORE_ID,
+          hours_worked: hours, hourly_rate: wage.hourly_rate, gross_pay: gross,
+          uif_employee: uif_emp, uif_employer: uif_emr, paye_tax: paye,
+          advances_deducted: advTotal, savings_deducted: savingsAmt, net_pay: net, status: 'draft',
+          ...breakdown,
+        })
+      }
+
+      // NOTE: advances are NOT marked paid here — only when "Mark as Paid" is clicked
+      // This allows re-calculation without incorrectly settling advances
+    }
+    await loadAll()
+    setCalculating(false)
+  }
+
+  async function approvePeriod() {
+    if (!selectedPeriod) return
+    await supabase.from('payroll_periods').update({ status: 'approved', approved_at: new Date().toISOString() }).eq('id', selectedPeriod.id)
+    await supabase.from('payroll_runs').update({ status: 'approved' }).eq('payroll_period_id', selectedPeriod.id)
+    await loadAll()
+  }
+
+  async function markPaid() {
+    if (!selectedPeriod) return
+    // Step 1: mark period and runs as paid
+    await supabase.from('payroll_periods').update({ status: 'paid', paid_at: new Date().toISOString() }).eq('id', selectedPeriod.id)
+    await supabase.from('payroll_runs').update({ status: 'paid' }).eq('payroll_period_id', selectedPeriod.id)
+
+    // Step 2: NOW mark deducted advances as paid (only on actual payment, not on calculate)
+    const runsForPeriod = runs.filter(r => r.payroll_period_id === selectedPeriod.id && r.advances_deducted > 0)
+    for (const run of runsForPeriod) {
+      const empAdvances = advances.filter(a =>
+        a.employee_id === run.employee_id &&
+        a.repayment_status === 'outstanding' &&
+        a.deduct_from_wages === true
+      )
+      for (const adv of empAdvances) {
+        await supabase.from('employee_advances').update({
+          repayment_status: 'paid',
+          payroll_period_id: selectedPeriod.id,
+        }).eq('id', adv.id)
       }
     }
 
-    // Work out overtime hours from the ordinary (non-Sunday/holiday) pool only — Sunday and
-    // holiday hours already carry their own premium so they're excluded from the OT threshold.
-    let otHours = 0;
-    if (isWeeklyPaid) {
-      for (const wk of Object.values(ordinaryByWeek)) {
-        if (wk > payrollSettings.weekly_ot_threshold) otHours += wk - payrollSettings.weekly_ot_threshold;
+    // Step 3: Update savings balances and record ledger entries
+    const savingsRuns = runs.filter(r => r.payroll_period_id === selectedPeriod.id && (r.savings_deducted || 0) > 0)
+    for (const run of savingsRuns) {
+      const empSaving = savings.find(s => s.employee_id === run.employee_id)
+      if (empSaving) {
+        const newBalance = empSaving.balance + (run.savings_deducted || 0)
+        await supabase.from('employee_savings').update({ balance: newBalance, updated_at: new Date().toISOString() }).eq('id', empSaving.id)
+        await supabase.from('employee_savings_ledger').insert({
+          employee_id: run.employee_id, store_id: STORE_ID,
+          amount: run.savings_deducted, transaction_type: 'payroll_deduction',
+          payroll_period_id: selectedPeriod.id,
+          notes: `Payroll deduction for ${selectedPeriod.period_start} – ${selectedPeriod.period_end}`,
+        })
       }
-    } else {
-      if (ordinaryHours > payrollSettings.monthly_ot_threshold) otHours = ordinaryHours - payrollSettings.monthly_ot_threshold;
     }
-    const normalHours = ordinaryHours - otHours;
-    const normalPay = normalHours * rate;
-    const otPay = otHours * rate * payrollSettings.overtime_multiplier;
-
-    const sundayHolidayHours = sundayHours + holidayHours;
-    const sundayHolidayPay = sundayPay + holidayPay;
-    const totalHours = ordinaryHours + sundayHolidayHours + leaveHours;
-    const totalPay = normalPay + otPay + sundayHolidayPay + nightPay + leavePay;
-    const uifBase = Math.min(totalPay, payrollSettings.uif_ceiling);
-    const uifEmployee = uifBase * (payrollSettings.uif_employee_rate / 100);
-    const uifEmployer = uifBase * (payrollSettings.uif_employer_rate / 100);
-    // Only count advances taken on or before the last day of the selected payroll month
-    const [py, pm] = payrollMonth.split('-').map(Number)
-    const periodEnd = new Date(py, pm, 0).toISOString().split('T')[0]
-    const outstandingAdvances = advances.filter(a => a.employee_id === employeeId && a.deduct_from_wages && a.repayment_status === 'outstanding' && a.advance_date <= periodEnd).reduce((s, a) => s + Number(a.amount), 0);
-    const empSaving = savings.find(s => s.employee_id === employeeId);
-    const savingsDeduction = empSaving?.deduction_per_payroll || 0;
-    return {
-      totalHours, totalPay, netPay: totalPay - outstandingAdvances - uifEmployee - savingsDeduction, outstandingAdvances, savingsDeduction, empSaving,
-      normalHours, normalPay, otHours, otPay,
-      sundayHours, sundayPay, holidayHours, holidayPay,
-      sundayHolidayHours, sundayHolidayPay,
-      nightHours, nightPay, leaveHours, leavePay, uifEmployee, uifEmployer,
-    };
-  }
-  async function saveHourlyRate(employeeId: string) {
-    const rate = parseFloat(rateInput) || 0;
-    // Update employees table (used by payroll calculations)
-    await supabase.from('employees').update({ hourly_rate: rate }).eq('id', employeeId);
-    // Also sync to employee_wages so Wages & Payroll page stays in sync
-    const { data: existingWage } = await supabase.from('employee_wages')
-      .select('id').eq('employee_id', employeeId).maybeSingle();
-    if (existingWage) {
-      await supabase.from('employee_wages').update({ hourly_rate: rate }).eq('id', existingWage.id);
-    } else {
-      await supabase.from('employee_wages').insert({ employee_id: employeeId, store_id: STORE_ID, hourly_rate: rate });
-    }
-    setEditingRate(null);
-    await loadEmployees();
+    await loadAll()
   }
 
-  async function saveNightRate(employeeId: string, value: string) {
-    const rate = parseFloat(value) || 0;
-    await supabase.from('employees').update({ night_allowance_rate: rate }).eq('id', employeeId);
-    await loadEmployees();
-  }
-
-  async function savePayFrequency(employeeId: string, value: string) {
-    await supabase.from('employees').update({ pay_frequency: value }).eq('id', employeeId);
-    await loadEmployees();
-  }
-
-  async function savePayrollSettings() {
-    const payload = {
+  async function saveAdvance() {
+    if (!advanceForm.employee_id || !advanceForm.amount) return
+    setSaving(true)
+    await supabase.from('employee_advances').insert({
       store_id: STORE_ID,
-      sunday_multiplier: parseFloat(settingsForm.sunday_multiplier) || 1.5,
-      holiday_multiplier: parseFloat(settingsForm.holiday_multiplier) || 2,
-      overtime_multiplier: parseFloat(settingsForm.overtime_multiplier) || 1.5,
-      weekly_ot_threshold: parseFloat(settingsForm.weekly_ot_threshold) || 45,
-      monthly_ot_threshold: parseFloat(settingsForm.monthly_ot_threshold) || 195,
-      night_allowance_start_hour: parseInt(settingsForm.night_allowance_start_hour) || 18,
-      default_night_rate: parseFloat(settingsForm.default_night_rate) || 0,
-      uif_employee_rate: parseFloat(settingsForm.uif_employee_rate) || 1,
-      uif_employer_rate: parseFloat(settingsForm.uif_employer_rate) || 1,
-      uif_ceiling: parseFloat(settingsForm.uif_ceiling) || 17712,
-      uif_reference_number: settingsForm.uif_reference_number || '',
-    };
-    await supabase.from('payroll_settings').upsert(payload);
-    setPayrollSettings(payload);
-    setShowSettingsModal(false);
+      employee_id: advanceForm.employee_id,
+      amount: parseFloat(advanceForm.amount),
+      reason: advanceForm.reason || null,
+      advance_date: advanceForm.advance_date,
+      repayment_status: 'outstanding',
+      deduct_from_wages: true,
+    })
+    setAdvanceForm({ employee_id: '', amount: '', reason: '', advance_date: new Date().toISOString().split('T')[0] })
+    setShowAdvanceModal(false)
+    await loadAll()
+    setSaving(false)
   }
 
-  async function saveLeave() {
-    if (!selectedPayrollEmployee || !leaveForm.start_date || !leaveForm.end_date) return;
-    await supabase.from('employee_leave').insert({
-      employee_id: selectedPayrollEmployee.id, store_id: STORE_ID, leave_type: leaveForm.leave_type,
-      start_date: leaveForm.start_date, end_date: leaveForm.end_date, days_taken: parseFloat(leaveForm.days_taken) || 1,
-      status: leaveForm.status, reason: leaveForm.reason || null, paid_hours_per_day: parseFloat(leaveForm.paid_hours_per_day) || 0,
-    });
-    setShowLeaveModal(false);
-    setLeaveForm({ leave_type: 'Sick', start_date: '', end_date: '', days_taken: '1', status: 'approved', reason: '', paid_hours_per_day: '' });
-    await loadPayrollData();
-  }
-
-  async function markAdvanceRepaid(id: string) {
-    await supabase.from('employee_advances').update({ repayment_status: 'paid', repaid_date: new Date().toISOString().split('T')[0] }).eq('id', id);
-    await loadPayrollData();
-  }
-
-  function isEmployeePaid(employeeId: string) {
-    return wagePayments.find(p => p.employee_id === employeeId);
-  }
-
-  async function markEmployeePaid(emp: Employee, summary: ReturnType<typeof employeeMonthSummary>) {
-    if (isEmployeePaid(emp.id)) { alert(`${emp.full_name} has already been marked paid for this period.`); return; }
-    setPaying(true);
-    const monthLabel = new Date(payrollMonth + '-01').toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' });
-
-    // Make sure a Wages expense category exists so this lands in the right bucket on Income & Expenses
-    let { data: wagesCat } = await supabase.from('expense_categories').select('key, name').eq('organisation_id', ORG_ID).eq('key', 'wages').maybeSingle();
-    if (!wagesCat) {
-      const { data: catCountData } = await supabase.from('expense_categories').select('id', { count: 'exact', head: true }).eq('organisation_id', ORG_ID);
-      await supabase.from('expense_categories').insert({ organisation_id: ORG_ID, name: 'Wages / Salaries', key: 'wages', colour: '#1a5c38', is_active: true, sort_order: (catCountData ? 0 : 0) + 1 });
-      wagesCat = { key: 'wages', name: 'Wages / Salaries' };
+  async function saveWage() {
+    if (!wageForm.employee_id || !wageForm.hourly_rate) return
+    setSaving(true)
+    const hourlyRate = parseFloat(wageForm.hourly_rate)
+    const nightRate = parseFloat(wageForm.night_allowance_rate) || 0
+    const existing = wages.find(w => w.employee_id === wageForm.employee_id)
+    const payload = {
+      store_id: STORE_ID, employee_id: wageForm.employee_id,
+      hourly_rate: hourlyRate,
+      uif_employee: parseFloat(wageForm.uif_employee),
+      uif_employer: parseFloat(wageForm.uif_employer),
+      tax_rate: parseFloat(wageForm.tax_rate),
+      pay_frequency: wageForm.pay_frequency,
+      bank_name: wageForm.bank_name || null,
+      bank_account: wageForm.bank_account || null,
+      bank_branch: wageForm.bank_branch || null,
+      id_number: wageForm.id_number || null,
     }
+    if (existing) await supabase.from('employee_wages').update(payload).eq('id', existing.id)
+    else await supabase.from('employee_wages').insert(payload)
 
-    // Write the actual cash-out expense so it shows up in Income & Expenses / food cost
-    const { data: expenseRow, error: expError } = await supabase.from('expenses').insert({
-      store_id: STORE_ID, expense_date: payForm.paid_date,
-      category_key: 'wages', category_name: wagesCat?.name || 'Wages / Salaries',
-      description: `Wages — ${emp.full_name} — ${monthLabel}`,
-      amount: summary.netPay, vat_amount: 0,
-      supplier: '', invoice_number: '', payment_method: payForm.payment_method, notes: 'Auto-created from Payroll',
-    }).select().single();
-    if (expError) { alert('Error creating expense: ' + expError.message); setPaying(false); return; }
+    // Sync hourly_rate AND night_allowance_rate to employees table
+    // so Time & Attendance payroll register always has the correct rates
+    await supabase.from('employees').update({
+      hourly_rate: hourlyRate,
+      night_allowance_rate: nightRate || null,
+      pay_frequency: wageForm.pay_frequency,
+    }).eq('id', wageForm.employee_id)
 
-    // Audit record tying this payment to the payroll period, and preventing accidental double-pay
-    const { error: payError } = await supabase.from('wage_payments').insert({
-      store_id: STORE_ID, employee_id: emp.id, period: payrollMonth, paid_date: payForm.paid_date,
-      gross_pay: summary.totalPay, uif_employee: summary.uifEmployee, uif_employer: summary.uifEmployer,
-      advances_deducted: summary.outstandingAdvances, net_pay: summary.netPay, payment_method: payForm.payment_method,
-      expense_id: expenseRow?.id || null,
-    });
-    if (payError) { alert('Error recording payment: ' + payError.message); setPaying(false); return; }
+    setShowWageModal(false)
+    setWageForm({ employee_id: '', hourly_rate: '', night_allowance_rate: '', uif_employee: '0.01', uif_employer: '0.01', tax_rate: '0', pay_frequency: 'monthly', bank_name: '', bank_account: '', bank_branch: '', id_number: '' })
+    await loadAll()
+    setSaving(false)
+  }
 
-    // Any advances that were deducted in this pay run are now settled
-    const empAdvances = advances.filter(a => a.employee_id === emp.id && a.deduct_from_wages && a.repayment_status === 'outstanding');
-    for (const adv of empAdvances) {
-      await supabase.from('employee_advances').update({ repayment_status: 'paid', repaid_date: payForm.paid_date }).eq('id', adv.id);
+  async function upsertSavings(employeeId: string, deductionPerPayroll: number) {
+    const existing = savings.find(s => s.employee_id === employeeId)
+    if (existing) {
+      await supabase.from('employee_savings').update({ deduction_per_payroll: deductionPerPayroll, updated_at: new Date().toISOString() }).eq('id', existing.id)
+    } else {
+      await supabase.from('employee_savings').insert({ employee_id: employeeId, store_id: STORE_ID, deduction_per_payroll: deductionPerPayroll, balance: 0 })
     }
-
-    setShowPayModal(false);
-    setPaying(false);
-    await loadPayrollData();
+    setSavingsEditId(null); setSavingsInput('')
+    await loadAll()
   }
 
-  async function undoEmployeePayment(payment: WagePayment) {
-    if (!confirm('Undo this payment? This removes the expense entry and payment record — advances will need to be re-marked manually if needed.')) return;
-    if (payment.expense_id) await supabase.from('expenses').delete().eq('id', payment.expense_id);
-    await supabase.from('wage_payments').delete().eq('id', payment.id);
-    await loadPayrollData();
+  async function withdrawSavings(employeeId: string, amount: number, date: string, notes: string) {
+    const empSaving = savings.find(s => s.employee_id === employeeId)
+    if (!empSaving || amount <= 0 || amount > empSaving.balance) return
+    await supabase.from('employee_savings').update({ balance: empSaving.balance - amount, updated_at: new Date().toISOString() }).eq('id', empSaving.id)
+    await supabase.from('employee_savings_ledger').insert({
+      employee_id: employeeId, store_id: STORE_ID,
+      amount: -amount, transaction_type: 'withdrawal',
+      notes: notes || null,
+      created_at: date ? `${date}T00:00:00.000Z` : undefined,
+    })
+    setWithdrawId(null); setWithdrawInput(''); setWithdrawDate(new Date().toISOString().split('T')[0]); setWithdrawNotes('')
+    await loadAll()
   }
 
-  function exportRegisterCSV(emp: Employee, days: ReturnType<typeof buildRegisterDays>) {
-    const rows: string[][] = [
-      ['CompliTrack — Restaurant Compliance & Operations Platform (complitrack.co.za)'],
-      [`${emp.full_name} — Payroll Register — ${payrollMonth}`],
-      [],
-      ['Date', 'Day', 'Clock In', 'Clock Out', 'Hours', 'Type', 'Pay (R)'],
-    ];
-    for (const day of [...days].reverse()) {
-      const type = day.leave ? `${day.leave.leave_type} leave${day.leave.status !== 'approved' ? ` (${day.leave.status})` : ''}` : day.label || '';
-      if (day.sessions.length <= 1) {
-        const s = day.sessions[0];
-        const clockIn = s?.clockIn ? new Date(s.clockIn).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : '';
-        const clockOut = s?.isOpen ? 'On shift' : s?.clockOut ? new Date(s.clockOut).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : '';
-        const hours = day.leave ? formatHM(day.leaveHours) : day.hours > 0 ? formatHM(day.hours) : '';
-        const pay = day.pay > 0 ? day.pay.toFixed(2) : '';
-        rows.push([day.date, day.dayName, clockIn, clockOut, hours, type, pay]);
-      } else {
-        day.sessions.forEach((s, i) => {
-          const clockIn = s.clockIn ? new Date(s.clockIn).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : '';
-          const clockOut = s.isOpen ? 'On shift' : s.clockOut ? new Date(s.clockOut).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : '';
-          rows.push([i === 0 ? day.date : '', i === 0 ? day.dayName : `Session ${i + 1}`, clockIn, clockOut, formatHM(s.hours), i === 0 ? type : '', s.pay > 0 ? s.pay.toFixed(2) : '']);
-        });
-      }
-    }
-    const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = `${emp.full_name.replace(/\s+/g, '_')}_${payrollMonth}.csv`;
-    a.click(); URL.revokeObjectURL(url);
+  async function loadLedger(employeeId: string) {
+    setLedgerLoading(true)
+    const { data } = await supabase
+      .from('employee_savings_ledger')
+      .select('*')
+      .eq('employee_id', employeeId)
+      .eq('store_id', STORE_ID)
+      .order('created_at', { ascending: false })
+    setLedger(data || [])
+    setLedgerLoading(false)
   }
 
-  // Shared CompliTrack letterhead/footer so every printable document looks like it came from
-  // a real product, not a one-off spreadsheet export.
-  function brandStyles() {
-    return `
-      .ct-topbar{background:linear-gradient(135deg,#0a1f12,#1a5c38);padding:10px 28px;display:flex;align-items:center;justify-content:space-between;color:#fff}
-      .ct-topbar .ct-brand{display:flex;align-items:center;gap:8px;font-weight:800;font-size:14px;letter-spacing:0.3px}
-      .ct-topbar .ct-tagline{font-size:10px;color:rgba(255,255,255,0.65);font-weight:500}
-      .ct-doc{padding:32px;max-width:760px;margin:0 auto}
-      .ct-footer{margin-top:40px;padding-top:14px;border-top:1px solid #e5e7eb;display:flex;justify-content:space-between;align-items:center;font-size:10px;color:#aaa}
-      .ct-footer b{color:#888}
-      @media print{.ct-topbar{padding:8px 20px}.ct-doc{padding:14px}.ct-footer{margin-top:24px}}
-    `;
-  }
-  function brandTopbar() {
-    return `<div class="ct-topbar"><div class="ct-brand">🛡️ CompliTrack</div><div class="ct-tagline">Restaurant Compliance &amp; Operations Platform</div></div>`;
-  }
-  function brandFooter() {
-    const now = new Date().toLocaleString('en-ZA', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-    return `<div class="ct-footer"><span>Generated by <b>CompliTrack</b> · complitrack.co.za</span><span>${now}</span></div>`;
-  }
-
-  function printRegister(emp: Employee, days: ReturnType<typeof buildRegisterDays>, summary: ReturnType<typeof employeeMonthSummary>) {
-    const monthLabel = new Date(payrollMonth + '-01').toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' });
-    const rate = emp.hourly_rate || 0;
-    const rowsHtml = [...days].reverse().map(day => {
-      const type = day.leave ? `${day.leave.leave_type} leave` : day.label || '';
-      const rowBg = day.type === 'holiday' ? '#fde8e8' : (day.type === 'sunday' || new Date(day.date + 'T00:00:00').getDay() === 6) ? '#f3f4f6' : '#fff';
-      if (day.sessions.length <= 1) {
-        const s = day.sessions[0];
-        const clockIn = s?.clockIn ? new Date(s.clockIn).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : '—';
-        const clockOut = s?.isOpen ? 'On shift' : s?.clockOut ? new Date(s.clockOut).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : '—';
-        const hours = day.leave ? formatHM(day.leaveHours) : day.hours > 0 ? formatHM(day.hours) : '—';
-        const pay = day.pay > 0 ? `R${day.pay.toFixed(2)}` : '—';
-        return `<tr style="background:${rowBg}"><td>${day.date}</td><td>${day.dayName}</td><td>${clockIn}</td><td>${clockOut}</td><td>${hours}</td><td>${type}</td><td style="text-align:right">${pay}</td></tr>`;
-      }
-      return day.sessions.map((s, i) => {
-        const clockIn = s.clockIn ? new Date(s.clockIn).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : '—';
-        const clockOut = s.isOpen ? 'On shift' : s.clockOut ? new Date(s.clockOut).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : '—';
-        const pay = s.pay > 0 ? `R${s.pay.toFixed(2)}` : '—';
-        return `<tr style="background:${rowBg}"><td>${i === 0 ? day.date : ''}</td><td>${i === 0 ? day.dayName : `Session ${i + 1}`}</td><td>${clockIn}</td><td>${clockOut}</td><td>${formatHM(s.hours)}</td><td>${i === 0 ? type : ''}</td><td style="text-align:right">${pay}</td></tr>`;
-      }).join('');
-    }).join('');
-    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${emp.full_name} — ${monthLabel}</title>
-      <style>
-        body{font-family:Arial,sans-serif;color:#111;margin:0}
-        ${brandStyles()}
-        h1{font-size:20px;margin:0 0 2px}
-        .sub{color:#666;font-size:13px;margin-bottom:18px}
-        table{width:100%;border-collapse:collapse;font-size:13px}
-        th{background:#1a5c38;color:#fff;text-align:left;padding:8px 10px}
-        td{padding:7px 10px;border-bottom:1px solid #eee}
-        .totals{margin-top:18px;font-size:14px}
-        .totals b{font-size:16px}
-        .legend{margin-top:10px;font-size:11px;color:#666}
-        .sw{display:inline-block;width:10px;height:10px;margin-right:4px;vertical-align:middle}
-      </style></head><body>
-      ${brandTopbar()}
-      <div class="ct-doc">
-      <h1>${emp.full_name} — ${emp.role}</h1>
-      <div class="sub">Payroll Register · ${monthLabel} · Rate: R${rate.toFixed(2)}/hr</div>
-      <table><thead><tr><th>Date</th><th>Day</th><th>Clock In</th><th>Clock Out</th><th>Hours</th><th>Type</th><th style="text-align:right">Pay</th></tr></thead>
-      <tbody>${rowsHtml}</tbody></table>
-      <div class="totals">Total Hours: <b>${formatHM(summary.totalHours)}</b> &nbsp;&nbsp; Total Earned: <b>R${summary.totalPay.toFixed(2)}</b>${summary.outstandingAdvances > 0 ? ` &nbsp;&nbsp; Advances Owing: <b>-R${summary.outstandingAdvances.toFixed(2)}</b> &nbsp;&nbsp; Net Pay: <b>R${summary.netPay.toFixed(2)}</b>` : ''}</div>
-      <div class="legend"><span class="sw" style="background:#fde8e8"></span>Public Holiday &nbsp; <span class="sw" style="background:#f3f4f6"></span>Weekend</div>
-      ${brandFooter()}
-      </div>
-      </body></html>`;
-    const win = window.open('', '_blank');
-    if (win) { win.document.write(html); win.document.close(); win.focus(); setTimeout(() => win.print(), 300); }
-  }
-
-  function formatZaPhone(phone: string) {
-    const digits = phone.replace(/\D/g, '');
-    if (digits.startsWith('27')) return digits;
-    if (digits.startsWith('0')) return '27' + digits.slice(1);
-    return digits;
-  }
-
-  function payslipHtml(emp: Employee, summary: ReturnType<typeof employeeMonthSummary>, days: ReturnType<typeof buildRegisterDays>) {
-    const monthLabel = new Date(payrollMonth + '-01').toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' });
-    const rate = emp.hourly_rate || 0;
-    const daysWorked = days.filter(d => d.hours > 0 || (d.leave && d.leaveHours > 0)).length;
-    // Payslip advance deductions: include advances from THIS month regardless of repayment_status
-    // (saveWagePayment marks them 'paid' when wages are saved, so 'outstanding' filter would miss them)
-    // Also catches any still-outstanding advances from prior months that carry over.
-    const [psYear, psMonth] = payrollMonth.split('-').map(Number);
-    const psMonthEnd = `${payrollMonth}-${String(new Date(psYear, psMonth, 0).getDate()).padStart(2, '0')}`;
-    const psAdvances = advances.filter(a =>
-      a.employee_id === emp.id &&
-      a.deduct_from_wages &&
-      (a.repayment_status === 'outstanding' || (a.advance_date >= payrollMonth + '-01' && a.advance_date <= psMonthEnd))
-    );
-    const psAdvTotal = psAdvances.reduce((s, a) => s + Number(a.amount), 0);
-    const psNetPay = summary.totalPay - summary.uifEmployee - psAdvTotal - summary.savingsDeduction;
-    // Count late sessions from attendance records for this employee in this period
-    const lateCount = days.filter(d => d.isLate).length;
-    const totalSessions = days.filter(d => d.hours > 0).length;
-    const row = (label: string, hrs: string, rateStr: string, amount: number) =>
-      `<tr><td>${label}</td><td style="text-align:center">${hrs}</td><td style="text-align:center">${rateStr}</td><td style="text-align:right">R${amount.toFixed(2)}</td></tr>`;
-    const lineItems = [
-      row('Normal Hours', formatHM(summary.normalHours), `R${rate.toFixed(2)}/hr`, summary.normalPay),
-      summary.otHours > 0 ? row('Overtime', formatHM(summary.otHours), `R${(rate * payrollSettings.overtime_multiplier).toFixed(2)}/hr`, summary.otPay) : '',
-      summary.sundayHours > 0 ? row('Sunday', formatHM(summary.sundayHours), `R${(rate * (payrollSettings.sunday_multiplier || 1.5)).toFixed(2)}/hr`, summary.sundayPay) : '',
-      summary.holidayHours > 0 ? row('Public Holiday', formatHM(summary.holidayHours), `R${(rate * (payrollSettings.holiday_multiplier || 2)).toFixed(2)}/hr`, summary.holidayPay) : '',
-      summary.nightHours > 0 ? row('Night Allowance', formatHM(summary.nightHours), `R${(emp.night_allowance_rate || payrollSettings.default_night_rate).toFixed(2)}/hr`, summary.nightPay) : '',
-      summary.leaveHours > 0 ? row('Paid Leave', formatHM(summary.leaveHours), `R${rate.toFixed(2)}/hr`, summary.leavePay) : '',
-    ].join('');
-    return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Payslip — ${emp.full_name} — ${monthLabel}</title>
-      <style>
-        body{font-family:Arial,sans-serif;color:#111;margin:0}
-        ${brandStyles()}
-        .ct-doc{max-width:680px}
-        .head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #1a5c38;padding-bottom:16px;margin-bottom:20px}
-        .head h1{font-size:18px;margin:0 0 4px;color:#1a5c38}
-        .head .sub{font-size:12px;color:#666}
-        .badge{font-size:11px;color:#fff;background:#1a5c38;padding:4px 12px;border-radius:20px;font-weight:700}
-        .grid{display:grid;grid-template-columns:1fr 1fr;gap:4px 24px;margin-bottom:20px;font-size:13px}
-        .grid .lbl{color:#888}
-        table{width:100%;border-collapse:collapse;font-size:13px;margin-bottom:16px}
-        th{background:#f3f4f6;text-align:left;padding:8px 10px;font-size:11px;text-transform:uppercase;color:#666}
-        td{padding:8px 10px;border-bottom:1px solid #f0f0f0}
-        .totals{margin-top:8px;border-top:2px solid #111;padding-top:12px}
-        .totals .row{display:flex;justify-content:space-between;padding:4px 0;font-size:14px}
-        .totals .net{font-size:18px;font-weight:800;color:#1a5c38;border-top:1px solid #ddd;margin-top:6px;padding-top:10px}
-        .sign{margin-top:50px;display:grid;grid-template-columns:1fr 1fr;gap:40px;font-size:12px}
-        .sign div{border-top:1px solid #999;padding-top:6px;color:#666}
-      </style></head><body>
-      ${brandTopbar()}
-      <div class="ct-doc">
-      <div class="head">
-        <div><h1>${EMPLOYER_NAME}</h1><div class="sub">Payslip · ${monthLabel}${payrollSettings.uif_reference_number ? ` · UIF Ref: ${payrollSettings.uif_reference_number}` : ''}</div></div>
-        <div class="badge">PAYSLIP</div>
-      </div>
-      <div class="grid">
-        <div><span class="lbl">Employee:</span> <b>${emp.full_name}</b></div>
-        <div><span class="lbl">ID Number:</span> ${emp.id_number || '—'}</div>
-        <div><span class="lbl">Role:</span> ${emp.role}</div>
-        <div><span class="lbl">Pay Frequency:</span> ${(emp.pay_frequency || 'monthly') === 'weekly' ? 'Weekly' : 'Monthly'}</div>
-        <div><span class="lbl">Days Worked:</span> ${daysWorked}</div>
-      </div>
-      <table><thead><tr><th>Description</th><th style="text-align:center">Hours</th><th style="text-align:center">Rate</th><th style="text-align:right">Amount</th></tr></thead>
-      <tbody>${lineItems}</tbody></table>
-      <div class="totals">
-        <div class="row"><span>Gross Pay</span><b>R${summary.totalPay.toFixed(2)}</b></div>
-        <div class="row" style="color:#c2410c"><span>Less: UIF (${payrollSettings.uif_employee_rate}%)</span><b>-R${summary.uifEmployee.toFixed(2)}</b></div>
-        ${psAdvTotal > 0 ? `<div class="row" style="color:#c2410c"><span>Less: Advance Deduction</span><b>-R${psAdvTotal.toFixed(2)}</b></div>` : ''}
-        ${summary.savingsDeduction > 0 ? `<div class="row" style="color:#0891b2"><span>Less: Savings Deduction</span><b>-R${summary.savingsDeduction.toFixed(2)}</b></div>` : ''}
-        <div class="row net"><span>Net Pay</span><span>R${psNetPay.toFixed(2)}</span></div>
-      </div>
-      ${summary.empSaving ? `<div style="background:#f0fdf4;color:#166534;border:1.5px solid #bbf7d0;margin-top:10px;border-radius:8px;padding:10px 12px;display:flex;justify-content:space-between;align-items:center"><div><b style="font-size:11px">🐷 Savings Balance Held by Employer</b><div style="font-size:9px;color:#6b7280;margin-top:2px">R${summary.empSaving.deduction_per_payroll.toFixed(2)}/payroll deduction · cumulative savings</div></div><b style="font-size:13px">R${summary.empSaving.balance.toFixed(2)}</b></div>` : ''}
-      <div style="font-size:11px;color:#999;margin-top:6px">Employer UIF Contribution (${payrollSettings.uif_employer_rate}%): R${summary.uifEmployer.toFixed(2)} — not deducted from employee, shown for payroll records.</div>
-      <div class="sign"><div>Employer Signature</div><div>Employee Signature</div></div>
-      ${lateCount > 0
-        ? '<div style="margin-top:16px;padding:10px 14px;background:#fef9c3;border:1px solid #fde047;border-left:4px solid #eab308;border-radius:6px;font-size:11px;color:#713f12;"><b>&#9888; Attendance Notice:</b> You were recorded late for <b>' + lateCount + ' of ' + totalSessions + ' session' + (totalSessions !== 1 ? 's' : '') + '</b> this pay period. Punctuality is expected — repeated late arrivals may result in a formal warning.</div>'
-        : '<div style="margin-top:16px;padding:10px 14px;background:#f0fdf4;border:1px solid #bbf7d0;border-left:4px solid #22c55e;border-radius:6px;font-size:11px;color:#166534;"><b>&#10003; Attendance:</b> No late sessions recorded this pay period. Well done!</div>'
-      }
-      ${brandFooter()}
-      </div>
-      </body></html>`;
-  }
-
-  function printPayslip(emp: Employee, summary: ReturnType<typeof employeeMonthSummary>, days: ReturnType<typeof buildRegisterDays>) {
-    const win = window.open('', '_blank');
-    if (win) { win.document.write(payslipHtml(emp, summary, days)); win.document.close(); win.focus(); setTimeout(() => win.print(), 300); }
-  }
-
-  function emailPayslip(emp: Employee, summary: ReturnType<typeof employeeMonthSummary>) {
-    const monthLabel = new Date(payrollMonth + '-01').toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' });
-    const subject = encodeURIComponent(`Payslip — ${monthLabel}`);
-    const body = encodeURIComponent(
-      `Hi ${emp.full_name},\n\nYour payslip for ${monthLabel}:\n\nGross Pay: R${summary.totalPay.toFixed(2)}\nUIF Deduction: -R${summary.uifEmployee.toFixed(2)}\n${summary.outstandingAdvances > 0 ? `Advance Deduction: -R${summary.outstandingAdvances.toFixed(2)}\n` : ''}Net Pay: R${summary.netPay.toFixed(2)}\n\nA printable copy is attached.\n\nRegards,\n${EMPLOYER_NAME}\n\n— Sent via CompliTrack (complitrack.co.za)`
-    );
-    window.open(`mailto:?subject=${subject}&body=${body}`, '_blank');
-  }
-
-  function whatsappPayslip(emp: Employee, summary: ReturnType<typeof employeeMonthSummary>) {
-    if (!emp.phone) { alert(`No phone number on file for ${emp.full_name}. Add one on the People page first.`); return; }
-    const monthLabel = new Date(payrollMonth + '-01').toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' });
-    const text = encodeURIComponent(
-      `Hi ${emp.full_name}, here's your payslip for ${monthLabel}:\n\nGross Pay: R${summary.totalPay.toFixed(2)}\nUIF Deduction: -R${summary.uifEmployee.toFixed(2)}\n${summary.outstandingAdvances > 0 ? `Advance Deduction: -R${summary.outstandingAdvances.toFixed(2)}\n` : ''}Net Pay: R${summary.netPay.toFixed(2)}\n\n- ${EMPLOYER_NAME}\n\n_Sent via CompliTrack_`
-    );
-    window.open(`https://wa.me/${formatZaPhone(emp.phone)}?text=${text}`, '_blank');
-  }
-
-  function exportAllPayrollCSV() {
-    const monthLabel = payrollMonth;
-    const rows: string[][] = [
-      ['CompliTrack — Restaurant Compliance & Operations Platform (complitrack.co.za)'],
-      [`${EMPLOYER_NAME} — Payroll Summary — ${monthLabel}`],
-      [],
-      ['Employee', 'ID Number', 'Role', 'Pay Frequency', 'Rate (R/hr)', 'Normal Hrs', 'Normal Pay', 'OT Hrs', 'OT Pay', 'Sunday/Holiday Hrs', 'Sunday/Holiday Pay', 'Night Hrs', 'Night Pay', 'Leave Hrs', 'Leave Pay', 'Gross Pay', 'UIF Employee', 'UIF Employer', 'Advances', 'Net Pay'],
-    ];
-    for (const emp of employees.filter(e => !excludedFromPayroll.has(e.id))) {
-      const s = employeeMonthSummary(emp.id);
-      rows.push([
-        emp.full_name, emp.id_number || '', emp.role, emp.pay_frequency || 'monthly', (emp.hourly_rate || 0).toFixed(2),
-        formatHM(s.normalHours), s.normalPay.toFixed(2), formatHM(s.otHours), s.otPay.toFixed(2),
-        formatHM(s.sundayHolidayHours), s.sundayHolidayPay.toFixed(2), formatHM(s.nightHours), s.nightPay.toFixed(2),
-        formatHM(s.leaveHours), s.leavePay.toFixed(2), s.totalPay.toFixed(2), s.uifEmployee.toFixed(2), s.uifEmployer.toFixed(2),
-        s.outstandingAdvances.toFixed(2), s.netPay.toFixed(2),
-      ]);
-    }
-    const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = `Payroll_${monthLabel}.csv`;
-    a.click(); URL.revokeObjectURL(url);
-  }
-
-  function printAllPayroll() {
-    const monthLabel = new Date(payrollMonth + '-01').toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' });
-    const included = employees.filter(emp => !excludedFromPayroll.has(emp.id));
-    const rowsHtml = included.map(emp => {
-      const s = employeeMonthSummary(emp.id);
-      return `<tr>
-        <td>${emp.full_name}</td>
-        <td>${emp.id_number || '—'}</td>
-        <td>${emp.role}</td>
-        <td style="text-align:right">${formatHM(s.totalHours)}</td>
-        <td style="text-align:right">${s.normalHours > 0 ? formatHM(s.normalHours) : '—'}</td>
-        <td style="text-align:right">${s.otHours > 0 ? formatHM(s.otHours) : '—'}</td>
-        <td style="text-align:right">${s.sundayHours > 0 ? formatHM(s.sundayHours) : '—'}</td>
-        <td style="text-align:right">${s.holidayHours > 0 ? formatHM(s.holidayHours) : '—'}</td>
-        <td style="text-align:right">${s.nightHours > 0 ? formatHM(s.nightHours) : '—'}</td>
-        <td style="text-align:right">R${s.totalPay.toFixed(2)}</td>
-        <td style="text-align:right">R${s.uifEmployee.toFixed(2)}</td>
-        <td style="text-align:right">R${s.uifEmployer.toFixed(2)}</td>
-        <td style="text-align:right">${s.outstandingAdvances > 0 ? '-R' + s.outstandingAdvances.toFixed(2) : '—'}</td>
-        <td style="text-align:right"><b>R${s.netPay.toFixed(2)}</b></td>
-      </tr>`;
-    }).join('');
-    const grandGross = included.reduce((sum, emp) => sum + employeeMonthSummary(emp.id).totalPay, 0);
-    const grandTotal = included.reduce((sum, emp) => sum + employeeMonthSummary(emp.id).netPay, 0);
-    const grandUifEmployee = included.reduce((sum, emp) => sum + employeeMonthSummary(emp.id).uifEmployee, 0);
-    const grandUifEmployer = included.reduce((sum, emp) => sum + employeeMonthSummary(emp.id).uifEmployer, 0);
-    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Payroll — ${monthLabel}</title>
-      <style>
-        @page { size: landscape; margin: 12mm; }
-        body{font-family:Arial,sans-serif;color:#111;margin:0;font-size:11px}
-        ${brandStyles()}
-        .ct-doc{max-width:1400px}
-        h1{font-size:18px;margin:0 0 2px;color:#1a5c38}
-        .sub{color:#666;font-size:12px;margin-bottom:14px}
-        table{width:100%;border-collapse:collapse;font-size:11px}
-        th{background:#1a5c38;color:#fff;text-align:left;padding:6px 7px;white-space:nowrap}
-        td{padding:6px 7px;border-bottom:1px solid #eee;white-space:nowrap}
-        .th-section{background:#0f3d25;font-size:9px;text-transform:uppercase;letter-spacing:0.5px;color:rgba(255,255,255,0.7)}
-        .grand{margin-top:12px;font-size:12px;text-align:right}
-        .grand b{font-size:15px}
-      </style></head><body>
-      ${brandTopbar()}
-      <div class="ct-doc">
-      <h1>${EMPLOYER_NAME}</h1>
-      <div class="sub">Payroll Summary · ${monthLabel}${payrollSettings.uif_reference_number ? ` · UIF Ref: ${payrollSettings.uif_reference_number}` : ''} · UIF: ${payrollSettings.uif_employee_rate}% employee / ${payrollSettings.uif_employer_rate}% employer, capped at R${payrollSettings.uif_ceiling.toLocaleString()}/month</div>
-      <table><thead>
-        <tr>
-          <th rowspan="2">Employee</th>
-          <th rowspan="2">ID Number</th>
-          <th rowspan="2">Role</th>
-          <th colspan="6" style="text-align:center;border-left:2px solid rgba(255,255,255,0.3)">Hours Breakdown</th>
-          <th colspan="4" style="text-align:center;border-left:2px solid rgba(255,255,255,0.3)">Deductions</th>
-          <th rowspan="2" style="text-align:right;border-left:2px solid rgba(255,255,255,0.3)">Net Pay</th>
-        </tr>
-        <tr class="th-section">
-          <th style="text-align:right;border-left:2px solid rgba(255,255,255,0.2)">Total Hrs</th>
-          <th style="text-align:right">Normal Hrs</th>
-          <th style="text-align:right">OT Hrs</th>
-          <th style="text-align:right">Sun Hrs</th>
-          <th style="text-align:right">Hol Hrs</th>
-          <th style="text-align:right">Night Hrs</th>
-          <th style="text-align:right;border-left:2px solid rgba(255,255,255,0.2)">Gross</th>
-          <th style="text-align:right">UIF (Emp)</th>
-          <th style="text-align:right">UIF (Empr)</th>
-          <th style="text-align:right">Advances</th>
-        </tr>
-      </thead>
-      <tbody>${rowsHtml}</tbody></table>
-      <div class="grand">Total Gross: R${grandGross.toFixed(2)} &nbsp;&nbsp;&nbsp; Total UIF Employee: R${grandUifEmployee.toFixed(2)} &nbsp;&nbsp; Total UIF Employer: R${grandUifEmployer.toFixed(2)}</div>
-      <div class="grand">Total Net Payroll: <b>R${grandTotal.toFixed(2)}</b></div>
-      ${brandFooter()}
-      </div>
-      </body></html>`;
-    const win = window.open('', '_blank');
-    if (win) { win.document.write(html); win.document.close(); win.focus(); setTimeout(() => win.print(), 300); }
-  }
-
-
-  const [manualSaving, setManualSaving] = useState(false);
-  const today = new Date().toISOString().split('T')[0];
-
-  useEffect(() => { if (ctxReady && STORE_ID) checkAuthAndLoad(); }, [ctxReady, STORE_ID]);
-
-  async function checkAuthAndLoad() {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) { router.push('/login'); return; }
-    await Promise.all([loadEmployees(), loadTodayRecords(), loadShifts()]);
-    setLoading(false);
-  }
-
-  async function loadEmployees() {
-    const { data } = await supabase.from('employees').select('id, full_name, role, is_active, hourly_rate, pay_frequency, night_allowance_rate, phone, id_number').eq('store_id', STORE_ID).eq('is_active', true).order('full_name');
-    setEmployees(data || []);
-  }
-
-  async function loadTodayRecords() {
-    const { data } = await supabase.from('attendance').select('*').eq('store_id', STORE_ID).eq('work_date', today);
-    setTodayRecords(data || []);
-  }
-
-  async function loadShifts() {
-    const { data } = await supabase.from('store_shifts').select('*').eq('store_id', STORE_ID).order('day_type').order('start_time');
-    setShifts(data || []);
-  }
-
-  async function loadHistory() {
-    setHistoryLoading(true);
-    const thirtyDaysAgo = new Date(); thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-    let query = supabase.from('attendance').select('*').eq('store_id', STORE_ID).gte('work_date', thirtyDaysAgo.toISOString().split('T')[0]).order('work_date', { ascending: false }).limit(200);
-    if (selectedEmployee !== 'all') query = query.eq('employee_id', selectedEmployee);
-    const { data } = await query;
-    setHistoryRecords(data || []);
-    setHistoryLoading(false);
-  }
-
-  useEffect(() => { if (activeTab === 'history' && STORE_ID) loadHistory(); }, [activeTab, selectedEmployee, STORE_ID]);
-
-  async function clockIn(employeeId: string) {
-    setSaving(employeeId);
-    const now = new Date().toISOString();
-    const dayType = todayDayType();
-    const currentTime = now.substring(11, 16);
-    const todayShifts = shifts.filter(s => s.day_type === dayType && s.is_active);
-    const alreadyHasSessionToday = todayRecords.some(r => r.employee_id === employeeId);
-    const late = !alreadyHasSessionToday && todayShifts.length > 0 && todayShifts.every(s => currentTime > s.start_time);
-    await supabase.from('attendance').insert({ employee_id: employeeId, store_id: STORE_ID, work_date: today, clock_in: now, is_late: late });
-    await loadTodayRecords();
-    setSaving(null);
-  }
-
-  async function clockOut(recordId: string, clockInTime: string) {
-    setSaving(recordId);
-    const now = new Date().toISOString();
-    const hours = (new Date(now).getTime() - new Date(clockInTime).getTime()) / (1000 * 60 * 60);
-    await supabase.from('attendance').update({ clock_out: now, hours_worked: hours }).eq('id', recordId);
-    await loadTodayRecords();
-    setSaving(null);
-  }
-
-  async function saveShift() {
-    if (!shiftForm.shift_name.trim()) return;
-    setShiftSaving(true);
-    const payload = { store_id: STORE_ID, shift_name: shiftForm.shift_name, day_type: shiftForm.day_type, start_time: shiftForm.start_time, end_time: shiftForm.end_time, is_active: true };
-    if (editShift) { await supabase.from('store_shifts').update(payload).eq('id', editShift.id); }
-    else { await supabase.from('store_shifts').insert(payload); }
-    await loadShifts();
-    setShowShiftModal(false); setEditShift(null); setShiftForm({ shift_name: '', day_type: 'weekday', start_time: '10:00', end_time: '15:00' });
-    setShiftSaving(false);
-  }
-
-  async function deleteShift(id: string) { await supabase.from('store_shifts').delete().eq('id', id); await loadShifts(); }
-
-  async function saveManual() {
-    if (!manualForm.employee_id || !manualForm.clock_in) return;
-    setManualSaving(true);
-    const clockInTime = `${today}T${manualForm.clock_in}:00`;
-    const clockOutTime = manualForm.clock_out ? `${today}T${manualForm.clock_out}:00` : null;
-    const hours = clockOutTime ? (new Date(clockOutTime).getTime() - new Date(clockInTime).getTime()) / (1000 * 60 * 60) : null;
-    await supabase.from('attendance').insert({ employee_id: manualForm.employee_id, store_id: STORE_ID, work_date: today, clock_in: clockInTime, clock_out: clockOutTime, hours_worked: hours, is_late: manualForm.is_late, notes: manualForm.notes || null });
-    await loadTodayRecords();
-    setShowManualModal(false); setManualForm({ employee_id: '', clock_in: '', clock_out: '', is_late: false, notes: '' });
-    setManualSaving(false);
-  }
-
-  const inp = { width: '100%', padding: '10px 14px', borderRadius: 10, border: '1.5px solid #eef2ee', fontSize: 14, outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box' as const };
-  const lbl = { display: 'block' as const, fontSize: 13, fontWeight: 600 as const, color: '#555', marginBottom: 6 };
-  const onShiftNow = employees.filter(e => todayRecords.some(r => r.employee_id === e.id && r.clock_in && !r.clock_out)).length;
-  const completedToday = employees.filter(e => {
-    const recs = todayRecords.filter(r => r.employee_id === e.id);
-    return recs.length > 0 && !recs.some(r => r.clock_in && !r.clock_out);
-  }).length;
-  const lateToday = todayRecords.filter(r => r.is_late).length;
-  const notClockedIn = employees.filter(e => !todayRecords.find(r => r.employee_id === e.id)).length;
-  const currentShift = shifts.find(s => { const d = todayDayType(); const now = `${String(new Date().getHours()).padStart(2,'0')}:${String(new Date().getMinutes()).padStart(2,'0')}`; return s.day_type === d && s.is_active && now >= s.start_time && now < s.end_time; });
-  const historyByDate = historyRecords.reduce<Record<string, AttendanceRecord[]>>((acc, r) => { if (!acc[r.work_date]) acc[r.work_date] = []; acc[r.work_date].push(r); return acc; }, {});
-  const getEmpName = (id: string) => employees.find(e => e.id === id)?.full_name || 'Unknown';
-  const getEmpRole = (id: string) => employees.find(e => e.id === id)?.role || '';
-  const DAY_LABELS: Record<string, string> = { weekday: 'Weekdays', saturday: 'Saturday', sunday: 'Sunday' };
+  const periodRuns = runs.filter(r => r.payroll_period_id === selectedPeriod?.id)
+  const totalGross = periodRuns.reduce((s, r) => s + r.gross_pay, 0)
+  const totalNet = periodRuns.reduce((s, r) => s + r.net_pay, 0)
+  const totalUIF = periodRuns.reduce((s, r) => s + r.uif_employee + r.uif_employer, 0)
+  const totalAdvances = periodRuns.reduce((s, r) => s + (r.advances_deducted || 0), 0)
+  const totalSavings = periodRuns.reduce((s, r) => s + (r.savings_deducted || 0), 0)
+  const unpaidAdvances = advances.filter(a => a.repayment_status === 'outstanding' && a.deduct_from_wages)
+  const sc = (s: string) => s === 'paid' ? { bg: '#dcfce7', color: '#166534' } : s === 'approved' ? { bg: '#dbeafe', color: '#1e40af' } : { bg: '#f3f4f6', color: '#6b7280' }
 
   return (
-    <div style={{ minHeight: '100vh', background: '#f8faf8', fontFamily: 'system-ui, sans-serif' }}>
-      {showShiftModal && (
-        <ModalWrap onClose={() => { setShowShiftModal(false); setEditShift(null); }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-            <div style={{ fontSize: 18, fontWeight: 700 }}>{editShift ? 'Edit Shift' : 'Add Shift'}</div>
-            <button onClick={() => { setShowShiftModal(false); setEditShift(null); }} style={{ background: '#f0f4f0', border: 'none', borderRadius: 8, padding: '6px 14px', cursor: 'pointer' }}>Cancel</button>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <div><label style={lbl}>Shift Name *</label><input value={shiftForm.shift_name} onChange={e => setShiftForm(p => ({ ...p, shift_name: e.target.value }))} placeholder="e.g. Morning Shift" style={inp} /></div>
-            <div><label style={lbl}>Day Type</label><select value={shiftForm.day_type} onChange={e => setShiftForm(p => ({ ...p, day_type: e.target.value }))} style={inp}><option value="weekday">Weekdays</option><option value="saturday">Saturday</option><option value="sunday">Sunday</option></select></div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-              <div><label style={lbl}>Start</label><input type="time" value={shiftForm.start_time} onChange={e => setShiftForm(p => ({ ...p, start_time: e.target.value }))} style={inp} /></div>
-              <div><label style={lbl}>End</label><input type="time" value={shiftForm.end_time} onChange={e => setShiftForm(p => ({ ...p, end_time: e.target.value }))} style={inp} /></div>
+    <div style={{ minHeight: '100vh', background: '#f0f4f0' }}>
+      <header style={{ background: 'linear-gradient(135deg, #0a1f12 0%, #1a5c38 100%)', position: 'sticky', top: 0, zIndex: 10, padding: '0 40px' }}>
+        <div style={{ maxWidth: '1200px', margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: '72px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <div style={{ width: '40px', height: '40px', borderRadius: '12px', background: 'rgba(255,255,255,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M3 10L8 15L17 6" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            </div>
+            <div>
+              <div style={{ fontWeight: '800', fontSize: '16px', color: 'white' }}>CompliTrack</div>
+              <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.55)' }}>Wages & Payroll</div>
             </div>
           </div>
-          <button onClick={saveShift} disabled={shiftSaving || !shiftForm.shift_name.trim()} style={{ width: '100%', marginTop: 20, padding: '13px', background: PRIMARY, color: '#fff', border: 'none', borderRadius: 12, fontWeight: 700, cursor: 'pointer', fontSize: 15 }}>{shiftSaving ? 'Saving...' : editShift ? 'Save Changes' : 'Add Shift'}</button>
-        </ModalWrap>
-      )}
-      {showManualModal && (
-        <ModalWrap onClose={() => setShowManualModal(false)}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-            <div style={{ fontSize: 18, fontWeight: 700 }}>Manual Clock Entry</div>
-            <button onClick={() => setShowManualModal(false)} style={{ background: '#f0f4f0', border: 'none', borderRadius: 8, padding: '6px 14px', cursor: 'pointer' }}>Cancel</button>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <div><label style={lbl}>Employee *</label><select value={manualForm.employee_id} onChange={e => setManualForm(p => ({ ...p, employee_id: e.target.value }))} style={inp}><option value="">— Select —</option>{employees.map(e => <option key={e.id} value={e.id}>{e.full_name}</option>)}</select></div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-              <div><label style={lbl}>Clock In *</label><input type="time" value={manualForm.clock_in} onChange={e => setManualForm(p => ({ ...p, clock_in: e.target.value }))} style={inp} /></div>
-              <div><label style={lbl}>Clock Out</label><input type="time" value={manualForm.clock_out} onChange={e => setManualForm(p => ({ ...p, clock_out: e.target.value }))} style={inp} /></div>
-            </div>
-            <div><label style={lbl}>Notes</label><textarea value={manualForm.notes} onChange={e => setManualForm(p => ({ ...p, notes: e.target.value }))} rows={2} style={{ ...inp, resize: 'vertical' as const }} /></div>
-          </div>
-          <button onClick={saveManual} disabled={manualSaving || !manualForm.employee_id || !manualForm.clock_in} style={{ width: '100%', marginTop: 20, padding: '13px', background: PRIMARY, color: '#fff', border: 'none', borderRadius: 12, fontWeight: 700, cursor: 'pointer', fontSize: 15 }}>{manualSaving ? 'Saving...' : 'Save Entry'}</button>
-        </ModalWrap>
-      )}
+          <button onClick={() => router.push('/dashboard')} style={{ padding: '8px 16px', border: '1.5px solid rgba(255,255,255,0.4)', borderRadius: '10px', fontSize: '13px', fontWeight: '700', color: 'white', background: 'rgba(255,255,255,0.15)', cursor: 'pointer' }}>← Dashboard</button>
+        </div>
+      </header>
 
-      {showLeaveModal && selectedPayrollEmployee && (
-        <ModalWrap onClose={() => setShowLeaveModal(false)}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-            <div style={{ fontSize: 18, fontWeight: 700 }}>Leave — {selectedPayrollEmployee.full_name}</div>
-            <button onClick={() => setShowLeaveModal(false)} style={{ background: '#f0f4f0', border: 'none', borderRadius: 8, padding: '6px 14px', cursor: 'pointer' }}>Cancel</button>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <div><label style={lbl}>Leave Type</label><select value={leaveForm.leave_type} onChange={e => setLeaveForm(p => ({ ...p, leave_type: e.target.value }))} style={inp}>{['Annual', 'Sick', 'Family Responsibility', 'Unpaid', 'Maternity', 'Paternity', 'Study'].map(t => <option key={t}>{t}</option>)}</select></div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-              <div><label style={lbl}>Start Date *</label><input type="date" value={leaveForm.start_date} onChange={e => setLeaveForm(p => ({ ...p, start_date: e.target.value, end_date: p.end_date || e.target.value }))} style={inp} /></div>
-              <div><label style={lbl}>End Date *</label><input type="date" value={leaveForm.end_date} onChange={e => setLeaveForm(p => ({ ...p, end_date: e.target.value }))} style={inp} /></div>
-            </div>
-            <div><label style={lbl}>Status</label><select value={leaveForm.status} onChange={e => setLeaveForm(p => ({ ...p, status: e.target.value }))} style={inp}><option value="approved">Approved</option><option value="pending">Pending</option><option value="rejected">Rejected</option></select></div>
-            <div><label style={lbl}>Hours to pay per day</label><input type="number" step="0.25" placeholder="e.g. 5 for a 10:00–15:00 shift" value={leaveForm.paid_hours_per_day} onChange={e => setLeaveForm(p => ({ ...p, paid_hours_per_day: e.target.value }))} style={inp} /><div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>Applied to every day in this leave period at their normal hourly rate. Leave at 0 if this leave is unpaid.</div></div>
-            <div><label style={lbl}>Reason / Notes</label><textarea value={leaveForm.reason} onChange={e => setLeaveForm(p => ({ ...p, reason: e.target.value }))} rows={2} style={{ ...inp, resize: 'vertical' as const }} /></div>
-          </div>
-          <button onClick={saveLeave} disabled={!leaveForm.start_date || !leaveForm.end_date} style={{ width: '100%', marginTop: 20, padding: '13px', background: PRIMARY, color: '#fff', border: 'none', borderRadius: 12, fontWeight: 700, cursor: 'pointer', fontSize: 15 }}>Save Leave</button>
-        </ModalWrap>
-      )}
+      <div style={{ background: 'linear-gradient(135deg, #0a1f12 0%, #1a5c38 100%)', padding: '40px 40px 100px' }}>
+        <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
+          <h1 style={{ fontSize: '32px', fontWeight: '800', color: 'white', margin: '0 0 6px', letterSpacing: '-0.5px' }}>Wages & Payroll 💰</h1>
+          <p style={{ fontSize: '15px', color: 'rgba(255,255,255,0.6)', margin: 0 }}>Manage employee wages, advances and payroll settings</p>
+        </div>
+      </div>
 
-      {showSettingsModal && (
-        <ModalWrap onClose={() => setShowSettingsModal(false)}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-            <div style={{ fontSize: 18, fontWeight: 700 }}>Pay Rules</div>
-            <button onClick={() => setShowSettingsModal(false)} style={{ background: '#f0f4f0', border: 'none', borderRadius: 8, padding: '6px 14px', cursor: 'pointer' }}>Cancel</button>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: PRIMARY }}>Sunday & Holiday</div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-              <div><label style={lbl}>Sunday Multiplier</label><input type="number" step="0.1" value={settingsForm.sunday_multiplier} onChange={e => setSettingsForm(p => ({ ...p, sunday_multiplier: e.target.value }))} style={inp} /><div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>BCEA default: 1.5x</div></div>
-              <div><label style={lbl}>Holiday Multiplier</label><input type="number" step="0.1" value={settingsForm.holiday_multiplier} onChange={e => setSettingsForm(p => ({ ...p, holiday_multiplier: e.target.value }))} style={inp} /><div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>BCEA default: 2x</div></div>
-            </div>
-            <div style={{ fontSize: 13, fontWeight: 700, color: PRIMARY, marginTop: 6 }}>Overtime</div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-              <div><label style={lbl}>OT Multiplier</label><input type="number" step="0.1" value={settingsForm.overtime_multiplier} onChange={e => setSettingsForm(p => ({ ...p, overtime_multiplier: e.target.value }))} style={inp} /></div>
-              <div></div>
-              <div><label style={lbl}>Weekly Threshold (hrs)</label><input type="number" step="1" value={settingsForm.weekly_ot_threshold} onChange={e => setSettingsForm(p => ({ ...p, weekly_ot_threshold: e.target.value }))} style={inp} /><div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>For weekly-paid staff</div></div>
-              <div><label style={lbl}>Monthly Threshold (hrs)</label><input type="number" step="1" value={settingsForm.monthly_ot_threshold} onChange={e => setSettingsForm(p => ({ ...p, monthly_ot_threshold: e.target.value }))} style={inp} /><div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>For monthly-paid staff</div></div>
-            </div>
-            <div style={{ fontSize: 13, fontWeight: 700, color: PRIMARY, marginTop: 6 }}>Night Allowance</div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-              <div><label style={lbl}>Starts From (hour, 24h)</label><input type="number" min="0" max="23" value={settingsForm.night_allowance_start_hour} onChange={e => setSettingsForm(p => ({ ...p, night_allowance_start_hour: e.target.value }))} style={inp} /></div>
-              <div><label style={lbl}>Default Rate (R/hr)</label><input type="number" step="0.01" value={settingsForm.default_night_rate} onChange={e => setSettingsForm(p => ({ ...p, default_night_rate: e.target.value }))} style={inp} /></div>
-            </div>
-            <div style={{ fontSize: 12, color: '#999', marginTop: -8 }}>Hours worked after the start time qualify, paid at the rate above on top of normal pay. Each employee can override their own rate on the Payroll card — this is just the default for new staff.</div>
-            <div style={{ fontSize: 13, fontWeight: 700, color: PRIMARY, marginTop: 6 }}>UIF</div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-              <div><label style={lbl}>Employee %</label><input type="number" step="0.1" value={settingsForm.uif_employee_rate} onChange={e => setSettingsForm(p => ({ ...p, uif_employee_rate: e.target.value }))} style={inp} /></div>
-              <div><label style={lbl}>Employer %</label><input type="number" step="0.1" value={settingsForm.uif_employer_rate} onChange={e => setSettingsForm(p => ({ ...p, uif_employer_rate: e.target.value }))} style={inp} /></div>
-              <div style={{ gridColumn: '1 / -1' }}><label style={lbl}>Monthly Earnings Ceiling (R)</label><input type="number" step="1" value={settingsForm.uif_ceiling} onChange={e => setSettingsForm(p => ({ ...p, uif_ceiling: e.target.value }))} style={inp} /><div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>SA default is 1% employee + 1% employer, capped at the Dept. of Labour's earnings ceiling — confirm the current figure before relying on this for a real submission.</div></div>
-              <div style={{ gridColumn: '1 / -1' }}><label style={lbl}>Employer UIF Reference Number</label><input type="text" value={settingsForm.uif_reference_number} onChange={e => setSettingsForm(p => ({ ...p, uif_reference_number: e.target.value }))} placeholder="U..." style={inp} /><div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>Printed on payslips and the labour broker export.</div></div>
-            </div>
-          </div>
-          <button onClick={savePayrollSettings} style={{ width: '100%', marginTop: 20, padding: '13px', background: PRIMARY, color: '#fff', border: 'none', borderRadius: 12, fontWeight: 700, cursor: 'pointer', fontSize: 15 }}>Save</button>
-        </ModalWrap>
-      )}
+      <main style={{ maxWidth: '1200px', margin: '-60px auto 0', padding: '0 40px 60px', position: 'relative', zIndex: 1 }}>
+        <div style={{ background: 'white', borderRadius: '16px', padding: '6px', display: 'inline-flex', gap: '4px', marginBottom: '24px', boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}>
+          {(['payroll', 'advances', 'savings', 'settings'] as const).map(t => (
+            <button key={t} onClick={() => setTab(t)} style={TAB_STYLE(tab === t)}>
+              {t === 'payroll' ? '📊 Payroll' : t === 'advances' ? '💵 Advances' : t === 'savings' ? '🐷 Savings' : '⚙️ Settings'}
+            </button>
+          ))}
+        </div>
 
-      {selectedPayrollEmployee && (() => {
-        const summary = employeeMonthSummary(selectedPayrollEmployee.id);
-        const days = buildRegisterDays(selectedPayrollEmployee.id);
-        const empAdvances = advances.filter(a => a.employee_id === selectedPayrollEmployee.id);
-        return (
-          <>
-          <div style={{ position: 'fixed' as const, inset: 0, zIndex: 1500, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
-            <div onClick={() => setSelectedPayrollEmployee(null)} style={{ position: 'absolute' as const, inset: 0, background: 'rgba(0,0,0,0.5)', cursor: 'pointer' }} />
-            <div style={{ position: 'relative' as const, width: '100%', maxWidth: 1000, maxHeight: '92vh', background: '#f8faf8', borderRadius: 20, overflow: 'hidden', display: 'flex', flexDirection: 'column' as const, boxShadow: '0 24px 60px rgba(0,0,0,0.3)' }}>
-              <div style={{ background: `linear-gradient(135deg, ${DARK}, ${PRIMARY})`, padding: '24px 28px', flexShrink: 0 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
-                  <button onClick={() => setSelectedPayrollEmployee(null)} style={{ background: 'rgba(255,255,255,0.2)', border: 'none', color: '#fff', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', fontSize: 13 }}>Close</button>
-                  <button onClick={() => { setLeaveForm({ leave_type: 'Sick', start_date: '', end_date: '', days_taken: '1', status: 'approved', reason: '', paid_hours_per_day: '' }); setShowLeaveModal(true); }} style={{ background: '#fff', color: PRIMARY, border: 'none', borderRadius: 8, padding: '6px 14px', cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>+ Add Leave</button>
+        {loading ? <div style={{ textAlign: 'center', padding: '60px', color: '#9ca3af' }}>Loading...</div> : (<>
+
+          {/* PAYROLL TAB */}
+          {tab === 'payroll' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              <div style={{ background: 'white', borderRadius: '20px', border: '1.5px solid #eef2ee', padding: '20px 24px', boxShadow: '0 2px 8px rgba(0,0,0,0.04)', display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' as const }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: '12px', fontWeight: '700', color: '#9ca3af', textTransform: 'uppercase' as const, letterSpacing: '0.5px', marginBottom: '6px' }}>Pay Period</div>
+                  <select value={selectedPeriod?.id || ''} onChange={e => setSelectedPeriod(periods.find(p => p.id === e.target.value) || null)} style={{ border: '1.5px solid #e5e7eb', borderRadius: '10px', padding: '8px 12px', fontSize: '14px', fontWeight: '700', outline: 'none', background: 'white', minWidth: '280px' }}>
+                    {periods.length === 0 && <option value="">No periods yet — create one</option>}
+                    {periods.map(p => <option key={p.id} value={p.id}>{new Date(p.period_start).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' })} – {new Date(p.period_end).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' })} ({p.status})</option>)}
+                  </select>
                 </div>
-                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' as const, marginBottom: 16 }}>
-                  <button onClick={() => exportRegisterCSV(selectedPayrollEmployee, days)} style={{ background: 'rgba(255,255,255,0.15)', border: 'none', color: '#fff', borderRadius: 8, padding: '5px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>⬇ Register CSV</button>
-                  <button onClick={() => printRegister(selectedPayrollEmployee, days, summary)} style={{ background: 'rgba(255,255,255,0.15)', border: 'none', color: '#fff', borderRadius: 8, padding: '5px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>🖨 Register PDF</button>
-                  <div style={{ width: 1, background: 'rgba(255,255,255,0.25)', margin: '2px 4px' }} />
-                  <button onClick={() => printPayslip(selectedPayrollEmployee, summary, days)} style={{ background: '#fff', color: PRIMARY, border: 'none', borderRadius: 8, padding: '5px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>📄 Payslip PDF</button>
-                  <button onClick={() => emailPayslip(selectedPayrollEmployee, summary)} style={{ background: 'rgba(255,255,255,0.15)', border: 'none', color: '#fff', borderRadius: 8, padding: '5px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>✉️ Email</button>
-                  <button onClick={() => whatsappPayslip(selectedPayrollEmployee, summary)} style={{ background: '#25D366', border: 'none', color: '#fff', borderRadius: 8, padding: '5px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>💬 WhatsApp</button>
-                  <div style={{ width: 1, background: 'rgba(255,255,255,0.25)', margin: '2px 4px' }} />
-                  {(() => {
-                    const payment = isEmployeePaid(selectedPayrollEmployee.id);
-                    return payment ? (
-                      <>
-                        <span style={{ background: 'rgba(34,197,94,0.25)', color: '#bbf7d0', border: '1px solid rgba(34,197,94,0.4)', borderRadius: 8, padding: '5px 12px', fontSize: 12, fontWeight: 700 }}>✓ Paid R{payment.net_pay.toFixed(2)} on {payment.paid_date}</span>
-                        <button onClick={() => undoEmployeePayment(payment)} style={{ background: 'rgba(255,255,255,0.15)', border: 'none', color: '#fff', borderRadius: 8, padding: '5px 12px', cursor: 'pointer', fontSize: 12 }}>Undo</button>
-                      </>
-                    ) : (
-                      <button onClick={() => { setPayForm({ paid_date: new Date().toISOString().split('T')[0], payment_method: 'Cash' }); setShowPayModal(true); }} style={{ background: '#fbbf24', color: '#1a1a1a', border: 'none', borderRadius: 8, padding: '5px 14px', cursor: 'pointer', fontSize: 12, fontWeight: 800 }}>💰 Mark as Paid</button>
-                    );
-                  })()}
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                  <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'rgba(255,255,255,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, fontWeight: 800, color: '#fff', flexShrink: 0 }}>{initials(selectedPayrollEmployee.full_name)}</div>
-                  <div>
-                    <div style={{ color: '#fff', fontWeight: 800, fontSize: 19 }}>{selectedPayrollEmployee.full_name}</div>
-                    <div style={{ color: 'rgba(255,255,255,0.7)', fontSize: 13 }}>{selectedPayrollEmployee.role}</div>
-                  </div>
-                </div>
+                {selectedPeriod && <span style={{ fontSize: '12px', fontWeight: '700', padding: '4px 12px', borderRadius: '100px', background: sc(selectedPeriod.status).bg, color: sc(selectedPeriod.status).color }}>{selectedPeriod.status.toUpperCase()}</span>}
+                <button onClick={() => setShowNewPeriod(true)} style={{ padding: '10px 18px', background: '#1a5c38', color: 'white', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: '800', cursor: 'pointer' }}>+ New Period</button>
               </div>
 
-              <div style={{ padding: '20px 24px', overflowY: 'auto' as const, flex: 1 }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
-                  <div style={{ background: '#fff', borderRadius: 14, padding: 16, border: '1px solid #eef2ee' }}>
-                    <div style={{ fontSize: 11, color: '#999', fontWeight: 700, marginBottom: 4 }}>HOURS THIS MONTH</div>
-                    <div style={{ fontSize: 22, fontWeight: 800, color: '#333' }}>{formatHM(summary.totalHours)}</div>
-                  </div>
-                  <div style={{ background: '#fff', borderRadius: 14, padding: 16, border: '1px solid #eef2ee' }}>
-                    <div style={{ fontSize: 11, color: '#999', fontWeight: 700, marginBottom: 4 }}>GROSS PAY THIS MONTH</div>
-                    <div style={{ fontSize: 22, fontWeight: 800, color: '#333' }}>R{summary.totalPay.toFixed(2)}</div>
-                  </div>
-                  <div style={{ background: '#fff7ed', borderRadius: 14, padding: 16, border: '1px solid #fed7aa', gridColumn: '1 / -1', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div>
-                      <div style={{ fontSize: 11, color: '#c2410c', fontWeight: 700 }}>DEDUCTIONS</div>
-                      <div style={{ fontSize: 13, color: '#c2410c' }}>UIF: -R{summary.uifEmployee.toFixed(2)}{summary.outstandingAdvances > 0 ? ` · Advance: -R${summary.outstandingAdvances.toFixed(2)}` : ''}</div>
+              {selectedPeriod && (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px' }}>
+                  {[
+                    { label: 'Total Gross Pay', value: formatCurrency(totalGross), color: '#111', border: '#eef2ee' },
+                    { label: 'Total UIF', value: formatCurrency(totalUIF), color: '#d97706', border: '#fde68a' },
+                    { label: 'Total Net Pay', value: formatCurrency(totalNet), color: '#1a5c38', border: '#bbf7d0' },
+                  ].map((k, i) => (
+                    <div key={i} style={{ background: 'white', borderRadius: '20px', border: `1.5px solid ${k.border}`, padding: '24px', textAlign: 'center', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
+                      <div style={{ fontSize: '24px', fontWeight: '800', color: k.color }}>{k.value}</div>
+                      <div style={{ fontSize: '13px', color: '#9ca3af', marginTop: '4px' }}>{k.label}</div>
                     </div>
-                    <div style={{ textAlign: 'right' as const }}><div style={{ fontSize: 11, color: '#999', fontWeight: 700 }}>NET PAY</div><div style={{ fontSize: 20, fontWeight: 800, color: PRIMARY }}>R{summary.netPay.toFixed(2)}</div></div>
+                  ))}
+                </div>
+              )}
+
+              {selectedPeriod && selectedPeriod.status === 'open' && (
+                <div style={{ display: 'flex', gap: '12px' }}>
+                  <button onClick={calculatePayroll} disabled={calculating} style={{ padding: '12px 24px', background: calculating ? '#d1d5db' : '#1a5c38', color: 'white', border: 'none', borderRadius: '12px', fontSize: '14px', fontWeight: '800', cursor: calculating ? 'not-allowed' : 'pointer' }}>
+                    {calculating ? '⏳ Calculating...' : '⚡ Calculate from Attendance'}
+                  </button>
+                  {periodRuns.length > 0 && (
+                    <button onClick={approvePeriod} style={{ padding: '12px 24px', background: '#1d4ed8', color: 'white', border: 'none', borderRadius: '12px', fontSize: '14px', fontWeight: '800', cursor: 'pointer' }}>✓ Approve Payroll</button>
+                  )}
+                </div>
+              )}
+              {selectedPeriod && selectedPeriod.status === 'approved' && (
+                <button onClick={markPaid} style={{ padding: '12px 24px', background: '#16a34a', color: 'white', border: 'none', borderRadius: '12px', fontSize: '14px', fontWeight: '800', cursor: 'pointer', width: 'fit-content' }}>💳 Mark as Paid</button>
+              )}
+
+              {selectedPeriod && periodRuns.length > 0 && (
+                <div style={{ background: 'white', borderRadius: '20px', border: '1.5px solid #eef2ee', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
+                  <div style={{ padding: '16px 24px', borderBottom: '1px solid #f3f4f6', fontWeight: '800', fontSize: '15px', color: '#111' }}>Employee Breakdown</div>
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <thead>
+                        <tr style={{ background: '#f9fafb' }}>
+                          {['Employee', 'Hours', 'Rate', 'Gross', 'UIF', 'PAYE', 'Advances', 'Savings', 'Net Pay', 'Status', ''].map(h => (
+                            <th key={h} style={{ padding: '12px 16px', textAlign: 'left', fontSize: '11px', fontWeight: '700', color: '#9ca3af', textTransform: 'uppercase' as const, letterSpacing: '0.5px', whiteSpace: 'nowrap' as const }}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {periodRuns.filter(run => employees.some(e => e.id === run.employee_id)).map(run => {
+                          const emp = employees.find(e => e.id === run.employee_id)
+                          const s = sc(run.status)
+                          return (
+                            <tr key={run.id} style={{ borderTop: '1px solid #f3f4f6' }}>
+                              <td style={{ padding: '14px 16px' }}>
+                                <div style={{ fontWeight: '700', fontSize: '14px', color: '#111' }}>{emp?.full_name || '—'}</div>
+                                <div style={{ fontSize: '12px', color: '#9ca3af' }}>{emp?.role}</div>
+                              </td>
+                              <td style={{ padding: '10px 16px' }}>
+                                <div style={{ fontSize: '14px', fontWeight: '700', color: '#111' }}>{formatHours(run.hours_worked)}</div>
+                                {((run.sunday_hours || 0) > 0 || (run.holiday_hours || 0) > 0 || (run.night_hours || 0) > 0) && (
+                                  <div style={{ marginTop: '4px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                    {(run.normal_hours || 0) > 0 && <div style={{ fontSize: '11px', color: '#6b7280' }}>📋 {formatHours(run.normal_hours || 0)} normal</div>}
+                                    {(run.sunday_hours || 0) > 0 && <div style={{ fontSize: '11px', color: '#7c3aed', fontWeight: '600' }}>☀ {formatHours(run.sunday_hours || 0)} Sun 1.5×</div>}
+                                    {(run.holiday_hours || 0) > 0 && <div style={{ fontSize: '11px', color: '#dc2626', fontWeight: '600' }}>🎉 {formatHours(run.holiday_hours || 0)} holiday 2×</div>}
+                                    {(run.night_hours || 0) > 0 && <div style={{ fontSize: '11px', color: '#1d4ed8', fontWeight: '600' }}>🌙 {formatHours(run.night_hours || 0)} night +R0.50</div>}
+                                  </div>
+                                )}
+                              </td>
+                              <td style={{ padding: '14px 16px', fontSize: '14px', color: '#374151' }}>R {run.hourly_rate.toFixed(2)}/h</td>
+                              <td style={{ padding: '14px 16px', fontSize: '14px', color: '#111', fontWeight: '700' }}>{formatCurrency(run.gross_pay)}</td>
+                              <td style={{ padding: '14px 16px', fontSize: '14px', color: '#d97706' }}>{formatCurrency(run.uif_employee)}</td>
+                              <td style={{ padding: '14px 16px', fontSize: '14px', color: '#dc2626' }}>{formatCurrency(run.paye_tax)}</td>
+                              <td style={{ padding: '14px 16px', fontSize: '14px', color: '#7c3aed' }}>{formatCurrency(run.advances_deducted)}</td>
+                              <td style={{ padding: '14px 16px', fontSize: '14px', color: '#0891b2' }}>{formatCurrency(run.savings_deducted || 0)}</td>
+                              <td style={{ padding: '14px 16px', fontSize: '15px', color: '#1a5c38', fontWeight: '800' }}>{formatCurrency(run.net_pay)}</td>
+                              <td style={{ padding: '14px 16px' }}><span style={{ fontSize: '11px', fontWeight: '700', padding: '3px 10px', borderRadius: '100px', background: s.bg, color: s.color }}>{run.status}</span></td>
+                              <td style={{ padding: '14px 16px' }}><button onClick={async () => {
+                              setShowSlip(run)
+                              setSlipBreakdown(null)
+                              // Fetch attendance for Sunday/Holiday/Night breakdown
+                              if (!selectedPeriod) return
+                              const { data: att } = await supabase.from('attendance')
+                                .select('work_date, hours_worked, clock_in, clock_out')
+                                .eq('employee_id', run.employee_id)
+                                .gte('work_date', selectedPeriod.period_start)
+                                .lte('work_date', selectedPeriod.period_end)
+                                .not('clock_out', 'is', null)
+                              const { data: holidays } = await supabase.from('public_holidays')
+                                .select('holiday_date')
+                                .gte('holiday_date', selectedPeriod.period_start)
+                                .lte('holiday_date', selectedPeriod.period_end)
+                              const holidaySet = new Set((holidays || []).map((h: any) => h.holiday_date))
+                              const nightStart = 18
+                              let normalH = 0, sunH = 0, holH = 0, nightH = 0, otH = 0
+                              for (const r of (att || [])) {
+                                const dow = new Date(r.work_date + 'T00:00:00').getDay()
+                                const h = r.hours_worked || 0
+                                if (holidaySet.has(r.work_date)) holH += h
+                                else if (dow === 0) sunH += h
+                                else normalH += h
+                                // Night hours
+                                if (r.clock_in && r.clock_out) {
+                                  const inH = parseInt(r.clock_in.split('T')[1]?.split(':')[0] || r.clock_in.split(':')[0] || '0')
+                                  if (inH >= nightStart || inH < 6) nightH += Math.min(h, 2)
+                                }
+                              }
+                              const rate = run.hourly_rate || 0
+                              const sunMult = 1.5, holMult = 2, nightRate = 0.5
+                              setSlipBreakdown({
+                                normalHours: normalH, normalPay: normalH * rate,
+                                sundayHours: sunH, sundayPay: sunH * rate * sunMult,
+                                holidayHours: holH, holidayPay: holH * rate * holMult,
+                                nightHours: nightH, nightPay: nightH * nightRate,
+                                overtimeHours: 0, overtimePay: 0,
+                              })
+                            }} style={{ fontSize: '12px', color: '#1d4ed8', background: '#eff6ff', border: 'none', borderRadius: '8px', padding: '5px 10px', cursor: 'pointer', fontWeight: '600' }}>Slip</button></td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
+              )}
 
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' as const, marginBottom: 20 }}>
-                  <div style={{ background: '#fff', border: '1px solid #eef2ee', borderRadius: 10, padding: '6px 12px', fontSize: 12 }}>Normal: <b>{formatHM(summary.normalHours)}</b> · R{summary.normalPay.toFixed(2)}</div>
-                  {summary.otHours > 0 && <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 10, padding: '6px 12px', fontSize: 12, color: '#dc2626' }}>Overtime: <b>{formatHM(summary.otHours)}</b> · R{summary.otPay.toFixed(2)}</div>}
-                  {summary.sundayHolidayHours > 0 && <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 10, padding: '6px 12px', fontSize: 12, color: '#2563eb' }}>Sunday/Holiday: <b>{formatHM(summary.sundayHolidayHours)}</b> · R{summary.sundayHolidayPay.toFixed(2)}</div>}
-                  {summary.nightHours > 0 && <div style={{ background: '#f5f3ff', border: '1px solid #ddd6fe', borderRadius: 10, padding: '6px 12px', fontSize: 12, color: '#7c3aed' }}>🌙 Night Allowance: <b>{formatHM(summary.nightHours)}</b> · R{summary.nightPay.toFixed(2)}</div>}
-                  {summary.leaveHours > 0 && <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 10, padding: '6px 12px', fontSize: 12, color: '#c2410c' }}>🌴 Paid Leave: <b>{formatHM(summary.leaveHours)}</b> · R{summary.leavePay.toFixed(2)}</div>}
-                  <div style={{ background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 10, padding: '6px 12px', fontSize: 12, color: '#6b7280' }}>UIF (Employer): R{summary.uifEmployer.toFixed(2)}</div>
+              {selectedPeriod && periodRuns.length === 0 && (
+                <div style={{ background: 'white', borderRadius: '20px', border: '1.5px solid #eef2ee', padding: '48px', textAlign: 'center', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
+                  <div style={{ fontSize: '48px', marginBottom: '12px' }}>⚡</div>
+                  <div style={{ fontSize: '16px', fontWeight: '700', color: '#111', marginBottom: '6px' }}>No payroll calculated yet</div>
+                  <div style={{ fontSize: '13px', color: '#9ca3af' }}>Click &quot;Calculate from Attendance&quot; to pull hours and compute wages</div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ADVANCES TAB */}
+          {tab === 'advances' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <div style={{ fontSize: '18px', fontWeight: '800', color: '#111' }}>Wage Advances</div>
+                  <div style={{ fontSize: '13px', color: '#9ca3af', marginTop: '2px' }}>Advances marked &quot;deduct from wages&quot; are automatically deducted on next payroll run. This includes advances logged in Cash Up.</div>
+                </div>
+                <button onClick={() => setShowAdvanceModal(true)} style={{ padding: '10px 20px', background: '#1a5c38', color: 'white', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: '800', cursor: 'pointer' }}>+ Log Advance</button>
+              </div>
+
+              {unpaidAdvances.length > 0 && (
+                <div style={{ background: 'white', border: '1.5px solid #fde68a', borderRadius: '16px', padding: '16px 24px', display: 'flex', alignItems: 'center', gap: '14px', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
+                  <div style={{ width: '38px', height: '38px', borderRadius: '10px', background: '#fef3c7', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px', flexShrink: 0 }}>💵</div>
+                  <div>
+                    <div style={{ fontWeight: '700', color: '#92400e', fontSize: '14px' }}>{unpaidAdvances.length} outstanding advance{unpaidAdvances.length > 1 ? 's' : ''} pending deduction</div>
+                    <div style={{ fontSize: '12px', color: '#b45309' }}>Total: {formatCurrency(unpaidAdvances.reduce((s, a) => s + a.amount, 0))} — will be deducted on next payroll run</div>
+                  </div>
+                </div>
+              )}
+
+              <div style={{ background: 'white', borderRadius: '20px', border: '1.5px solid #eef2ee', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                  <div style={{ fontWeight: 700, color: '#374151', fontSize: 14 }}>
+                    {advances.filter(a => a.advance_date?.replace(/\//g, '-').slice(0,7) === advanceMonth).length} advance(s) in {new Date(advanceMonth + '-01').toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' })}
+                  </div>
+                  <input type="month" value={advanceMonth} onChange={e => setAdvanceMonth(e.target.value)}
+                    style={{ padding: '6px 12px', border: '1.5px solid #e5e7eb', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer', background: '#f9fafb' }} />
                 </div>
 
-                {empAdvances.filter(a => a.repayment_status === 'outstanding').length > 0 && (
-                  <div style={{ marginBottom: 20 }}>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: '#333', marginBottom: 8 }}>Outstanding Advances</div>
-                    {empAdvances.filter(a => a.repayment_status === 'outstanding').map(a => (
-                      <div key={a.id} style={{ background: '#fff', borderRadius: 10, padding: '10px 14px', border: '1px solid #eef2ee', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                        <div><span style={{ fontWeight: 700 }}>R{Number(a.amount).toFixed(2)}</span> <span style={{ fontSize: 12, color: '#999' }}>{a.advance_date}{a.reason ? ` — ${a.reason}` : ''}</span></div>
-                        <button onClick={() => markAdvanceRepaid(a.id)} style={{ fontSize: 12, background: '#f0f4f0', border: 'none', borderRadius: 8, padding: '5px 12px', cursor: 'pointer', fontWeight: 600 }}>Mark Repaid</button>
-                      </div>
-                    ))}
+                {advances.filter(a => a.repayment_status === 'paid').length > 0 && (
+                  <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 10, padding: 12, marginBottom: 16, fontSize: 13, color: '#92400e' }}>
+                    <strong>⚠ Incorrectly settled advances?</strong> If advances were marked paid by a calculate run (not by actual payment), use the Revert button below to reset them to Outstanding.
                   </div>
                 )}
-
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: '#333' }}>Daily Register — {new Date(payrollMonth + '-01').toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' })}</div>
-                  <div style={{ display: 'flex', gap: 12, fontSize: 11, color: '#999' }}>
-                    <span><span style={{ display: 'inline-block', width: 10, height: 10, background: '#fde8e8', borderRadius: 2, marginRight: 4, verticalAlign: 'middle' }} />Public Holiday</span>
-                    <span><span style={{ display: 'inline-block', width: 10, height: 10, background: '#f3f4f6', border: '1px solid #e5e7eb', borderRadius: 2, marginRight: 4, verticalAlign: 'middle' }} />Weekend</span>
-                  </div>
-                </div>
-                <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #eef2ee', overflow: 'hidden' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse' as const, fontSize: 13 }}>
+                {advances.length === 0 ? (
+                  <div style={{ padding: '48px', textAlign: 'center', color: '#9ca3af' }}>No advances logged yet</div>
+                ) : (
+                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                     <thead>
-                      <tr style={{ background: '#f9fafb', borderBottom: '1px solid #e5e7eb' }}>
-                        {['Date', 'Day', 'Clock In', 'Clock Out', 'Hours', 'Type', 'Pay'].map(h => (
-                          <th key={h} style={{ padding: '10px 12px', textAlign: h === 'Pay' ? 'right' as const : 'left' as const, color: '#6b7280', fontWeight: 700, fontSize: 11, textTransform: 'uppercase' as const }}>{h}</th>
+                      <tr style={{ background: '#f9fafb' }}>
+                        {['Employee', 'Amount', 'Date', 'Reason', 'Deduct from Wages', 'Status'].map(h => (
+                          <th key={h} style={{ padding: '12px 20px', textAlign: 'left', fontSize: '11px', fontWeight: '700', color: '#9ca3af', textTransform: 'uppercase' as const, letterSpacing: '0.5px' }}>{h}</th>
                         ))}
                       </tr>
                     </thead>
                     <tbody>
-                      {days.flatMap(day => {
-                        const isWeekend = new Date(day.date + 'T00:00:00').getDay() === 6 || day.type === 'sunday';
-                        const rowBg = day.type === 'holiday' ? '#fde8e8' : isWeekend ? '#f3f4f6' : '#fff';
-                        const typeCell = day.leave ? (
-                          <span style={{ color: '#c2410c', fontWeight: 600 }}>🌴 {day.leave.leave_type}{day.leave.status !== 'approved' ? ` (${day.leave.status})` : ''}</span>
-                        ) : day.label ? (
-                          <span style={{ color: day.type === 'holiday' ? '#dc2626' : '#2563eb', fontWeight: 700 }}>{day.label} · {day.mult}x</span>
-                        ) : (
-                          <span style={{ color: '#ccc' }}>—</span>
-                        );
-                        // No sessions that day (leave or blank) — one summary row as before
-                        if (day.sessions.length <= 1) {
-                          const s = day.sessions[0];
-                          return [
-                            <tr key={day.date} style={{ background: rowBg, borderBottom: '1px solid #f3f4f6' }}>
-                              <td style={{ padding: '8px 12px', color: '#374151' }}>{day.date}</td>
-                              <td style={{ padding: '8px 12px', color: '#6b7280', fontWeight: 600 }}>{day.dayName}</td>
-                              <td style={{ padding: '8px 12px', color: '#374151' }}>{s?.clockIn ? new Date(s.clockIn).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : '—'}</td>
-                              <td style={{ padding: '8px 12px', color: '#374151' }}>{s?.isOpen ? <span style={{ color: '#22c55e', fontWeight: 700 }}>On shift</span> : s?.clockOut ? new Date(s.clockOut).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : '—'}</td>
-                              <td style={{ padding: '8px 12px', fontWeight: 700, color: '#111' }}>
-                                {day.leave ? formatHM(day.leaveHours) : day.hours > 0 ? formatHM(day.hours) : '—'}
-                                {day.isLate && <span style={{ fontSize: 10, fontWeight: 700, color: '#f59e0b', marginLeft: 6 }}>LATE</span>}
-                                {day.nightHours > 0 && <span style={{ fontSize: 10, fontWeight: 700, color: '#7c3aed', marginLeft: 6 }}>🌙 {formatHM(day.nightHours)}</span>}
-                              </td>
-                              <td style={{ padding: '8px 12px' }}>{typeCell}</td>
-                              <td style={{ padding: '8px 12px', textAlign: 'right' as const, fontWeight: 700, color: PRIMARY }}>{day.pay > 0 ? `R${day.pay.toFixed(2)}` : '—'}</td>
-                            </tr>
-                          ];
-                        }
-                        // Multiple sessions that day — one row per session, each with its own real
-                        // clock in/out so nothing implies a single long shift that didn't happen.
-                        return day.sessions.map((s, i) => (
-                          <tr key={`${day.date}-${i}`} style={{ background: rowBg, borderBottom: i === day.sessions.length - 1 ? '2px solid #e5e7eb' : '1px dashed #e5e7eb' }}>
-                            <td style={{ padding: '8px 12px', color: i === 0 ? '#374151' : '#bbb' }}>{i === 0 ? day.date : ''}</td>
-                            <td style={{ padding: '8px 12px', color: i === 0 ? '#6b7280' : '#ccc', fontWeight: 600 }}>{i === 0 ? day.dayName : `Session ${i + 1}`}</td>
-                            <td style={{ padding: '8px 12px', color: '#374151' }}>{s.clockIn ? new Date(s.clockIn).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : '—'}</td>
-                            <td style={{ padding: '8px 12px', color: '#374151' }}>{s.isOpen ? <span style={{ color: '#22c55e', fontWeight: 700 }}>On shift</span> : s.clockOut ? new Date(s.clockOut).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : '—'}</td>
-                            <td style={{ padding: '8px 12px', fontWeight: 700, color: '#111' }}>
-                              {formatHM(s.hours)}
-                              {s.isLate && <span style={{ fontSize: 10, fontWeight: 700, color: '#f59e0b', marginLeft: 6 }}>LATE</span>}
-                              {s.nightHours > 0 && <span style={{ fontSize: 10, fontWeight: 700, color: '#7c3aed', marginLeft: 6 }}>🌙 {formatHM(s.nightHours)}</span>}
+                      {advances.filter(adv => adv.advance_date?.replace(/\//g, '-').slice(0,7) === advanceMonth).map(adv => {
+                        const emp = employees.find(e => e.id === adv.employee_id)
+                        return (
+                          <tr key={adv.id} style={{ borderTop: '1px solid #f3f4f6' }}>
+                            <td style={{ padding: '14px 20px', fontWeight: '700', fontSize: '14px', color: '#111' }}>{emp?.full_name || '—'}</td>
+                            <td style={{ padding: '14px 20px', fontWeight: '800', fontSize: '15px', color: '#dc2626' }}>{formatCurrency(adv.amount)}</td>
+                            <td style={{ padding: '14px 20px', fontSize: '13px', color: '#6b7280' }}>{new Date(adv.advance_date).toLocaleDateString('en-ZA')}</td>
+                            <td style={{ padding: '14px 20px', fontSize: '13px', color: '#374151' }}>{adv.reason || '—'}</td>
+                            <td style={{ padding: '14px 20px' }}>
+                              <span style={{ fontSize: '11px', fontWeight: '700', padding: '3px 10px', borderRadius: '100px', background: adv.deduct_from_wages ? '#dcfce7' : '#fef2f2', color: adv.deduct_from_wages ? '#166534' : '#dc2626' }}>
+                                {adv.deduct_from_wages ? '✓ Yes' : 'No'}
+                              </span>
+                              {!adv.deduct_from_wages && adv.repayment_status === 'outstanding' && (
+                                <button onClick={async () => { await supabase.from('employee_advances').update({ deduct_from_wages: true }).eq('id', adv.id); await loadAll() }} style={{ fontSize: '11px', fontWeight: '700', color: '#166534', background: '#dcfce7', border: '1px solid #bbf7d0', borderRadius: '6px', padding: '2px 8px', cursor: 'pointer', marginLeft: '6px' }}>Enable</button>
+                              )}
                             </td>
-                            <td style={{ padding: '8px 12px' }}>{i === 0 ? typeCell : null}</td>
-                            <td style={{ padding: '8px 12px', textAlign: 'right' as const, fontWeight: 700, color: PRIMARY }}>{s.pay > 0 ? `R${s.pay.toFixed(2)}` : '—'}</td>
+                            <td style={{ padding: '14px 20px' }}>
+                              <span style={{ fontSize: '11px', fontWeight: '700', padding: '3px 10px', borderRadius: '100px', background: adv.repayment_status === 'paid' ? '#dcfce7' : '#fef3c7', color: adv.repayment_status === 'paid' ? '#166634' : '#92400e' }}>
+                                {adv.repayment_status === 'paid' ? 'Deducted' : 'Outstanding'}
+                              </span>
+                              {adv.repayment_status === 'paid' && (
+                                <button onClick={async () => { if (!confirm('Revert to Outstanding?')) return; await supabase.from('employee_advances').update({ repayment_status: 'outstanding', payroll_period_id: null }).eq('id', adv.id); await loadAll() }} style={{ fontSize: '11px', fontWeight: '700', color: '#d97706', background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: '6px', padding: '2px 8px', cursor: 'pointer', marginLeft: '6px' }}>↩ Revert</button>
+                              )}
+                            </td>
                           </tr>
-                        ));
+                        )
                       })}
                     </tbody>
                   </table>
-                </div>
+                )}
               </div>
             </div>
-          </div>
-
-          {showPayModal && (
-            <ModalWrap onClose={() => setShowPayModal(false)}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-                <div style={{ fontSize: 18, fontWeight: 700 }}>Mark as Paid</div>
-                <button onClick={() => setShowPayModal(false)} style={{ background: '#f0f4f0', border: 'none', borderRadius: 8, padding: '6px 14px', cursor: 'pointer' }}>Cancel</button>
-              </div>
-              <div style={{ background: '#f0f7f4', borderRadius: 12, padding: 16, marginBottom: 16 }}>
-                <div style={{ fontSize: 13, color: '#666', marginBottom: 4 }}>{selectedPayrollEmployee.full_name} — {new Date(payrollMonth + '-01').toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' })}</div>
-                <div style={{ fontSize: 24, fontWeight: 800, color: PRIMARY }}>R{summary.netPay.toFixed(2)}</div>
-                <div style={{ fontSize: 12, color: '#999' }}>Net pay, after UIF{summary.outstandingAdvances > 0 ? ' and advances' : ''}</div>
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                <div><label style={lbl}>Date Paid</label><input type="date" value={payForm.paid_date} onChange={e => setPayForm(p => ({ ...p, paid_date: e.target.value }))} style={inp} /></div>
-                <div><label style={lbl}>Payment Method</label><select value={payForm.payment_method} onChange={e => setPayForm(p => ({ ...p, payment_method: e.target.value }))} style={inp}>{['Cash', 'Bank Transfer', 'EFT'].map(m => <option key={m}>{m}</option>)}</select></div>
-              </div>
-              <div style={{ fontSize: 12, color: '#999', marginTop: 12 }}>This will create a R{summary.netPay.toFixed(2)} expense under &quot;Wages / Salaries&quot; in Income &amp; Expenses dated {payForm.paid_date}, and settle any outstanding advances deducted this period.</div>
-              <button onClick={() => markEmployeePaid(selectedPayrollEmployee, summary)} disabled={paying} style={{ width: '100%', marginTop: 20, padding: '13px', background: '#fbbf24', color: '#1a1a1a', border: 'none', borderRadius: 12, fontWeight: 800, cursor: 'pointer', fontSize: 15 }}>{paying ? 'Saving…' : `💰 Confirm Paid R${summary.netPay.toFixed(2)}`}</button>
-            </ModalWrap>
           )}
-          </>
-        );
-      })()}
 
-      {/* Header */}
-      <div style={{ background: `linear-gradient(135deg, ${DARK}, ${PRIMARY})`, padding: '0 32px' }}>
-        <div style={{ maxWidth: 1200, margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 64 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <button onClick={() => router.push('/dashboard')} style={{ background: 'rgba(255,255,255,0.15)', border: 'none', color: '#fff', borderRadius: 8, padding: '6px 14px', cursor: 'pointer', fontSize: 14 }}>← Back</button>
-            <span style={{ color: '#fff', fontWeight: 700, fontSize: 18 }}>Time & Attendance</span>
-          </div>
-          <div style={{ display: 'flex', gap: 10 }}>
-            <button onClick={() => window.open('/attendance/clock', '_blank')} style={{ background: '#fff', color: PRIMARY, border: 'none', borderRadius: 10, padding: '8px 18px', fontWeight: 700, cursor: 'pointer', fontSize: 13 }}>🎭 Open Kiosk</button>
-            <button onClick={() => setShowManualModal(true)} style={{ background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.3)', color: '#fff', borderRadius: 10, padding: '8px 16px', fontWeight: 600, cursor: 'pointer', fontSize: 13 }}>+ Manual Entry</button>
+          {/* SLIPS TAB */}
+
+          {/* SAVINGS TAB */}
+          {tab === 'savings' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              <div>
+                <div style={{ fontSize: '18px', fontWeight: '800', color: '#111' }}>Employee Savings</div>
+                <div style={{ fontSize: '13px', color: '#9ca3af', marginTop: '2px' }}>Set how much to deduct per payroll for each employee&apos;s savings. Savings are held by you and can be withdrawn at any time.</div>
+              </div>
+              {totalSavings > 0 && (
+                <div style={{ background: 'white', border: '1.5px solid #a5f3fc', borderRadius: '16px', padding: '16px 24px', display: 'flex', alignItems: 'center', gap: '14px', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
+                  <div style={{ width: '38px', height: '38px', borderRadius: '10px', background: '#e0f2fe', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px', flexShrink: 0 }}>🐷</div>
+                  <div>
+                    <div style={{ fontWeight: '700', color: '#0e7490', fontSize: '14px' }}>Total savings held across all employees</div>
+                    <div style={{ fontSize: '12px', color: '#0891b2' }}>{formatCurrency(savings.reduce((s, e) => s + e.balance, 0))} in savings balances · {formatCurrency(totalSavings)} deducted this period</div>
+                  </div>
+                </div>
+              )}
+              <div style={{ background: 'white', borderRadius: '20px', border: '1.5px solid #eef2ee', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ background: '#f9fafb' }}>
+                      {['Employee', 'Deduction / Payroll', 'Current Balance', ''].map(h => (
+                        <th key={h} style={{ padding: '12px 20px', textAlign: 'left', fontSize: '11px', fontWeight: '700', color: '#9ca3af', textTransform: 'uppercase' as const, letterSpacing: '0.5px' }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {employees.map(emp => {
+                      const empSaving = savings.find(s => s.employee_id === emp.id)
+                      const isEditing = savingsEditId === emp.id
+                      return (
+                        <tr key={emp.id} style={{ borderTop: '1px solid #f3f4f6' }}>
+                          <td style={{ padding: '14px 20px' }}>
+                            <div style={{ fontWeight: '700', fontSize: '14px', color: '#111' }}>{emp.full_name}</div>
+                            <div style={{ fontSize: '12px', color: '#9ca3af' }}>{emp.role}</div>
+                          </td>
+                          <td style={{ padding: '14px 20px' }}>
+                            {isEditing ? (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <input type="number" step="0.01" min="0" value={savingsInput} onChange={e => setSavingsInput(e.target.value)} placeholder="0.00" style={{ ...INPUT_STYLE, width: 110 }} />
+                                <button onClick={() => upsertSavings(emp.id, parseFloat(savingsInput) || 0)} style={{ padding: '6px 14px', background: '#1a5c38', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '700' }}>Save</button>
+                                <button onClick={() => { setSavingsEditId(null); setSavingsInput('') }} style={{ padding: '6px 10px', background: '#f3f4f6', color: '#6b7280', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '14px' }}>✕</button>
+                              </div>
+                            ) : (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <span style={{ fontWeight: '700', color: empSaving?.deduction_per_payroll ? '#0891b2' : '#9ca3af' }}>
+                                  {empSaving?.deduction_per_payroll ? formatCurrency(empSaving.deduction_per_payroll) : 'Not set'}
+                                </span>
+                                <button onClick={() => { setSavingsEditId(emp.id); setSavingsInput(empSaving?.deduction_per_payroll?.toString() || '') }} style={{ fontSize: '11px', color: '#1d4ed8', background: '#eff6ff', border: 'none', borderRadius: '6px', padding: '3px 8px', cursor: 'pointer', fontWeight: '600' }}>
+                                  {empSaving?.deduction_per_payroll ? 'Edit' : 'Set up'}
+                                </button>
+                              </div>
+                            )}
+                          </td>
+                          <td style={{ padding: '14px 20px' }}>
+                            <span style={{ fontWeight: '800', fontSize: '15px', color: (empSaving?.balance || 0) > 0 ? '#1a5c38' : '#9ca3af' }}>
+                              {formatCurrency(empSaving?.balance || 0)}
+                            </span>
+                          </td>
+                          <td style={{ padding: '14px 20px' }}>
+                            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' as const }}>
+                              <button onClick={() => { setWithdrawId(emp.id); setWithdrawInput(''); setWithdrawDate(new Date().toISOString().split('T')[0]); setWithdrawNotes('') }} style={{ fontSize: '12px', color: '#dc2626', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '8px', padding: '5px 12px', cursor: 'pointer', fontWeight: '700' }}>
+                                Withdraw
+                              </button>
+                              <button onClick={() => { setHistoryId(emp.id); loadLedger(emp.id) }} style={{ fontSize: '12px', color: '#1d4ed8', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '8px', padding: '5px 12px', cursor: 'pointer', fontWeight: '700' }}>
+                                History
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* SETTINGS TAB */}
+          {tab === 'settings' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <div style={{ fontSize: '18px', fontWeight: '800', color: '#111' }}>Employee Wage Settings</div>
+                  <div style={{ fontSize: '13px', color: '#9ca3af', marginTop: '2px' }}>Set hourly rate, UIF and tax per employee</div>
+                </div>
+                <button onClick={() => setShowWageModal(true)} style={{ padding: '10px 20px', background: '#1a5c38', color: 'white', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: '800', cursor: 'pointer' }}>+ Set Wage</button>
+              </div>
+              <div style={{ background: 'white', borderRadius: '20px', border: '1.5px solid #eef2ee', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ background: '#f9fafb' }}>
+                      {['Employee', 'Role', 'Hourly Rate', 'Night Rate', 'UIF %', 'PAYE %', 'Pay Freq', ''].map(h => (
+                        <th key={h} style={{ padding: '12px 20px', textAlign: 'left', fontSize: '11px', fontWeight: '700', color: '#9ca3af', textTransform: 'uppercase' as const, letterSpacing: '0.5px' }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {employees.map(emp => {
+                      const wage = wages.find(w => w.employee_id === emp.id)
+                      return (
+                        <tr key={emp.id} style={{ borderTop: '1px solid #f3f4f6' }}>
+                          <td style={{ padding: '14px 20px', fontWeight: '700', fontSize: '14px', color: '#111' }}>{emp.full_name}</td>
+                          <td style={{ padding: '14px 20px', fontSize: '13px', color: '#6b7280' }}>{emp.role}</td>
+                          <td style={{ padding: '14px 20px', fontWeight: '800', fontSize: '14px', color: '#1a5c38' }}>{wage ? `R ${wage.hourly_rate.toFixed(2)}/h` : <span style={{ color: '#d1d5db' }}>Not set</span>}</td>
+                          <td style={{ padding: '14px 16px', fontSize: '14px', color: '#374151' }}>{(emp as any).night_allowance_rate ? `R ${parseFloat((emp as any).night_allowance_rate).toFixed(2)}/h` : <span style={{ color: '#d1d5db' }}>—</span>}</td>
+                          <td style={{ padding: '14px 20px', fontSize: '13px', color: '#374151' }}>{wage ? `${(wage.uif_employee * 100).toFixed(1)}%` : '—'}</td>
+                          <td style={{ padding: '14px 20px', fontSize: '13px', color: '#374151' }}>{wage ? `${(wage.tax_rate * 100).toFixed(1)}%` : '—'}</td>
+                          <td style={{ padding: '14px 20px', fontSize: '13px', color: '#374151' }}>{wage?.pay_frequency || '—'}</td>
+                          <td style={{ padding: '14px 20px' }}>
+                            <button onClick={() => {
+                              setWageForm({ employee_id: emp.id, hourly_rate: wage?.hourly_rate?.toString() || '', night_allowance_rate: (emp as any).night_allowance_rate?.toString() || '', uif_employee: wage?.uif_employee?.toString() || '0.01', uif_employer: wage?.uif_employer?.toString() || '0.01', tax_rate: wage?.tax_rate?.toString() || '0', pay_frequency: wage?.pay_frequency || 'monthly', bank_name: wage?.bank_name || '', bank_account: wage?.bank_account || '', bank_branch: wage?.bank_branch || '', id_number: wage?.id_number || '' })
+                              setShowWageModal(true)
+                            }} style={{ fontSize: '12px', color: '#1d4ed8', background: '#eff6ff', border: 'none', borderRadius: '8px', padding: '5px 10px', cursor: 'pointer', fontWeight: '600' }}>Edit</button>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </>)}
+
+        <div style={{ marginTop: '48px', textAlign: 'center' }}><p style={{ fontSize: '12px', color: '#9ca3af' }}>CompliTrack © 2026 • Store Management Platform • South Africa 🇿🇦</p></div>
+      </main>
+
+      {/* New Period Modal */}
+      {showNewPeriod && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: '16px' }}>
+          <div style={{ background: 'white', borderRadius: '24px', width: '100%', maxWidth: '440px', boxShadow: '0 24px 60px rgba(0,0,0,0.2)' }}>
+            <div style={{ padding: '24px 28px 16px', borderBottom: '1px solid #f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <h2 style={{ fontSize: '18px', fontWeight: '800', color: '#111', margin: 0 }}>New Pay Period</h2>
+              <button onClick={() => setShowNewPeriod(false)} style={{ background: '#f3f4f6', border: 'none', borderRadius: '8px', width: '32px', height: '32px', cursor: 'pointer', fontSize: '16px' }}>✕</button>
+            </div>
+            <div style={{ padding: '20px 28px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div><label style={LABEL_STYLE}>Pay Frequency</label><select value={periodForm.pay_frequency} onChange={e => setPeriodForm(f => ({ ...f, pay_frequency: e.target.value }))} style={INPUT_STYLE}><option value="weekly">Weekly</option><option value="biweekly">Bi-weekly</option><option value="monthly">Monthly</option></select></div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                <div><label style={LABEL_STYLE}>Start Date</label><input type="date" value={periodForm.period_start} onChange={e => setPeriodForm(f => ({ ...f, period_start: e.target.value }))} style={INPUT_STYLE} /></div>
+                <div><label style={LABEL_STYLE}>End Date</label><input type="date" value={periodForm.period_end} onChange={e => setPeriodForm(f => ({ ...f, period_end: e.target.value }))} style={INPUT_STYLE} /></div>
+              </div>
+            </div>
+            <div style={{ padding: '16px 28px 24px', display: 'flex', gap: '12px' }}>
+              <button onClick={() => setShowNewPeriod(false)} style={{ flex: 1, border: '1.5px solid #e5e7eb', color: '#374151', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: '700', cursor: 'pointer', background: 'white' }}>Cancel</button>
+              <button onClick={createPeriod} disabled={saving} style={{ flex: 1, background: '#1a5c38', color: 'white', border: 'none', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: '800', cursor: 'pointer' }}>Create Period</button>
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
-      <div style={{ maxWidth: 1200, margin: '0 auto', padding: '32px 24px' }}>
-        {loading && <div style={{ textAlign: 'center', padding: 80, color: '#666' }}>Loading...</div>}
-        {!loading && (
-          <div>
-            {currentShift && (
-              <div style={{ background: `linear-gradient(135deg, ${DARK}, ${PRIMARY})`, borderRadius: 16, padding: '16px 24px', marginBottom: 24, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <div><div style={{ color: 'rgba(255,255,255,0.7)', fontSize: 12, fontWeight: 600, marginBottom: 4 }}>CURRENT SHIFT</div><div style={{ color: '#fff', fontWeight: 800, fontSize: 20 }}>{currentShift.shift_name}</div><div style={{ color: 'rgba(255,255,255,0.7)', fontSize: 13, marginTop: 2 }}>{currentShift.start_time} — {currentShift.end_time}</div></div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><div style={{ width: 10, height: 10, borderRadius: '50%', background: '#4ade80' }} /><span style={{ color: '#fff', fontWeight: 600, fontSize: 14 }}>Active</span></div>
+      {/* Advance Modal */}
+      {showAdvanceModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: '16px' }}>
+          <div style={{ background: 'white', borderRadius: '24px', width: '100%', maxWidth: '440px', boxShadow: '0 24px 60px rgba(0,0,0,0.2)' }}>
+            <div style={{ padding: '24px 28px 16px', borderBottom: '1px solid #f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <h2 style={{ fontSize: '18px', fontWeight: '800', color: '#111', margin: 0 }}>Log Advance</h2>
+              <button onClick={() => setShowAdvanceModal(false)} style={{ background: '#f3f4f6', border: 'none', borderRadius: '8px', width: '32px', height: '32px', cursor: 'pointer', fontSize: '16px' }}>✕</button>
+            </div>
+            <div style={{ padding: '20px 28px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div><label style={LABEL_STYLE}>Employee *</label><select value={advanceForm.employee_id} onChange={e => setAdvanceForm(f => ({ ...f, employee_id: e.target.value }))} style={INPUT_STYLE}><option value="">Select employee</option>{employees.map(e => <option key={e.id} value={e.id}>{e.full_name}</option>)}</select></div>
+              <div><label style={LABEL_STYLE}>Amount (R) *</label><input type="number" value={advanceForm.amount} onChange={e => setAdvanceForm(f => ({ ...f, amount: e.target.value }))} placeholder="e.g. 500" style={INPUT_STYLE} /></div>
+              <div><label style={LABEL_STYLE}>Date</label><input type="date" value={advanceForm.advance_date} onChange={e => setAdvanceForm(f => ({ ...f, advance_date: e.target.value }))} style={INPUT_STYLE} /></div>
+              <div><label style={LABEL_STYLE}>Reason</label><input type="text" value={advanceForm.reason} onChange={e => setAdvanceForm(f => ({ ...f, reason: e.target.value }))} placeholder="e.g. Emergency" style={INPUT_STYLE} /></div>
+              <div style={{ background: '#f0fdf4', borderRadius: '10px', padding: '12px', fontSize: '12px', color: '#166534', fontWeight: '600' }}>
+                ✅ This advance will be automatically deducted from the next payroll run
               </div>
-            )}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 32 }}>
-              {[{ label: 'ON SHIFT', value: onShiftNow, color: PRIMARY }, { label: 'COMPLETED', value: completedToday, color: '#1565c0' }, { label: 'LATE', value: lateToday, color: '#f57f17' }, { label: 'NOT IN', value: notClockedIn, color: notClockedIn > 0 ? '#ef4444' : PRIMARY }].map(item => (
-                <div key={item.label} style={{ background: '#fff', borderRadius: 20, padding: 24, border: '1px solid #eef2ee', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
-                  <div style={{ fontSize: 12, color: '#888', fontWeight: 600, marginBottom: 8 }}>{item.label}</div>
-                  <div style={{ fontSize: 40, fontWeight: 800, color: item.color }}>{item.value}</div>
-                </div>
-              ))}
             </div>
-            <div style={{ display: 'flex', gap: 4, background: '#fff', padding: 4, borderRadius: 14, border: '1px solid #eef2ee', marginBottom: 24, width: 'fit-content' }}>
-              {[{ key: 'today', label: '📅 Today' }, { key: 'history', label: '📊 History' }, { key: 'shifts', label: '⚙️ Shifts' }, { key: 'payroll', label: '💰 Payroll' }].map(tab => (
-                <button key={tab.key} onClick={() => setActiveTab(tab.key as typeof activeTab)} style={{ padding: '8px 20px', borderRadius: 10, border: 'none', cursor: 'pointer', fontWeight: 600, fontSize: 13, background: activeTab === tab.key ? PRIMARY : 'transparent', color: activeTab === tab.key ? '#fff' : '#666' }}>{tab.label}</button>
-              ))}
+            <div style={{ padding: '16px 28px 24px', display: 'flex', gap: '12px' }}>
+              <button onClick={() => setShowAdvanceModal(false)} style={{ flex: 1, border: '1.5px solid #e5e7eb', color: '#374151', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: '700', cursor: 'pointer', background: 'white' }}>Cancel</button>
+              <button onClick={saveAdvance} disabled={saving} style={{ flex: 1, background: '#1a5c38', color: 'white', border: 'none', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: '800', cursor: 'pointer' }}>Save Advance</button>
             </div>
+          </div>
+        </div>
+      )}
 
-            {activeTab === 'today' && (
-              <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                  <h2 style={{ fontSize: 18, fontWeight: 700, color: '#333', margin: 0 }}>{new Date().toLocaleDateString('en-ZA', { weekday: 'long', day: 'numeric', month: 'long' })}</h2>
-                  <span style={{ fontSize: 13, color: '#aaa' }}>{employees.length} active employees</span>
+      {/* Wage Settings Modal */}
+      {showWageModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: '16px' }}>
+          <div style={{ background: 'white', borderRadius: '24px', width: '100%', maxWidth: '520px', boxShadow: '0 24px 60px rgba(0,0,0,0.2)', maxHeight: '90vh', overflowY: 'auto' }}>
+            <div style={{ padding: '24px 28px 16px', borderBottom: '1px solid #f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <h2 style={{ fontSize: '18px', fontWeight: '800', color: '#111', margin: 0 }}>Wage Settings</h2>
+              <button onClick={() => setShowWageModal(false)} style={{ background: '#f3f4f6', border: 'none', borderRadius: '8px', width: '32px', height: '32px', cursor: 'pointer', fontSize: '16px' }}>✕</button>
+            </div>
+            <div style={{ padding: '20px 28px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div><label style={LABEL_STYLE}>Employee *</label><select value={wageForm.employee_id} onChange={e => setWageForm(f => ({ ...f, employee_id: e.target.value }))} style={INPUT_STYLE}><option value="">Select employee</option>{employees.map(e => <option key={e.id} value={e.id}>{e.full_name}</option>)}</select></div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                <div><label style={LABEL_STYLE}>Hourly Rate (R) *</label><input type="number" step="0.01" value={wageForm.hourly_rate} onChange={e => setWageForm(f => ({ ...f, hourly_rate: e.target.value }))} placeholder="e.g. 25.00" style={INPUT_STYLE} /></div>
+                <div><label style={LABEL_STYLE}>Night Allowance Rate (R/hr)</label><input type="number" step="0.01" value={wageForm.night_allowance_rate} onChange={e => setWageForm(f => ({ ...f, night_allowance_rate: e.target.value }))} placeholder="e.g. 5.00 extra per night hour" style={INPUT_STYLE} /><div style={{ fontSize: '11px', color: '#9ca3af', marginTop: 4 }}>Extra rate added per hour worked during night hours (on top of hourly rate)</div></div>
+                <div><label style={LABEL_STYLE}>Pay Frequency</label><select value={wageForm.pay_frequency} onChange={e => setWageForm(f => ({ ...f, pay_frequency: e.target.value }))} style={INPUT_STYLE}><option value="weekly">Weekly</option><option value="biweekly">Bi-weekly</option><option value="monthly">Monthly</option></select></div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
+                <div><label style={LABEL_STYLE}>UIF Emp %</label><input type="number" step="0.1" value={(parseFloat(wageForm.uif_employee || '0') * 100).toFixed(1)} onChange={e => setWageForm(f => ({ ...f, uif_employee: (parseFloat(e.target.value) / 100).toString() }))} style={INPUT_STYLE} /></div>
+                <div><label style={LABEL_STYLE}>UIF Emr %</label><input type="number" step="0.1" value={(parseFloat(wageForm.uif_employer || '0') * 100).toFixed(1)} onChange={e => setWageForm(f => ({ ...f, uif_employer: (parseFloat(e.target.value) / 100).toString() }))} style={INPUT_STYLE} /></div>
+                <div><label style={LABEL_STYLE}>PAYE %</label><input type="number" step="0.1" value={(parseFloat(wageForm.tax_rate || '0') * 100).toFixed(1)} onChange={e => setWageForm(f => ({ ...f, tax_rate: (parseFloat(e.target.value) / 100).toString() }))} style={INPUT_STYLE} /></div>
+              </div>
+              <div style={{ borderTop: '1px solid #f3f4f6', paddingTop: '16px' }}>
+                <div style={{ fontSize: '13px', fontWeight: '700', color: '#374151', marginBottom: '12px' }}>Banking Details</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  <div><label style={LABEL_STYLE}>ID Number</label><input type="text" value={wageForm.id_number} onChange={e => setWageForm(f => ({ ...f, id_number: e.target.value }))} placeholder="RSA ID number" style={INPUT_STYLE} /></div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                    <div><label style={LABEL_STYLE}>Bank Name</label><input type="text" value={wageForm.bank_name} onChange={e => setWageForm(f => ({ ...f, bank_name: e.target.value }))} placeholder="e.g. FNB" style={INPUT_STYLE} /></div>
+                    <div><label style={LABEL_STYLE}>Branch Code</label><input type="text" value={wageForm.bank_branch} onChange={e => setWageForm(f => ({ ...f, bank_branch: e.target.value }))} placeholder="e.g. 250655" style={INPUT_STYLE} /></div>
+                  </div>
+                  <div><label style={LABEL_STYLE}>Account Number</label><input type="text" value={wageForm.bank_account} onChange={e => setWageForm(f => ({ ...f, bank_account: e.target.value }))} placeholder="Bank account number" style={INPUT_STYLE} /></div>
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 16 }}>
-                  {employees.map(emp => {
-                    const empRecords = todayRecords.filter(r => r.employee_id === emp.id).sort((a, b) => (a.clock_in || '').localeCompare(b.clock_in || ''));
-                    const openRecord = empRecords.find(r => r.clock_in && !r.clock_out);
-                    const rc = ROLE_COLORS[emp.role] || { bg: '#f5f5f5', color: '#424242' };
-                    const isOnShift = !!openRecord;
-                    const isDone = empRecords.length > 0 && !openRecord;
-                    const totalHoursToday = empRecords.reduce((s, r) => s + (r.hours_worked || 0), 0);
-                    const isSaving = saving === emp.id || saving === openRecord?.id;
-                    const anyLate = empRecords.some(r => r.is_late);
-                    return (
-                      <div key={emp.id} style={{ background: '#fff', borderRadius: 16, border: `1.5px solid ${isOnShift ? '#bbf7d0' : '#eef2ee'}`, padding: 20, boxShadow: '0 2px 6px rgba(0,0,0,0.04)' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 16 }}>
-                          <div style={{ width: 48, height: 48, borderRadius: '50%', background: rc.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, fontWeight: 800, color: rc.color, flexShrink: 0, position: 'relative' as const }}>
-                            {initials(emp.full_name)}
-                            {isOnShift && <div style={{ position: 'absolute' as const, bottom: 0, right: 0, width: 12, height: 12, borderRadius: '50%', background: '#22c55e', border: '2px solid #fff' }} />}
+              </div>
+            </div>
+            <div style={{ padding: '16px 28px 24px', display: 'flex', gap: '12px' }}>
+              <button onClick={() => setShowWageModal(false)} style={{ flex: 1, border: '1.5px solid #e5e7eb', color: '#374151', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: '700', cursor: 'pointer', background: 'white' }}>Cancel</button>
+              <button onClick={saveWage} disabled={saving} style={{ flex: 1, background: '#1a5c38', color: 'white', border: 'none', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: '800', cursor: 'pointer' }}>Save</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Withdrawal Modal */}
+      {withdrawId && (() => {
+        const emp = employees.find(e => e.id === withdrawId)
+        const empSaving = savings.find(s => s.employee_id === withdrawId)
+        return (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: '16px' }}>
+            <div style={{ background: 'white', borderRadius: '24px', width: '100%', maxWidth: '400px', boxShadow: '0 24px 60px rgba(0,0,0,0.2)' }}>
+              <div style={{ padding: '24px 28px 16px', borderBottom: '1px solid #f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <h2 style={{ fontSize: '18px', fontWeight: '800', color: '#111', margin: 0 }}>Withdraw Savings</h2>
+                <button onClick={() => { setWithdrawId(null); setWithdrawInput('') }} style={{ background: '#f3f4f6', border: 'none', borderRadius: '8px', width: '32px', height: '32px', cursor: 'pointer', fontSize: '16px' }}>✕</button>
+              </div>
+              <div style={{ padding: '20px 28px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                <div style={{ background: '#f0fdf4', borderRadius: '10px', padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <div style={{ fontSize: '12px', color: '#166534', fontWeight: '700' }}>{emp?.full_name}</div>
+                    <div style={{ fontSize: '11px', color: '#4ade80' }}>Current savings balance</div>
+                  </div>
+                  <div style={{ fontSize: '22px', fontWeight: '900', color: '#1a5c38' }}>{formatCurrency(empSaving?.balance || 0)}</div>
+                </div>
+                <div>
+                  <label style={LABEL_STYLE}>Withdrawal Amount (R) *</label>
+                  <input type="number" step="0.01" min="0" max={empSaving?.balance || 0} value={withdrawInput} onChange={e => setWithdrawInput(e.target.value)} placeholder="0.00" style={INPUT_STYLE} />
+                </div>
+                <div>
+                  <label style={LABEL_STYLE}>Date *</label>
+                  <input type="date" value={withdrawDate} onChange={e => setWithdrawDate(e.target.value)} style={INPUT_STYLE} />
+                </div>
+                <div>
+                  <label style={LABEL_STYLE}>Reason / Notes</label>
+                  <input type="text" value={withdrawNotes} onChange={e => setWithdrawNotes(e.target.value)} placeholder="e.g. Emergency, school fees, personal request…" style={INPUT_STYLE} />
+                </div>
+                {(empSaving?.balance || 0) === 0 && (
+                  <div style={{ fontSize: '12px', color: '#d97706', fontWeight: '600', background: '#fef9c3', borderRadius: '8px', padding: '8px 12px' }}>⚠ This employee has no savings balance yet. Once payroll is marked as <strong>Paid</strong>, deductions will credit their balance and withdrawals can be processed.</div>
+                )}
+                {parseFloat(withdrawInput) > (empSaving?.balance || 0) && (empSaving?.balance || 0) > 0 && (
+                  <div style={{ fontSize: '12px', color: '#dc2626', fontWeight: '600' }}>⚠ Amount exceeds available balance of {formatCurrency(empSaving?.balance || 0)}</div>
+                )}
+              </div>
+              <div style={{ padding: '16px 28px 24px', display: 'flex', gap: '12px' }}>
+                <button onClick={() => { setWithdrawId(null); setWithdrawInput(''); setWithdrawDate(new Date().toISOString().split('T')[0]); setWithdrawNotes('') }} style={{ flex: 1, border: '1.5px solid #e5e7eb', color: '#374151', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: '700', cursor: 'pointer', background: 'white' }}>Cancel</button>
+                <button onClick={() => withdrawSavings(withdrawId, parseFloat(withdrawInput) || 0, withdrawDate, withdrawNotes)} disabled={!withdrawInput || parseFloat(withdrawInput) <= 0 || parseFloat(withdrawInput) > (empSaving?.balance || 0)} style={{ flex: 1, background: '#dc2626', color: 'white', border: 'none', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: '800', cursor: 'pointer' }}>Record Withdrawal</button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* Savings History Modal */}
+      {historyId && (() => {
+        const emp = employees.find(e => e.id === historyId)
+        const empSaving = savings.find(s => s.employee_id === historyId)
+        return (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 60, padding: '16px' }}>
+            <div style={{ background: 'white', borderRadius: '20px', width: '100%', maxWidth: '560px', boxShadow: '0 24px 60px rgba(0,0,0,0.3)', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}>
+              <div style={{ background: 'linear-gradient(135deg, #1e3a5f, #2563eb)', padding: '24px 28px', borderRadius: '20px 20px 0 0', flexShrink: 0 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div>
+                    <div style={{ fontSize: '11px', fontWeight: '700', color: 'rgba(255,255,255,0.6)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '4px' }}>Savings Ledger</div>
+                    <div style={{ fontSize: '20px', fontWeight: '900', color: 'white' }}>{emp?.full_name}</div>
+                    <div style={{ fontSize: '13px', color: 'rgba(255,255,255,0.7)', marginTop: '4px' }}>Balance: <strong style={{ color: '#86efac' }}>{formatCurrency(empSaving?.balance || 0)}</strong></div>
+                  </div>
+                  <button onClick={() => setHistoryId(null)} style={{ background: 'rgba(255,255,255,0.2)', border: 'none', color: 'white', borderRadius: '50%', width: '32px', height: '32px', cursor: 'pointer', fontSize: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
+                </div>
+              </div>
+              <div style={{ overflowY: 'auto', flex: 1, padding: '20px 28px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                {ledgerLoading ? (
+                  <div style={{ textAlign: 'center', padding: '40px', color: '#9ca3af', fontSize: '14px' }}>Loading transactions…</div>
+                ) : ledger.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '40px', color: '#9ca3af', fontSize: '14px' }}>No transactions recorded yet.</div>
+                ) : (
+                  <>
+                    {ledger.map((entry) => {
+                      const isDeduction = entry.transaction_type === 'payroll_deduction'
+                      const isWithdrawal = entry.transaction_type === 'withdrawal'
+                      const isAdjust = entry.transaction_type === 'manual_adjustment'
+                      const positive = entry.amount > 0
+                      return (
+                        <div key={entry.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '14px 16px', borderRadius: '12px', background: isWithdrawal ? '#fef2f2' : isDeduction ? '#f0fdf4' : '#f5f3ff', border: `1px solid ${isWithdrawal ? '#fecaca' : isDeduction ? '#bbf7d0' : '#ddd6fe'}` }}>
+                          <div>
+                            <div style={{ fontSize: '13px', fontWeight: '700', color: isWithdrawal ? '#991b1b' : isDeduction ? '#166534' : '#5b21b6' }}>
+                              {isDeduction ? '⬇ Payroll Deduction' : isWithdrawal ? '⬆ Withdrawal' : '⚙ Adjustment'}
+                            </div>
+                            <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '2px' }}>{new Date(entry.created_at).toLocaleDateString('en-ZA', { day: '2-digit', month: 'long', year: 'numeric' })}</div>
+                            {entry.notes && <div style={{ fontSize: '11px', color: '#374151', marginTop: '4px', fontStyle: 'italic' }}>{entry.notes}</div>}
                           </div>
-                          <div style={{ flex: 1 }}>
-                            <div style={{ fontWeight: 700, color: '#333', fontSize: 15 }}>{emp.full_name}</div>
-                            <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: rc.bg, color: rc.color }}>{emp.role}</span>
+                          <div style={{ fontSize: '16px', fontWeight: '900', color: positive ? '#166534' : '#dc2626', whiteSpace: 'nowrap', marginLeft: '12px' }}>
+                            {positive ? '+' : ''}{formatCurrency(Math.abs(entry.amount))}
                           </div>
-                          {anyLate && <span style={{ fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 20, background: '#fff8e1', color: '#f59e0b' }}>LATE</span>}
-                          {isDone && <span style={{ fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 20, background: '#f0f4f0', color: '#666' }}>DONE</span>}
                         </div>
-                        {empRecords.length > 0 && (
-                          <div style={{ marginBottom: 12, display: 'flex', flexDirection: 'column' as const, gap: 6 }}>
-                            {empRecords.map(rec => (
-                              <div key={rec.id} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                                <div style={{ background: '#f0f7f4', borderRadius: 10, padding: '8px 12px' }}><div style={{ fontSize: 10, color: '#888', fontWeight: 600 }}>IN</div><div style={{ fontWeight: 700, color: PRIMARY }}>{rec.clock_in ? new Date(rec.clock_in).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : '—'}</div></div>
-                                <div style={{ background: '#f8faf8', borderRadius: 10, padding: '8px 12px' }}><div style={{ fontSize: 10, color: '#888', fontWeight: 600 }}>OUT</div><div style={{ fontWeight: 700, color: rec.clock_out ? '#333' : '#22c55e' }}>{rec.clock_out ? new Date(rec.clock_out).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : 'On shift'}</div></div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                        {totalHoursToday > 0 && <div style={{ textAlign: 'center' as const, fontSize: 13, color: '#888', marginBottom: 12 }}>⏱ <strong style={{ color: PRIMARY }}>{formatHM(totalHoursToday)}</strong>{empRecords.length > 1 ? ` across ${empRecords.length} sessions` : ''}</div>}
-                        {openRecord ? (
-                          <button onClick={() => clockOut(openRecord.id, openRecord.clock_in!)} disabled={isSaving} style={{ width: '100%', padding: '10px', background: DARK, color: '#fff', border: 'none', borderRadius: 10, fontWeight: 700, cursor: 'pointer' }}>{isSaving ? 'Saving...' : '🔴 Clock Out'}</button>
-                        ) : (
-                          <button onClick={() => clockIn(emp.id)} disabled={isSaving} style={{ width: '100%', padding: '10px', background: PRIMARY, color: '#fff', border: 'none', borderRadius: 10, fontWeight: 700, cursor: 'pointer' }}>{isSaving ? 'Saving...' : empRecords.length > 0 ? '🟢 Clock In Again' : '🟢 Clock In'}</button>
-                        )}
-                      </div>
-                    );
-                  })}
+                      )
+                    })}
+                  </>
+                )}
+              </div>
+              <div style={{ padding: '16px 28px 24px', borderTop: '1px solid #e5e7eb', flexShrink: 0 }}>
+                <button onClick={() => setHistoryId(null)} style={{ width: '100%', border: '1.5px solid #e5e7eb', color: '#374151', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: '700', cursor: 'pointer', background: 'white' }}>Close</button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* Wage Slip Modal */}
+      {showSlip && (() => {
+        const emp = employees.find(e => e.id === showSlip.employee_id)
+        const wage = wages.find(w => w.employee_id === showSlip.employee_id)
+        const period = periods.find(p => p.id === showSlip.payroll_period_id)
+        return (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: '16px' }}>
+            <div style={{ background: 'white', borderRadius: '20px', width: '100%', maxWidth: '560px', boxShadow: '0 24px 60px rgba(0,0,0,0.3)', maxHeight: '90vh', overflowY: 'auto' }}>
+              <div style={{ background: 'linear-gradient(135deg, #0a1f12, #1a5c38)', padding: '28px 32px', borderRadius: '20px 20px 0 0' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div>
+                    <div style={{ fontSize: '20px', fontWeight: '900', color: 'white', letterSpacing: '-0.5px' }}>WAGE SLIP</div>
+                    <div style={{ fontSize: '13px', color: 'rgba(255,255,255,0.6)', marginTop: '4px' }}>Mochachos Hartswater (Pty) Ltd</div>
+                  </div>
+                  <button onClick={() => setShowSlip(null)} style={{ background: 'rgba(255,255,255,0.15)', border: 'none', borderRadius: '8px', width: '32px', height: '32px', cursor: 'pointer', fontSize: '16px', color: 'white' }}>✕</button>
                 </div>
               </div>
-            )}
-
-            {activeTab === 'history' && (
-              <div>
-                <div style={{ display: 'flex', gap: 12, marginBottom: 24 }}>
-                  <select value={selectedEmployee} onChange={e => setSelectedEmployee(e.target.value)} style={{ padding: '10px 14px', borderRadius: 10, border: '1.5px solid #eef2ee', fontSize: 14, outline: 'none', background: '#fff', cursor: 'pointer' }}>
-                    <option value="all">All Employees</option>
-                    {employees.map(e => <option key={e.id} value={e.id}>{e.full_name}</option>)}
-                  </select>
-                  <span style={{ fontSize: 13, color: '#aaa', alignSelf: 'center' }}>Last 30 days</span>
+              <div style={{ padding: '28px 32px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                  <div style={{ background: '#f9fafb', borderRadius: '12px', padding: '14px 16px' }}>
+                    <div style={{ fontSize: '11px', fontWeight: '700', color: '#9ca3af', textTransform: 'uppercase' as const, letterSpacing: '0.5px', marginBottom: '6px' }}>Employee</div>
+                    <div style={{ fontWeight: '800', fontSize: '15px', color: '#111' }}>{emp?.full_name}</div>
+                    <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '2px' }}>{emp?.role}</div>
+                    {wage?.id_number && <div style={{ fontSize: '12px', color: '#6b7280' }}>ID: {wage.id_number}</div>}
+                  </div>
+                  <div style={{ background: '#f9fafb', borderRadius: '12px', padding: '14px 16px' }}>
+                    <div style={{ fontSize: '11px', fontWeight: '700', color: '#9ca3af', textTransform: 'uppercase' as const, letterSpacing: '0.5px', marginBottom: '6px' }}>Pay Period</div>
+                    <div style={{ fontWeight: '700', fontSize: '14px', color: '#111' }}>{period ? new Date(period.period_start).toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' }) : '—'}</div>
+                    <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '2px' }}>{period ? `${new Date(period.period_start).toLocaleDateString('en-ZA')} – ${new Date(period.period_end).toLocaleDateString('en-ZA')}` : '—'}</div>
+                  </div>
                 </div>
-                {historyLoading && <div style={{ textAlign: 'center', padding: 40, color: '#666' }}>Loading...</div>}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                  {Object.entries(historyByDate).map(([date, records]) => (
-                    <div key={date} style={{ background: '#fff', borderRadius: 16, border: '1px solid #eef2ee', overflow: 'hidden' }}>
-                      <div style={{ padding: '12px 20px', background: date === today ? '#f0f7f4' : '#f8faf8', display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #eef2ee' }}>
-                        <span style={{ fontWeight: 700, color: date === today ? PRIMARY : '#333', fontSize: 14 }}>{date === today ? 'Today' : new Date(date).toLocaleDateString('en-ZA', { weekday: 'long', day: 'numeric', month: 'long' })}</span>
-                        <span style={{ fontSize: 12, color: '#888' }}>{records.length} staff · {formatHM(records.reduce((s, r) => s + (r.hours_worked || 0), 0))}</span>
-                      </div>
-                      {records.map((r, i) => {
-                        const rc = ROLE_COLORS[getEmpRole(r.employee_id)] || { bg: '#f5f5f5', color: '#424242' };
-                        return (
-                          <div key={r.id} style={{ padding: '12px 20px', display: 'flex', alignItems: 'center', gap: 14, borderBottom: i < records.length - 1 ? '1px solid #f5f5f5' : 'none' }}>
-                            <div style={{ width: 36, height: 36, borderRadius: '50%', background: rc.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 800, color: rc.color, flexShrink: 0 }}>{initials(getEmpName(r.employee_id))}</div>
-                            <div style={{ flex: 1 }}><div style={{ fontWeight: 600, color: '#333', fontSize: 14 }}>{getEmpName(r.employee_id)}</div><div style={{ fontSize: 12, color: '#888' }}>{r.clock_in ? new Date(r.clock_in).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : '—'} → {r.clock_out ? new Date(r.clock_out).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : 'On shift'}</div></div>
-                            <div style={{ textAlign: 'right' as const }}>{r.hours_worked ? <div style={{ fontWeight: 700, color: PRIMARY }}>{formatHM(r.hours_worked)}</div> : null}{r.is_late && <div style={{ fontSize: 10, fontWeight: 700, color: '#f59e0b' }}>LATE</div>}</div>
+                <div>
+                  <div style={{ fontSize: '12px', fontWeight: '700', color: '#9ca3af', textTransform: 'uppercase' as const, letterSpacing: '0.5px', marginBottom: '10px' }}>Earnings</div>
+                  <div style={{ background: '#f9fafb', borderRadius: '12px', overflow: 'hidden' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 16px', borderBottom: '1px solid #e5e7eb' }}>
+                      <span style={{ fontSize: '14px', color: '#374151' }}>Basic Pay ({formatHours(showSlip.hours_worked)} × R{showSlip.hourly_rate.toFixed(2)}/h)</span>
+                      <span style={{ fontSize: '14px', fontWeight: '700', color: '#111' }}>{formatCurrency(showSlip.gross_pay)}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 16px', background: '#f0fdf4' }}>
+                      <span style={{ fontSize: '14px', fontWeight: '700', color: '#166534' }}>Gross Pay</span>
+                      <span style={{ fontSize: '15px', fontWeight: '800', color: '#166534' }}>{formatCurrency(showSlip.gross_pay)}</span>
+                    </div>
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontSize: '12px', fontWeight: '700', color: '#9ca3af', textTransform: 'uppercase' as const, letterSpacing: '0.5px', marginBottom: '10px' }}>Deductions</div>
+                  <div style={{ background: '#f9fafb', borderRadius: '12px', overflow: 'hidden' }}>
+                    {(() => {
+                      const liveAdvs = advances.filter(a => a.employee_id === showSlip.employee_id && a.repayment_status === 'outstanding' && a.deduct_from_wages && a.advance_date <= (period?.period_end ?? '9999-12-31'))
+                      const liveAdvTotal = liveAdvs.reduce((sum, a) => sum + a.amount, 0)
+                      const savAmt = showSlip.savings_deducted || 0
+                      const hasUnmatched = liveAdvTotal > 0 && showSlip.advances_deducted === 0
+                      const deductionRows = [
+                        { label: 'UIF (Employee 1%)', value: showSlip.uif_employee },
+                        { label: 'PAYE Tax', value: showSlip.paye_tax },
+                        { label: 'Advances Deducted', value: liveAdvTotal },
+                        { label: 'Savings Deducted', value: savAmt },
+                      ]
+                      const totalDed = showSlip.uif_employee + showSlip.paye_tax + liveAdvTotal + savAmt
+                      return <>
+                        {hasUnmatched && <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', padding: '8px 12px', fontSize: '12px', color: '#c2410c', borderRadius: '6px', marginBottom: '4px' }}>⚠️ Outstanding advance of {formatCurrency(liveAdvTotal)} entered — recalculate payroll to apply to net pay</div>}
+                        {deductionRows.map((row, i) => (
+                          <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 16px', borderBottom: '1px solid #e5e7eb' }}>
+                            <span style={{ fontSize: '14px', color: '#374151' }}>{row.label}</span>
+                            <span style={{ fontSize: '14px', fontWeight: '700', color: '#dc2626' }}>- {formatCurrency(row.value)}</span>
                           </div>
-                        );
-                      })}
+                        ))}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 16px', background: '#fef2f2' }}>
+                          <span style={{ fontSize: '14px', fontWeight: '700', color: '#991b1b' }}>Total Deductions</span>
+                          <span style={{ fontSize: '15px', fontWeight: '800', color: '#991b1b' }}>- {formatCurrency(totalDed)}</span>
+                        </div>
+                      </>
+                    })()}
+                  </div>
+                </div>
+                <div style={{ background: '#eff6ff', borderRadius: '10px', padding: '12px 16px', fontSize: '12px', color: '#1e40af' }}>
+                  <strong>Employer UIF Contribution:</strong> {formatCurrency(showSlip.uif_employer)} (paid by employer, not deducted from employee)
+                </div>
+                <div style={{ background: 'linear-gradient(135deg, #0a1f12, #1a5c38)', borderRadius: '16px', padding: '20px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '16px', fontWeight: '800', color: 'white' }}>NET PAY</span>
+                  <span style={{ fontSize: '28px', fontWeight: '900', color: 'white' }}>{formatCurrency(showSlip.net_pay)}</span>
+                </div>
+                {(() => {
+                  const empSaving = savings.find(s => s.employee_id === showSlip.employee_id)
+                  if (!empSaving) return null
+                  return (
+                    <div style={{ background: '#f0fdf4', border: '2px solid #bbf7d0', borderRadius: '12px', padding: '14px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div>
+                        <div style={{ fontSize: '12px', fontWeight: '700', color: '#166534', textTransform: 'uppercase' as const, letterSpacing: '0.5px' }}>🐷 Savings Balance Held by Employer</div>
+                        <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '2px' }}>R{empSaving.deduction_per_payroll.toFixed(2)}/payroll · cumulative savings balance</div>
+                      </div>
+                      <div style={{ fontSize: '18px', fontWeight: '900', color: '#166534' }}>{formatCurrency(empSaving.balance)}</div>
+                    </div>
+                  )
+                })()}
+                {(wage?.bank_name || wage?.bank_account) && (
+                  <div style={{ background: '#f9fafb', borderRadius: '12px', padding: '14px 16px' }}>
+                    <div style={{ fontSize: '11px', fontWeight: '700', color: '#9ca3af', textTransform: 'uppercase' as const, letterSpacing: '0.5px', marginBottom: '8px' }}>Banking Details</div>
+                    {wage?.bank_name && <div style={{ fontSize: '13px', color: '#374151' }}>Bank: <strong>{wage.bank_name}</strong></div>}
+                    {wage?.bank_branch && <div style={{ fontSize: '13px', color: '#374151' }}>Branch: <strong>{wage.bank_branch}</strong></div>}
+                    {wage?.bank_account && <div style={{ fontSize: '13px', color: '#374151' }}>Account: <strong>{wage.bank_account}</strong></div>}
+                  </div>
+                )}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', paddingTop: '8px' }}>
+                  {['Employee Signature', 'Employer Signature'].map(label => (
+                    <div key={label}>
+                      <div style={{ borderBottom: '1.5px solid #374151', marginBottom: '6px', height: '32px' }} />
+                      <div style={{ fontSize: '11px', color: '#9ca3af', textAlign: 'center' as const }}>{label}</div>
                     </div>
                   ))}
                 </div>
-              </div>
-            )}
-
-            {activeTab === 'shifts' && (
-              <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-                  <h2 style={{ fontSize: 18, fontWeight: 700, color: '#333', margin: 0 }}>Shift Configuration</h2>
-                  <button onClick={() => { setEditShift(null); setShiftForm({ shift_name: '', day_type: 'weekday', start_time: '10:00', end_time: '15:00' }); setShowShiftModal(true); }} style={{ padding: '8px 20px', background: PRIMARY, color: '#fff', border: 'none', borderRadius: 10, fontWeight: 700, cursor: 'pointer' }}>+ Add Shift</button>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button onClick={() => {
+                    const win = window.open('', '_blank')
+                    if (!win || !emp) return
+                    const monthLabel = period ? `${period.period_start} – ${period.period_end}` : ''
+                    const rows = slipBreakdown ? [
+                      slipBreakdown.normalHours > 0 ? `<tr><td>Normal Hours</td><td>${formatHours(slipBreakdown.normalHours)}h</td><td>R${showSlip.hourly_rate.toFixed(2)}/hr</td><td>R${slipBreakdown.normalPay.toFixed(2)}</td></tr>` : '',
+                      slipBreakdown.sundayHours > 0 ? `<tr><td>Sunday</td><td>${formatHours(slipBreakdown.sundayHours)}h</td><td>R${(showSlip.hourly_rate*1.5).toFixed(2)}/hr</td><td>R${slipBreakdown.sundayPay.toFixed(2)}</td></tr>` : '',
+                      slipBreakdown.holidayHours > 0 ? `<tr><td>Public Holiday</td><td>${formatHours(slipBreakdown.holidayHours)}h</td><td>R${(showSlip.hourly_rate*2).toFixed(2)}/hr</td><td>R${slipBreakdown.holidayPay.toFixed(2)}</td></tr>` : '',
+                      slipBreakdown.nightHours > 0 ? `<tr><td>Night Allowance</td><td>${formatHours(slipBreakdown.nightHours)}h</td><td>R0.50/hr</td><td>R${slipBreakdown.nightPay.toFixed(2)}</td></tr>` : '',
+                    ].join('') : `<tr><td>Basic Pay</td><td>${formatHours(showSlip.hours_worked)}h</td><td>R${showSlip.hourly_rate.toFixed(2)}/hr</td><td>R${showSlip.gross_pay.toFixed(2)}</td></tr>`
+                    // Live advances — filtered to period end so future advances don't appear
+                    const liveAdvances = advances.filter(a => a.employee_id === showSlip.employee_id && a.repayment_status === 'outstanding' && a.deduct_from_wages && a.advance_date <= (period?.period_end ?? '9999-12-31'))
+                    const liveAdvTotal = liveAdvances.reduce((sum, a) => sum + a.amount, 0)
+                    const empSav = savings.find(s => s.employee_id === showSlip.employee_id)
+                    const savAmt = showSlip.savings_deducted || 0
+                    const liveNetPay = showSlip.gross_pay - showSlip.uif_employee - showSlip.paye_tax - liveAdvTotal - savAmt
+                    const advHtml = liveAdvances.map(a => `<div class="row" style="color:#c2410c"><span>Advance${a.reason ? ': ' + a.reason : ''} (${a.advance_date})</span><span>-R${a.amount.toFixed(2)}</span></div>`).join('')
+                    win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Payslip — ${emp.full_name}</title>
+                    <style>body{font-family:Arial,sans-serif;padding:24px;color:#111;font-size:13px}h1{color:#1a5c38;margin:0 0 4px;font-size:18px}.badge{background:#1a5c38;color:#fff;padding:4px 12px;border-radius:20px;font-size:11px;font-weight:700}.head{display:flex;justify-content:space-between;border-bottom:2px solid #1a5c38;padding-bottom:12px;margin-bottom:16px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:4px 24px;margin-bottom:16px;font-size:12px}.grid .lbl{color:#888}table{width:100%;border-collapse:collapse;margin-bottom:16px;font-size:13px}th{background:#f3f4f6;padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase}th:last-child,th:nth-child(3){text-align:right}td{padding:8px 10px;border-bottom:1px solid #f0f0f0}td:last-child,td:nth-child(3){text-align:right}.totals{border-top:2px solid #111;padding-top:10px}.row{display:flex;justify-content:space-between;padding:4px 0}.net{font-size:17px;font-weight:800;color:#1a5c38;border-top:1px solid #ddd;margin-top:6px;padding-top:6px}.sign{margin-top:50px;display:grid;grid-template-columns:1fr 1fr;gap:40px;font-size:11px}.sign div{border-top:1px solid #999;padding-top:6px;color:#666;text-align:center}.footer{margin-top:20px;font-size:10px;color:#aaa;text-align:center;border-top:1px solid #eee;padding-top:12px}</style>
+                    </head><body>
+                    <div class="head"><div><h1>Mochachos Hartswater (Pty) Ltd</h1><div style="font-size:12px;color:#666">Payslip · ${monthLabel}</div></div><div class="badge">PAYSLIP</div></div>
+                    <div class="grid"><div><span class="lbl">Employee: </span><b>${emp.full_name}</b></div><div><span class="lbl">ID Number: </span>${wage?.id_number || '—'}</div><div><span class="lbl">Role: </span>${emp.role}</div><div><span class="lbl">Pay Frequency: </span>Monthly</div></div>
+                    <table><thead><tr><th>Description</th><th>Hours</th><th>Rate</th><th>Amount</th></tr></thead><tbody>${rows}</tbody></table>
+                    <div class="totals"><div class="row"><span>Gross Pay</span><b>R${showSlip.gross_pay.toFixed(2)}</b></div><div class="row" style="color:#c2410c"><span>UIF (1%)</span><span>-R${showSlip.uif_employee.toFixed(2)}</span></div>${advHtml}${savAmt > 0 ? `<div class="row" style="color:#0891b2"><span>Savings Deduction</span><span>-R${savAmt.toFixed(2)}</span></div>` : ''}<div class="row net"><span>Net Pay</span><span>R${liveNetPay.toFixed(2)}</span></div>${empSav ? `<div style="background:#f0fdf4;color:#166534;border:1.5px solid #bbf7d0;margin-top:10px;border-radius:8px;padding:10px 12px;display:flex;justify-content:space-between;align-items:center"><div><b style="font-size:11px">🐷 Savings Balance Held by Employer</b><div style="font-size:9px;color:#4ade80;margin-top:2px">R${empSav.deduction_per_payroll.toFixed(2)}/payroll deduction · cumulative savings</div></div><b style="font-size:13px">R${empSav.balance.toFixed(2)}</b></div>` : ''} </div>
+                    <div class="sign"><div>Employee Signature</div><div>Employer Signature</div></div>
+                    <div class="footer">Generated by CompliTrack · complitrack.co.za · ${new Date().toLocaleString('en-ZA')}</div>
+                    <script>window.onload=()=>{window.print()}<\/script></body></html>`)
+                    win.document.close()
+                  }} style={{ flex: 1, padding: '12px', background: '#1a5c38', color: '#fff', border: 'none', borderRadius: '10px', cursor: 'pointer', fontWeight: '700', fontSize: '13px' }}>🖨 Print / PDF</button>
+                  <button onClick={() => {
+                    if (!emp) return
+                    const body = `Hi ${emp.full_name},%0A%0AYour payslip:%0AGross: R${showSlip.gross_pay.toFixed(2)}%0AUIF: -R${showSlip.uif_employee.toFixed(2)}%0ANet Pay: R${showSlip.net_pay.toFixed(2)}`
+                    window.open(`mailto:?subject=Payslip&body=${body}`, '_blank')
+                  }} style={{ padding: '12px 16px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: '10px', cursor: 'pointer', fontWeight: '700', fontSize: '13px' }}>✉️ Email</button>
+                  <button onClick={() => {
+                    if (!emp) return
+                    const text = `*Payslip — ${emp.full_name}*%0AGross: R${showSlip.gross_pay.toFixed(2)}%0AUIF: -R${showSlip.uif_employee.toFixed(2)}%0A*Net Pay: R${showSlip.net_pay.toFixed(2)}*`
+                    const phone = emp.phone ? emp.phone.replace(/[^0-9]/g,'').replace(/^0/,'27') : ''
+                    window.open(phone ? `https://wa.me/${phone}?text=${text}` : `https://wa.me/?text=${text}`, '_blank')
+                  }} style={{ padding: '12px 16px', background: '#25d366', color: '#fff', border: 'none', borderRadius: '10px', cursor: 'pointer', fontWeight: '700', fontSize: '13px' }}>💬 WhatsApp</button>
                 </div>
-                {(['weekday', 'saturday', 'sunday'] as const).map(dayType => (
-                  <div key={dayType} style={{ marginBottom: 24 }}>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: '#333', marginBottom: 12 }}>{DAY_LABELS[dayType]}</div>
-                    {shifts.filter(s => s.day_type === dayType).length === 0 ? (
-                      <div style={{ padding: 20, background: '#fff', borderRadius: 12, border: '1px dashed #eef2ee', textAlign: 'center' as const, color: '#ccc', fontSize: 13 }}>No shifts configured</div>
-                    ) : (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                        {shifts.filter(s => s.day_type === dayType).map(shift => (
-                          <div key={shift.id} style={{ background: '#fff', borderRadius: 14, padding: '16px 20px', border: '1px solid #eef2ee', display: 'flex', alignItems: 'center', gap: 16 }}>
-                            <div style={{ width: 48, height: 48, borderRadius: 12, background: '#f0f7f4', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>⏰</div>
-                            <div style={{ flex: 1 }}><div style={{ fontWeight: 700, color: '#333' }}>{shift.shift_name}</div><div style={{ fontSize: 13, color: PRIMARY, fontWeight: 600 }}>{shift.start_time} — {shift.end_time}</div></div>
-                            <div style={{ display: 'flex', gap: 8 }}>
-                              <button onClick={() => { setEditShift(shift); setShiftForm({ shift_name: shift.shift_name, day_type: shift.day_type, start_time: shift.start_time, end_time: shift.end_time }); setShowShiftModal(true); }} style={{ padding: '6px 14px', background: '#f0f4f0', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 600, fontSize: 13 }}>Edit</button>
-                              <button onClick={() => deleteShift(shift.id)} style={{ padding: '6px 14px', background: '#fdecea', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 600, fontSize: 13, color: '#ef4444' }}>Delete</button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ))}
               </div>
-            )}
-
-            {activeTab === 'payroll' && (
-              <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap' as const, gap: 10 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                    <h2 style={{ fontSize: 18, fontWeight: 700, color: '#333', margin: 0 }}>Payroll Register</h2>
-                    <input type="month" value={payrollMonth} onChange={e => setPayrollMonth(e.target.value)} style={{ ...inp, width: 160 }} />
-                  </div>
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                    {excludedFromPayroll.size > 0 && (
-                      <span style={{ fontSize: 12, fontWeight: 700, color: '#92400e', background: '#fef3c7', border: '1px solid #fde68a', borderRadius: 8, padding: '4px 10px' }}>
-                        {excludedFromPayroll.size} excluded · {employees.length - excludedFromPayroll.size} included
-                      </span>
-                    )}
-                    <button onClick={exportAllPayrollCSV} style={{ padding: '8px 14px', background: '#f0f4f0', border: 'none', borderRadius: 10, fontWeight: 600, cursor: 'pointer', fontSize: 13 }}>⬇ Export (CSV)</button>
-                    <button onClick={printAllPayroll} style={{ padding: '8px 14px', background: '#f0f4f0', border: 'none', borderRadius: 10, fontWeight: 600, cursor: 'pointer', fontSize: 13 }}>🖨 Print Summary</button>
-                    <button onClick={() => setShowSettingsModal(true)} style={{ padding: '8px 16px', background: '#f0f4f0', border: 'none', borderRadius: 10, fontWeight: 600, cursor: 'pointer', fontSize: 13 }}>⚙️ Pay Rules</button>
-                  </div>
-                </div>
-                {!payrollLoaded ? (
-                  <div style={{ textAlign: 'center' as const, padding: 60, color: '#ccc' }}>Loading…</div>
-                ) : (
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
-                    {employees.map(emp => {
-                      const summary = employeeMonthSummary(emp.id);
-                      const colors = ROLE_COLORS[emp.role] || ROLE_COLORS['Other'];
-                      return (
-                        <div key={emp.id} style={{ background: excludedFromPayroll.has(emp.id) ? '#fafafa' : '#fff', borderRadius: 18, padding: 20, border: excludedFromPayroll.has(emp.id) ? '1px solid #e5e7eb' : '1px solid #eef2ee', boxShadow: '0 2px 8px rgba(0,0,0,0.04)', cursor: 'pointer', opacity: excludedFromPayroll.has(emp.id) ? 0.55 : 1 }} onClick={() => setSelectedPayrollEmployee(emp)}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
-                            <div style={{ width: 48, height: 48, borderRadius: '50%', background: colors.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, color: colors.color, fontSize: 16, flexShrink: 0 }}>{initials(emp.full_name)}</div>
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                              <div style={{ fontWeight: 700, color: '#333', fontSize: 15 }}>{emp.full_name}</div>
-                              <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: colors.bg, color: colors.color }}>{emp.role}</span>
-                            </div>
-                            {isEmployeePaid(emp.id) && <span style={{ fontSize: 10, fontWeight: 700, color: '#16a34a', background: '#dcfce7', padding: '3px 8px', borderRadius: 20 }}>✓ PAID</span>}
-                            <label onClick={e => e.stopPropagation()} style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', fontSize: 11, fontWeight: 700, color: excludedFromPayroll.has(emp.id) ? '#dc2626' : '#6b7280', flexShrink: 0 }} title={excludedFromPayroll.has(emp.id) ? 'Click to include in payroll' : 'Click to exclude from payroll'}>
-                              <input type="checkbox" checked={!excludedFromPayroll.has(emp.id)} onChange={() => togglePayrollExclusion(emp.id)} style={{ width: 15, height: 15, cursor: 'pointer', accentColor: '#1a5c38' }} />
-                              {excludedFromPayroll.has(emp.id) ? 'Excluded' : 'Include'}
-                            </label>
-                          </div>
-                          <div style={{ marginBottom: 10 }}>
-                            {editingRate === emp.id ? (
-                              <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 6 }} onClick={e => e.stopPropagation()}>
-                                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                                  <span style={{ fontSize: 11, color: '#999', width: 60 }}>Rate</span>
-                                  <input type="number" step="0.01" autoFocus value={rateInput} onChange={e => setRateInput(e.target.value)} style={{ width: 70, padding: '4px 6px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13 }} />
-                                </div>
-                                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                                  <span style={{ fontSize: 11, color: '#999', width: 60 }}>Night/hr</span>
-                                  <input type="number" step="0.01" value={nightRateInput} onChange={e => setNightRateInput(e.target.value)} style={{ width: 70, padding: '4px 6px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13 }} />
-                                </div>
-                                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                                  <span style={{ fontSize: 11, color: '#999', width: 60 }}>Paid</span>
-                                  <select value={payFreqInput} onChange={e => setPayFreqInput(e.target.value)} style={{ padding: '4px 6px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13 }}>
-                                    <option value="monthly">Monthly</option>
-                                    <option value="weekly">Weekly</option>
-                                  </select>
-                                </div>
-                                <button onClick={async () => { await saveHourlyRate(emp.id); await saveNightRate(emp.id, nightRateInput); await savePayFrequency(emp.id, payFreqInput); }} style={{ background: PRIMARY, color: '#fff', border: 'none', borderRadius: 6, padding: '5px 10px', fontSize: 12, cursor: 'pointer', fontWeight: 700 }}>✓ Save</button>
-                              </div>
-                            ) : (
-                              <div onClick={e => { e.stopPropagation(); setEditingRate(emp.id); setRateInput(String(emp.hourly_rate || 0)); setNightRateInput(String(emp.night_allowance_rate || 0)); setPayFreqInput(emp.pay_frequency || 'monthly'); }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                  <span style={{ fontSize: 11, color: '#999', fontWeight: 600 }}>Rate</span>
-                                  <span style={{ fontSize: 11, color: '#999', fontWeight: 600 }}>Hours MTD</span>
-                                </div>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                                  <span style={{ fontWeight: 700, fontSize: 14, color: '#333' }}>R{(emp.hourly_rate || 0).toFixed(2)}/hr ✎</span>
-                                  <span style={{ fontWeight: 700, fontSize: 14, color: '#333' }}>{formatHM(summary.totalHours)}</span>
-                                </div>
-                                <div style={{ fontSize: 10, color: '#bbb', marginTop: 2 }}>{(emp.pay_frequency || 'monthly') === 'weekly' ? 'Weekly' : 'Monthly'} paid · Night R{(emp.night_allowance_rate || payrollSettings.default_night_rate).toFixed(2)}/hr{!emp.night_allowance_rate ? ' (default)' : ''}</div>
-                              </div>
-                            )}
-                          </div>
-                          {summary.otHours > 0 && (
-                            <div style={{ fontSize: 11, fontWeight: 700, color: '#dc2626', marginBottom: 8, background: '#fef2f2', borderRadius: 6, padding: '3px 8px', display: 'inline-block' }}>⏱ {formatHM(summary.otHours)} overtime</div>
-                          )}
-                          <div style={{ background: '#f0f7f4', borderRadius: 10, padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <span style={{ fontSize: 12, color: '#666', fontWeight: 600 }}>Net Pay (after UIF)</span>
-                            <span style={{ fontWeight: 800, fontSize: 17, color: PRIMARY }}>R{summary.netPay.toFixed(2)}</span>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            )}
+            </div>
           </div>
-        )}
-      </div>
+        )
+      })()}
     </div>
-  );
-                                              }
+  )
+}
