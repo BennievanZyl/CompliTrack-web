@@ -25,6 +25,11 @@ type EmployeeWarning = {
   id: string; warning_type: string; reason: string; incident_date: string;
   issued_by: string; document_url: string | null; notes: string | null; created_at: string;
 };
+type EmployeeEvaluation = {
+  id: string; eval_date: string; evaluated_by: string;
+  punctuality: number; attitude: number; performance: number; appearance: number; teamwork: number;
+  overall_score: number; notes: string | null; created_at: string;
+};
 type EmployeeAdvance = {
   id: string; amount: number; reason: string | null; advance_date: string;
   repayment_status: string; repaid_date: string | null; deduct_from_wages: boolean; notes: string | null; created_at: string;
@@ -33,7 +38,7 @@ type Attendance = {
   id: string; work_date: string; clock_in: string | null; clock_out: string | null;
   hours_worked: number | null; is_late: boolean; notes: string | null;
 };
-type ProfileTab = 'overview' | 'documents' | 'leave' | 'warnings' | 'advances' | 'attendance';
+type ProfileTab = 'overview' | 'documents' | 'leave' | 'warnings' | 'advances' | 'attendance' | 'evaluations';
 
 const ROLES = ['Store Manager', 'Assistant Manager', 'Cashier', 'Kitchen Staff', 'Driver', 'Cleaner', 'Security', 'Other'];
 const EMPLOYMENT_TYPES = ['full_time', 'part_time', 'casual', 'contract'];
@@ -58,6 +63,7 @@ const PROFILE_TABS: { key: ProfileTab; label: string; emoji: string }[] = [
   { key: 'warnings', label: 'Warnings', emoji: '⚠️' },
   { key: 'advances', label: 'Advances', emoji: '💵' },
   { key: 'attendance', label: 'Attendance', emoji: '⏰' },
+  { key: 'evaluations', label: 'Evaluations', emoji: '📋' },
 ];
 
 // ─── PURE FUNCTIONS ───────────────────────────────────────────────────────────
@@ -298,6 +304,9 @@ export default function PeoplePage() {
   const [leave, setLeave] = useState<EmployeeLeave[]>([]);
   const [warnings, setWarnings] = useState<EmployeeWarning[]>([]);
   const [advances, setAdvances] = useState<EmployeeAdvance[]>([]);
+  const [evaluations, setEvaluations] = useState<EmployeeEvaluation[]>([]);
+  const [showEvalModal, setShowEvalModal] = useState(false);
+  const [evalForm, setEvalForm] = useState({ eval_date: new Date().toISOString().split('T')[0], evaluated_by: '', punctuality: 3, attitude: 3, performance: 3, appearance: 3, teamwork: 3, notes: '' });
   const [attendance, setAttendance] = useState<Attendance[]>([]);
   const [profileLoading, setProfileLoading] = useState(false);
   const [showDocModal, setShowDocModal] = useState(false);
@@ -340,16 +349,18 @@ export default function PeoplePage() {
 
   async function loadEmployeeProfile(emp: Employee) {
     setProfileLoading(true);
-    const [docsRes, leaveRes, warningsRes, advancesRes, attendanceRes] = await Promise.all([
+    const [docsRes, leaveRes, warningsRes, advancesRes, attendanceRes, evalRes] = await Promise.all([
       supabase.from('employee_documents').select('*').eq('employee_id', emp.id).order('created_at', { ascending: false }),
       supabase.from('employee_leave').select('*').eq('employee_id', emp.id).order('start_date', { ascending: false }),
       supabase.from('employee_warnings').select('*').eq('employee_id', emp.id).order('incident_date', { ascending: false }),
       supabase.from('employee_advances').select('*').eq('employee_id', emp.id).order('advance_date', { ascending: false }),
       supabase.from('attendance').select('*').eq('employee_id', emp.id).order('work_date', { ascending: false }).limit(30),
+      supabase.from('employee_evaluations').select('*').eq('employee_id', emp.id).order('eval_date', { ascending: false }),
     ]);
     setDocuments(docsRes.data || []);
     setLeave(leaveRes.data || []);
     setWarnings(warningsRes.data || []);
+    setEvaluations(evalRes.data || []);
     setAdvances(advancesRes.data || []);
     setAttendance(attendanceRes.data || []);
     setProfileLoading(false);
@@ -407,6 +418,33 @@ export default function PeoplePage() {
       }
       await supabase.from('employee_warnings').insert({ employee_id: selectedEmployee.id, store_id: STORE_ID, warning_type: warningForm.warning_type, reason: warningForm.reason, incident_date: warningForm.incident_date, issued_by: warningForm.issued_by, document_url: documentUrl, notes: warningForm.notes || null });
       await loadEmployeeProfile(selectedEmployee); setShowWarningModal(false); setWarningForm({ warning_type: 'Written Warning', reason: '', incident_date: '', issued_by: '', notes: '' }); setWarningFile(null);
+    } catch (e: unknown) { setSaveError(e instanceof Error ? e.message : 'Failed to save'); }
+    setSaving(false);
+  }
+
+  function computeEmployeeGrade(evals: EmployeeEvaluation[], warns: EmployeeWarning[]) {
+    const baseScore = evals.length > 0 ? evals[0].overall_score : 3.5;
+    const warningDeductions = warns.reduce((sum, w) => {
+      if (w.warning_type === 'Final Written Warning') return sum + 1;
+      if (w.warning_type === 'Written Warning') return sum + 0.5;
+      if (w.warning_type === 'Verbal Warning') return sum + 0.25;
+      return sum;
+    }, 0);
+    const score = Math.max(1, baseScore - warningDeductions);
+    if (score >= 4.5) return { score, grade: 'A', label: 'Excellent', color: '#16a34a' };
+    if (score >= 3.5) return { score, grade: 'B', label: 'Good', color: '#2563eb' };
+    if (score >= 2.5) return { score, grade: 'C', label: 'Satisfactory', color: '#d97706' };
+    if (score >= 1.5) return { score, grade: 'D', label: 'Below Standard', color: '#dc2626' };
+    return { score, grade: 'F', label: 'Unsatisfactory', color: '#7f1d1d' };
+  }
+
+  async function saveEvaluation() {
+    if (!selectedEmployee || !evalForm.evaluated_by.trim() || !evalForm.eval_date) return;
+    setSaving(true); setSaveError(null);
+    const overall_score = parseFloat(((evalForm.punctuality + evalForm.attitude + evalForm.performance + evalForm.appearance + evalForm.teamwork) / 5).toFixed(2));
+    try {
+      await supabase.from('employee_evaluations').insert({ employee_id: selectedEmployee.id, store_id: STORE_ID, eval_date: evalForm.eval_date, evaluated_by: evalForm.evaluated_by, punctuality: evalForm.punctuality, attitude: evalForm.attitude, performance: evalForm.performance, appearance: evalForm.appearance, teamwork: evalForm.teamwork, overall_score, notes: evalForm.notes || null });
+      await loadEmployeeProfile(selectedEmployee); setShowEvalModal(false); setEvalForm({ eval_date: new Date().toISOString().split('T')[0], evaluated_by: '', punctuality: 3, attitude: 3, performance: 3, appearance: 3, teamwork: 3, notes: '' });
     } catch (e: unknown) { setSaveError(e instanceof Error ? e.message : 'Failed to save'); }
     setSaving(false);
   }
@@ -569,6 +607,42 @@ export default function PeoplePage() {
         </ModalWrap>
       )}
 
+      {showEvalModal && (
+        <ModalWrap onClose={() => { setShowEvalModal(false); setSaveError(null); }}>
+          <ModalHeader title="Employee Evaluation" onClose={() => { setShowEvalModal(false); setSaveError(null); }} />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div><label style={lbl}>Evaluation Date *</label><input type="date" value={evalForm.eval_date} onChange={e => setEvalForm(p => ({ ...p, eval_date: e.target.value }))} style={inp} /></div>
+              <div><label style={lbl}>Evaluated By *</label><input value={evalForm.evaluated_by} onChange={e => setEvalForm(p => ({ ...p, evaluated_by: e.target.value }))} placeholder="Manager name" style={inp} /></div>
+            </div>
+            <div style={{ background: '#f8faf8', borderRadius: 12, padding: '14px 16px', border: '1px solid #eef2ee' }}>
+              <div style={{ fontWeight: 700, fontSize: 13, color: '#333', marginBottom: 12 }}>Rate each category (1 = Poor, 5 = Excellent)</div>
+              {[{ key: 'punctuality', label: '⏰ Punctuality' }, { key: 'attitude', label: '😊 Attitude' }, { key: 'performance', label: '🎯 Performance' }, { key: 'appearance', label: '👔 Appearance' }, { key: 'teamwork', label: '🤝 Teamwork' }].map(({ key, label }) => (
+                <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
+                  <div style={{ width: 130, fontSize: 13, color: '#555', fontWeight: 600 }}>{label}</div>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    {[1, 2, 3, 4, 5].map(n => (
+                      <button key={n} onClick={() => setEvalForm(p => ({ ...p, [key]: n }))} style={{ width: 36, height: 36, borderRadius: 8, border: '1px solid #ddd', background: (evalForm as Record<string, number>)[key] === n ? PRIMARY : '#fff', color: (evalForm as Record<string, number>)[key] === n ? '#fff' : '#555', fontWeight: 700, cursor: 'pointer', fontSize: 14 }}>{n}</button>
+                    ))}
+                  </div>
+                  <div style={{ fontSize: 12, color: '#888', marginLeft: 4 }}>{(evalForm as Record<string, number>)[key]}/5</div>
+                </div>
+              ))}
+              <div style={{ borderTop: '1px solid #eef2ee', paddingTop: 10, marginTop: 4, display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ fontSize: 13, fontWeight: 700, color: '#333' }}>Overall Score:</span>
+                <span style={{ fontWeight: 900, fontSize: 18, color: PRIMARY }}>{((evalForm.punctuality + evalForm.attitude + evalForm.performance + evalForm.appearance + evalForm.teamwork) / 5).toFixed(2)} / 5.00</span>
+                <span style={{ fontWeight: 800, color: computeEmployeeGrade([{ ...evalForm, id: '', overall_score: (evalForm.punctuality + evalForm.attitude + evalForm.performance + evalForm.appearance + evalForm.teamwork) / 5, created_at: '' } as EmployeeEvaluation], []).color }}>({computeEmployeeGrade([{ ...evalForm, id: '', overall_score: (evalForm.punctuality + evalForm.attitude + evalForm.performance + evalForm.appearance + evalForm.teamwork) / 5, created_at: '' } as EmployeeEvaluation], []).grade} — {computeEmployeeGrade([{ ...evalForm, id: '', overall_score: (evalForm.punctuality + evalForm.attitude + evalForm.performance + evalForm.appearance + evalForm.teamwork) / 5, created_at: '' } as EmployeeEvaluation], []).label})</span>
+              </div>
+            </div>
+            <div><label style={lbl}>Notes (optional)</label><textarea value={evalForm.notes} onChange={e => setEvalForm(p => ({ ...p, notes: e.target.value }))} rows={3} placeholder="Any additional observations..." style={{ ...inp, resize: 'vertical' as const }} /></div>
+          </div>
+          <ErrorBanner msg={saveError} />
+          <div style={{ display: 'flex', gap: 10, marginTop: 20 }}>
+            <button onClick={saveEvaluation} disabled={saving || !evalForm.evaluated_by.trim() || !evalForm.eval_date} style={{ flex: 1, padding: '12px', background: PRIMARY, color: '#fff', border: 'none', borderRadius: 12, fontWeight: 700, cursor: 'pointer' }}>{saving ? 'Saving...' : 'Save Evaluation'}</button>
+          </div>
+        </ModalWrap>
+      )}
+
       {showAdvanceModal && (
         <ModalWrap onClose={() => { setShowAdvanceModal(false); setSaveError(null); }}>
           <ModalHeader title="Record Advance" onClose={() => { setShowAdvanceModal(false); setSaveError(null); }} />
@@ -675,16 +749,28 @@ export default function PeoplePage() {
                   </div>
                 </div>
               </div>
-              {!profileLoading && (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, marginTop: 16 }}>
-                  {[{ label: 'Documents', value: documents.length }, { label: 'Leave Days', value: totalLeaveDays }, { label: 'Warnings', value: warnings.length }, { label: 'Advances', value: fmt(outstandingAdvances) }].map(item => (
-                    <div key={item.label} style={{ background: 'rgba(255,255,255,0.15)', borderRadius: 10, padding: '8px', textAlign: 'center' as const }}>
-                      <div style={{ color: '#fff', fontWeight: 800, fontSize: 15 }}>{item.value}</div>
-                      <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: 10, marginTop: 2 }}>{item.label}</div>
+              {!profileLoading && (() => {
+                const gradeInfo = computeEmployeeGrade(evaluations, warnings);
+                return (
+                  <>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, background: 'rgba(255,255,255,0.12)', borderRadius: 10, padding: '8px 12px' }}>
+                      <div style={{ fontWeight: 900, fontSize: 28, color: gradeInfo.color, background: '#fff', borderRadius: 8, width: 44, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{gradeInfo.grade}</div>
+                      <div>
+                        <div style={{ color: '#fff', fontWeight: 700, fontSize: 13 }}>{gradeInfo.label}</div>
+                        <div style={{ color: 'rgba(255,255,255,0.65)', fontSize: 11 }}>Employee Grade · Score {gradeInfo.score.toFixed(2)}/5.00</div>
+                      </div>
                     </div>
-                  ))}
-                </div>
-              )}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, marginTop: 10 }}>
+                      {[{ label: 'Documents', value: documents.length }, { label: 'Leave Days', value: totalLeaveDays }, { label: 'Warnings', value: warnings.length }, { label: 'Advances', value: fmt(outstandingAdvances) }].map(item => (
+                        <div key={item.label} style={{ background: 'rgba(255,255,255,0.15)', borderRadius: 10, padding: '8px', textAlign: 'center' as const }}>
+                          <div style={{ color: '#fff', fontWeight: 800, fontSize: 15 }}>{item.value}</div>
+                          <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: 10, marginTop: 2 }}>{item.label}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                );
+              })()}
             </div>
 
             <div style={{ display: 'flex', borderBottom: '1px solid #eef2ee', background: '#fff', flexShrink: 0, overflowX: 'auto' }}>
@@ -983,6 +1069,49 @@ export default function PeoplePage() {
                         </div>
                       ))}
                     </div>
+                  </div>
+                )}
+
+                {profileTab === 'evaluations' && (
+                  <div style={{ padding: '20px 0', display: 'flex', flexDirection: 'column', gap: 16 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div style={{ fontWeight: 700, fontSize: 15, color: '#333' }}>📋 Performance Evaluations</div>
+                      <button onClick={() => setShowEvalModal(true)} style={{ background: PRIMARY, color: '#fff', border: 'none', borderRadius: 10, padding: '8px 18px', fontWeight: 700, cursor: 'pointer', fontSize: 13 }}>+ New Evaluation</button>
+                    </div>
+                    {(() => {
+                      const gradeInfo = computeEmployeeGrade(evaluations, warnings);
+                      return (
+                        <div style={{ background: `linear-gradient(135deg, ${gradeInfo.color}22, ${gradeInfo.color}11)`, border: `1.5px solid ${gradeInfo.color}55`, borderRadius: 14, padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 16 }}>
+                          <div style={{ fontWeight: 900, fontSize: 36, color: gradeInfo.color, background: '#fff', borderRadius: 10, width: 56, height: 56, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>{gradeInfo.grade}</div>
+                          <div>
+                            <div style={{ fontWeight: 800, fontSize: 17, color: '#333' }}>{gradeInfo.label}</div>
+                            <div style={{ fontSize: 12, color: '#666', marginTop: 3 }}>Current employee grade — Score: {gradeInfo.score.toFixed(2)} / 5.00</div>
+                            {warnings.length > 0 && <div style={{ fontSize: 11, color: '#dc2626', marginTop: 3 }}>⚠ {warnings.length} active warning{warnings.length > 1 ? 's' : ''} affecting grade</div>}
+                          </div>
+                        </div>
+                      );
+                    })()}
+                    {evaluations.length === 0 && <div style={{ textAlign: 'center' as const, padding: 40, color: '#aaa' }}>No evaluations yet — add the first one</div>}
+                    {evaluations.map(ev => (
+                      <div key={ev.id} style={{ background: '#f8faf8', borderRadius: 14, padding: '16px 20px', border: '1px solid #eef2ee' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+                          <div>
+                            <div style={{ fontWeight: 700, fontSize: 14, color: '#333' }}>{new Date(ev.eval_date).toLocaleDateString('en-ZA', { day: 'numeric', month: 'long', year: 'numeric' })}</div>
+                            <div style={{ fontSize: 12, color: '#666', marginTop: 2 }}>Evaluated by: {ev.evaluated_by}</div>
+                          </div>
+                          <div style={{ fontWeight: 900, fontSize: 22, color: computeEmployeeGrade([ev], []).color, background: '#fff', borderRadius: 8, width: 40, height: 40, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, border: `2px solid ${computeEmployeeGrade([ev], []).color}44` }}>{computeEmployeeGrade([ev], []).grade}</div>
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 8, marginTop: 12 }}>
+                          {[{ k: 'Punctuality', v: ev.punctuality }, { k: 'Attitude', v: ev.attitude }, { k: 'Performance', v: ev.performance }, { k: 'Appearance', v: ev.appearance }, { k: 'Teamwork', v: ev.teamwork }].map(item => (
+                            <div key={item.k} style={{ textAlign: 'center' as const, background: '#fff', borderRadius: 8, padding: '8px 4px', border: '1px solid #eef2ee' }}>
+                              <div style={{ fontWeight: 800, fontSize: 18, color: item.v >= 4 ? '#16a34a' : item.v >= 3 ? '#2563eb' : '#dc2626' }}>{item.v}/5</div>
+                              <div style={{ fontSize: 10, color: '#888', marginTop: 2 }}>{item.k}</div>
+                            </div>
+                          ))}
+                        </div>
+                        {ev.notes && <div style={{ marginTop: 10, fontSize: 12, color: '#555', background: '#fff', borderRadius: 8, padding: '8px 12px', border: '1px solid #eef2ee' }}><b>Notes:</b> {ev.notes}</div>}
+                      </div>
+                    ))}
                   </div>
                 )}
 

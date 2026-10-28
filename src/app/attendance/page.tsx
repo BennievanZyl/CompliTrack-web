@@ -17,6 +17,8 @@ type Advance = { id: string; employee_id: string; amount: number; advance_date: 
 type Holiday = { id: string; holiday_date: string; name: string };
 type EmployeeSavings = { id: string; employee_id: string; store_id: string; deduction_per_payroll: number; balance: number };
 type WagePayment = { id: string; employee_id: string; period: string; paid_date: string; gross_pay?: number; uif_employee?: number; uif_employer?: number; advances_deducted?: number; net_pay: number; payment_method: string | null; expense_id?: string | null };
+type EmployeeWarning = { id: string; employee_id: string; warning_type: string; incident_date: string };
+type EmployeeEvaluation = { id: string; employee_id: string; eval_date: string; overall_score: number };
 type PayrollSettings = { sunday_multiplier: number; holiday_multiplier: number; overtime_multiplier: number; weekly_ot_threshold: number; monthly_ot_threshold: number; night_allowance_start_hour: number; default_night_rate: number; uif_employee_rate: number; uif_employer_rate: number; uif_ceiling: number; uif_reference_number: string };
 
 const ROLE_COLORS: Record<string, { bg: string; color: string }> = {
@@ -91,6 +93,8 @@ export default function AttendancePage() {
   const [leaveForm, setLeaveForm] = useState({ leave_type: 'Sick', start_date: '', end_date: '', days_taken: '1', status: 'approved', reason: '', paid_hours_per_day: '' });
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [settingsForm, setSettingsForm] = useState({ sunday_multiplier: '1.5', holiday_multiplier: '2', overtime_multiplier: '1.5', weekly_ot_threshold: '45', monthly_ot_threshold: '195', night_allowance_start_hour: '18', default_night_rate: '0.5', uif_employee_rate: '1', uif_employer_rate: '1', uif_ceiling: '17712', uif_reference_number: '' });
+  const [allWarnings, setAllWarnings] = useState<EmployeeWarning[]>([]);
+  const [allEvaluations, setAllEvaluations] = useState<EmployeeEvaluation[]>([]);
 
   async function loadPayrollData() {
     const [py, pm] = payrollMonth.split('-').map(Number);
@@ -102,7 +106,7 @@ export default function AttendancePage() {
       .eq('store_id', STORE_ID).eq('is_active', true).order('full_name');
     if (empRes.data) setEmployees(empRes.data);
 
-    const [attRes, leaveRes, advRes, holRes, setRes, payRes, savRes] = await Promise.all([
+    const [attRes, leaveRes, advRes, holRes, setRes, payRes, savRes, warnRes, evalRes] = await Promise.all([
       supabase.from('attendance').select('*').eq('store_id', STORE_ID)
         .gte('work_date', payrollMonth + '-01').lte('work_date', monthEnd),
       supabase.from('employee_leave').select('*').eq('store_id', STORE_ID)
@@ -112,6 +116,8 @@ export default function AttendancePage() {
       supabase.from('payroll_settings').select('*').eq('store_id', STORE_ID).maybeSingle(),
       supabase.from('wage_payments').select('*').eq('store_id', STORE_ID).eq('period', payrollMonth),
       supabase.from('employee_savings').select('*').eq('store_id', STORE_ID),
+      supabase.from('employee_warnings').select('id, employee_id, warning_type, incident_date').eq('store_id', STORE_ID),
+      supabase.from('employee_evaluations').select('id, employee_id, eval_date, overall_score').eq('store_id', STORE_ID).order('eval_date', { ascending: false }),
     ]);
     setMonthAttendance(attRes.data || []);
     setMonthLeave(leaveRes.data || []);
@@ -119,6 +125,8 @@ export default function AttendancePage() {
     setSavings(savRes.data || []);
     setHolidays(holRes.data || []);
     setWagePayments(payRes.data || []);
+    setAllWarnings(warnRes.data || []);
+    setAllEvaluations(evalRes.data || []);
     if (setRes.data) {
       const s = setRes.data;
       setPayrollSettings({
@@ -513,6 +521,24 @@ export default function AttendancePage() {
     return digits;
   }
 
+  function computeGradeForPayslip(empId: string) {
+    const empEvals = allEvaluations.filter(e => e.employee_id === empId);
+    const empWarns = allWarnings.filter(w => w.employee_id === empId);
+    const baseScore = empEvals.length > 0 ? empEvals[0].overall_score : 3.5;
+    const deductions = empWarns.reduce((sum, w) => {
+      if (w.warning_type === 'Final Written Warning') return sum + 1;
+      if (w.warning_type === 'Written Warning') return sum + 0.5;
+      if (w.warning_type === 'Verbal Warning') return sum + 0.25;
+      return sum;
+    }, 0);
+    const score = Math.max(1, baseScore - deductions);
+    if (score >= 4.5) return { score, grade: 'A', label: 'Excellent', color: '#16a34a' };
+    if (score >= 3.5) return { score, grade: 'B', label: 'Good', color: '#2563eb' };
+    if (score >= 2.5) return { score, grade: 'C', label: 'Satisfactory', color: '#d97706' };
+    if (score >= 1.5) return { score, grade: 'D', label: 'Below Standard', color: '#dc2626' };
+    return { score, grade: 'F', label: 'Unsatisfactory', color: '#7f1d1d' };
+  }
+
   function payslipHtml(emp: Employee, summary: ReturnType<typeof employeeMonthSummary>, days: ReturnType<typeof buildRegisterDays>) {
     const monthLabel = new Date(payrollMonth + '-01').toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' });
     const rate = emp.hourly_rate || 0;
@@ -591,6 +617,31 @@ export default function AttendancePage() {
         ? '<div style="margin-top:16px;padding:10px 14px;background:#fef9c3;border:1px solid #fde047;border-left:4px solid #eab308;border-radius:6px;font-size:11px;color:#713f12;"><b>&#9888; Attendance Notice:</b> You were recorded late for <b>' + lateCount + ' of ' + totalSessions + ' session' + (totalSessions !== 1 ? 's' : '') + '</b> this pay period. Punctuality is expected — repeated late arrivals may result in a formal warning.</div>'
         : '<div style="margin-top:16px;padding:10px 14px;background:#f0fdf4;border:1px solid #bbf7d0;border-left:4px solid #22c55e;border-radius:6px;font-size:11px;color:#166534;"><b>&#10003; Attendance:</b> No late sessions recorded this pay period. Well done!</div>'
       }
+      ${(() => {
+        const gradeInfo = computeGradeForPayslip(emp.id);
+        const empWarns = allWarnings.filter(w => w.employee_id === emp.id);
+        const warnCounts: Record<string, number> = {};
+        empWarns.forEach(w => { warnCounts[w.warning_type] = (warnCounts[w.warning_type] || 0) + 1; });
+        const warnTypeSummary = Object.entries(warnCounts).map(([t, c]) => `${c}x ${t}`).join(', ');
+        return `<div style="margin-top:12px;border:1.5px solid #e2e8f0;border-radius:8px;overflow:hidden;font-size:11px">
+          <div style="background:#f1f5f9;padding:8px 12px;font-weight:700;font-size:12px;color:#334155;display:flex;justify-content:space-between;align-items:center">
+            <span>&#127775; Employee Performance Record</span>
+          </div>
+          <div style="padding:10px 12px;display:grid;grid-template-columns:1fr 1fr;gap:8px">
+            <div style="background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:8px 10px;display:flex;align-items:center;gap:8px">
+              <div style="font-weight:900;font-size:22px;color:${gradeInfo.color};width:32px;height:32px;background:#f8f9fa;border-radius:6px;display:flex;align-items:center;justify-content:center;flex-shrink:0">${gradeInfo.grade}</div>
+              <div><div style="font-weight:700;color:#333">${gradeInfo.label}</div><div style="color:#888">Grade ${gradeInfo.grade} · Score ${gradeInfo.score.toFixed(2)}/5.00</div></div>
+            </div>
+            <div style="background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:8px 10px">
+              <div style="font-weight:700;color:#333;margin-bottom:4px">&#9888; Disciplinary Record</div>
+              ${empWarns.length === 0
+                ? '<div style="color:#16a34a">&#10003; No warnings on record</div>'
+                : `<div style="color:#dc2626">${empWarns.length} warning${empWarns.length > 1 ? 's' : ''} on file</div><div style="color:#666;margin-top:2px">${warnTypeSummary}</div>`}
+            </div>
+          </div>
+          ${empWarns.length > 0 ? `<div style="padding:6px 12px 10px;font-size:10px;color:#555;background:#fffbeb;border-top:1px solid #fde68a">&#9432; Warnings affect your employee grade. Please discuss any concerns with your manager.</div>` : ''}
+        </div>`;
+      })()}
       ${brandFooter()}
       </div>
       </body></html>`;
