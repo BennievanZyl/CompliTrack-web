@@ -175,8 +175,26 @@ export default function AnalyticsPage(){
       return(lines||[]).reduce((s:number,l:any)=>s+Number(l.actual_qty||0)*Number(l.unit_cost||0),0)
     }
     const[openingValue,closingValue]=await Promise.all([countValue(openingCount?.id),countValue(closingCount?.id)])
-    // Food & Packaging Cost = opening stock (food+packaging) + all purchases - closing stock - wastage
-    const foodCostAmount=openingValue+purchases-closingValue-wastage
+
+    // Invoice-line-based COGS: sum of all lines with a food/COGS category key
+    // This is the fallback (and primary) source when stock counts are absent or produce an anomaly
+    const invoiceFoodCost=(invLinesRes.data||[]).reduce((s:number,l:any)=>{
+      const k=(l.category_key||'').toLowerCase()
+      const isFood=!l.category_key||['cost_of_sales','stock_cogs','cogs','packaging'].includes(l.category_key)||k.includes('cog')||k.startsWith('stock_c')||k.includes('packaging')
+      if(!isFood)return s
+      const exVat=Number(l.amount||0)-Number(l.vat_amount||0)
+      return s+(exVat>0?exVat:Number(l.amount||0))
+    },0)
+
+    // Stock-count-based formula: opening + purchases - closing - wastage
+    // Only use this when BOTH counts exist AND the result is positive AND > invoiceFoodCost * 0.5
+    // (guards against inflated/stale stock counts skewing the figure)
+    const stockCountFoodCost=openingValue+purchases-closingValue-wastage
+    const hasValidCounts=openingCount?.id&&closingCount?.id&&openingCount.id!==closingCount.id
+    const foodCostAmount=(hasValidCounts&&stockCountFoodCost>0&&(invoiceFoodCost===0||Math.abs(stockCountFoodCost-invoiceFoodCost)/Math.max(invoiceFoodCost,1)<0.5))
+      ?stockCountFoodCost
+      :invoiceFoodCost>0?invoiceFoodCost:purchases
+
     const foodCostPct=salesExclVat>0?foodCostAmount/salesExclVat*100:0
 
     const expByCat:Record<string,{name:string;total:number;color:string}>= {}
