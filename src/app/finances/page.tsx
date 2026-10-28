@@ -590,6 +590,15 @@ export default function FinancesPage() {
     const payload = { store_id: STORE_ID, name: doForm.name.trim(), category_key: doForm.category_key, default_amount: parseFloat(doForm.default_amount) || 0, is_active: true, sort_order: debitOrders.length }
     if (editDo) {
       await supabase.from('debit_orders').update(payload).eq('id', editDo.id)
+      // Also update this month's amount if it hasn't been allocated yet
+      const newAmt = parseFloat(doForm.default_amount) || 0
+      await supabase.from('debit_order_months')
+        .update({ amount: newAmt })
+        .eq('debit_order_id', editDo.id)
+        .eq('month', month)
+        .eq('is_allocated', false)
+      // Update in-memory state too so list refreshes immediately
+      setDebitOrderMonths(prev => prev.map(m => m.debit_order_id === editDo.id && !m.is_allocated ? { ...m, amount: newAmt } : m))
     } else {
       await supabase.from('debit_orders').insert(payload)
     }
