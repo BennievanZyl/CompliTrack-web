@@ -305,6 +305,8 @@ export default function PeoplePage() {
   const [warnings, setWarnings] = useState<EmployeeWarning[]>([]);
   const [advances, setAdvances] = useState<EmployeeAdvance[]>([]);
   const [evaluations, setEvaluations] = useState<EmployeeEvaluation[]>([]);
+  const [allStoreEvals, setAllStoreEvals] = useState<{employee_id: string; overall_score: number; eval_date: string}[]>([]);
+  const [allStoreWarnings, setAllStoreWarnings] = useState<{employee_id: string; warning_type: string}[]>([]);
   const [showEvalModal, setShowEvalModal] = useState(false);
   const [evalForm, setEvalForm] = useState({ eval_date: new Date().toISOString().split('T')[0], evaluated_by: '', punctuality: 3, attitude: 3, performance: 3, appearance: 3, teamwork: 3, notes: '' });
   const [attendance, setAttendance] = useState<Attendance[]>([]);
@@ -342,8 +344,14 @@ export default function PeoplePage() {
 
   async function loadEmployees() {
     setLoading(true);
-    const { data } = await supabase.from('employees').select('*').eq('store_id', STORE_ID).order('full_name');
+    const [{ data }, { data: evalsData }, { data: warnsData }] = await Promise.all([
+      supabase.from('employees').select('*').eq('store_id', STORE_ID).order('full_name'),
+      supabase.from('employee_evaluations').select('employee_id, overall_score, eval_date').eq('store_id', STORE_ID).order('eval_date', { ascending: false }),
+      supabase.from('employee_warnings').select('employee_id, warning_type').eq('store_id', STORE_ID),
+    ]);
     setEmployees(data || []);
+    setAllStoreEvals(evalsData || []);
+    setAllStoreWarnings(warnsData || []);
     setLoading(false);
   }
 
@@ -355,7 +363,7 @@ export default function PeoplePage() {
       supabase.from('employee_warnings').select('*').eq('employee_id', emp.id).order('incident_date', { ascending: false }),
       supabase.from('employee_advances').select('*').eq('employee_id', emp.id).order('advance_date', { ascending: false }),
       supabase.from('attendance').select('*').eq('employee_id', emp.id).order('work_date', { ascending: false }).limit(30),
-      supabase.from('employee_evaluations').select('*').eq('employee_id', emp.id).order('eval_date', { ascending: false }),
+      supabase.from('employee_evaluations').select('*').eq('employee_id', emp.id).eq('store_id', STORE_ID).order('eval_date', { ascending: false }),
     ]);
     setDocuments(docsRes.data || []);
     setLeave(leaveRes.data || []);
@@ -444,7 +452,7 @@ export default function PeoplePage() {
     const overall_score = parseFloat(((evalForm.punctuality + evalForm.attitude + evalForm.performance + evalForm.appearance + evalForm.teamwork) / 5).toFixed(2));
     try {
       await supabase.from('employee_evaluations').insert({ employee_id: selectedEmployee.id, store_id: STORE_ID, eval_date: evalForm.eval_date, evaluated_by: evalForm.evaluated_by, punctuality: evalForm.punctuality, attitude: evalForm.attitude, performance: evalForm.performance, appearance: evalForm.appearance, teamwork: evalForm.teamwork, overall_score, notes: evalForm.notes || null });
-      await loadEmployeeProfile(selectedEmployee); setShowEvalModal(false); setEvalForm({ eval_date: new Date().toISOString().split('T')[0], evaluated_by: '', punctuality: 3, attitude: 3, performance: 3, appearance: 3, teamwork: 3, notes: '' });
+      await Promise.all([loadEmployeeProfile(selectedEmployee), loadEmployees()]); setShowEvalModal(false); setEvalForm({ eval_date: new Date().toISOString().split('T')[0], evaluated_by: '', punctuality: 3, attitude: 3, performance: 3, appearance: 3, teamwork: 3, notes: '' });
     } catch (e: unknown) { setSaveError(e instanceof Error ? e.message : 'Failed to save'); }
     setSaving(false);
   }
@@ -1178,14 +1186,25 @@ export default function PeoplePage() {
                     onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 6px 20px rgba(0,0,0,0.1)'; }}
                     onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 2px 6px rgba(0,0,0,0.04)'; }}
                   >
+                    {(() => {
+                      const empEvals = allStoreEvals.filter(e => e.employee_id === emp.id);
+                      const empWarns = allStoreWarnings.filter(w => w.employee_id === emp.id);
+                      const cardGrade = computeEmployeeGrade(empEvals.length > 0 ? [{ ...empEvals[0], id: '', eval_date: empEvals[0].eval_date, evaluated_by: '', punctuality: 0, attitude: 0, performance: 0, appearance: 0, teamwork: 0, notes: null, created_at: '' }] : [], empWarns.map(w => ({ ...w, id: '', employee_id: emp.id, incident_date: '', reason: '', issued_by: '', document_url: null, notes: null, created_at: '' })));
+                      return (
                     <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 14 }}>
                       <div style={{ width: 52, height: 52, borderRadius: '50%', background: rc.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, fontWeight: 800, color: rc.color, flexShrink: 0 }}>{initials(emp.full_name)}</div>
                       <div style={{ flex: 1 }}>
                         <div style={{ fontWeight: 700, color: '#333', fontSize: 15 }}>{emp.full_name}</div>
                         <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: rc.bg, color: rc.color }}>{emp.role}</span>
                       </div>
+                      <div style={{ display: 'flex', flexDirection: 'column' as const, alignItems: 'center', gap: 2 }}>
+                        <div style={{ width: 34, height: 34, borderRadius: '50%', background: cardGrade.color + '18', border: `2px solid ${cardGrade.color}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 900, fontSize: 15, color: cardGrade.color }}>{cardGrade.grade}</div>
+                        <span style={{ fontSize: 9, fontWeight: 600, color: cardGrade.color }}>{cardGrade.label.split(' ')[0].toUpperCase()}</span>
+                      </div>
                       {!emp.is_active && <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: '#f5f5f5', color: '#aaa' }}>INACTIVE</span>}
                     </div>
+                      );
+                    })()}
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' as const }}>
                       {emp.employment_type && <span style={{ fontSize: 11, padding: '3px 8px', borderRadius: 20, background: '#f0f4f0', color: '#666' }}>{EMPLOYMENT_LABELS[emp.employment_type]}</span>}
                       {emp.phone && <span style={{ fontSize: 11, padding: '3px 8px', borderRadius: 20, background: '#f0f4f0', color: '#666' }}>📞 {emp.phone}</span>}
