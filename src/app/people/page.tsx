@@ -88,6 +88,115 @@ function isExpiringSoon(date: string) { return Math.floor((new Date(date).getTim
 function isExpired(date: string) { return new Date(date) < new Date(); }
 function isImage(url: string) { return /\.(jpg|jpeg|png|gif|webp)$/i.test(url); }
 
+// ─── WARNING LETTER PRINT ────────────────────────────────────────────────────
+function printWarningLetter(params: {
+  warningType: string; incidentDate: string; reason: string;
+  issuedBy: string; notes: string; employee: Employee;
+  storeName: string; previousWarnings: EmployeeWarning[];
+}) {
+  const { warningType, incidentDate, reason, issuedBy, notes, employee, storeName, previousWarnings } = params;
+  const fmtDate = (d: string) => d ? new Date(d + 'T00:00:00').toLocaleDateString('en-ZA', { day: 'numeric', month: 'long', year: 'numeric' }) : '—';
+  const todayStr = new Date().toLocaleDateString('en-ZA', { day: 'numeric', month: 'long', year: 'numeric' });
+  const employmentLabel = EMPLOYMENT_LABELS[employee.employment_type || ''] || employee.employment_type || '—';
+  const prevLines = previousWarnings.length > 0
+    ? previousWarnings.map(w => `<li>${w.warning_type} — ${fmtDate(w.incident_date)} — ${w.reason}</li>`).join('')
+    : '<li style="color:#888">None</li>';
+  const validityMap: Record<string, string> = {
+    'Verbal Warning': '3 months', 'Written Warning': '6 months',
+    'Final Written Warning': '12 months', 'Suspension': 'N/A', 'Disciplinary Hearing': 'N/A',
+  };
+  const validity = validityMap[warningType] || '6 months';
+  const outcomeText = warningType === 'Verbal Warning'
+    ? `You have been issued a <strong>Verbal Warning</strong>. This warning is valid for <strong>${validity}</strong> from the date of issue. A further act of misconduct during this period may result in more serious disciplinary action.`
+    : warningType === 'Written Warning'
+    ? `You have been issued a <strong>Written Warning</strong>. This warning is valid for <strong>${validity}</strong> from the date of issue. A further act of misconduct or repeat of this offence during this period may result in a <strong>Final Written Warning</strong> or dismissal.`
+    : warningType === 'Final Written Warning'
+    ? `You have been issued a <strong>Final Written Warning</strong>. This is your final warning, valid for <strong>${validity}</strong>. Any further misconduct during this period may result in <strong>dismissal</strong>.`
+    : warningType === 'Suspension'
+    ? `You are hereby <strong>suspended</strong> pending investigation into the above matter. You will be notified of the outcome in due course.`
+    : `You are hereby notified of a formal <strong>Disciplinary Hearing</strong> regarding the above matter. You have the right to be represented.`;
+  const html = `<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>${warningType} — ${employee.full_name}</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:Arial,sans-serif;font-size:12pt;color:#000;background:#fff}
+@page{size:A4;margin:20mm}
+.page{max-width:170mm;margin:0 auto}
+h1{font-size:16pt;text-align:center;text-transform:uppercase;margin-bottom:4px}
+h2{font-size:13pt;text-align:center;color:#333;margin-bottom:24px;font-weight:normal}
+.sec{margin-bottom:18px}
+.sec-title{font-weight:bold;font-size:10pt;border-bottom:1.5px solid #000;padding-bottom:3px;margin-bottom:10px;text-transform:uppercase;letter-spacing:.5px}
+table.det{width:100%;border-collapse:collapse}
+table.det td{padding:5px 6px;font-size:11pt;vertical-align:top}
+table.det td:first-child{font-weight:bold;width:42%;color:#444}
+.box{border:1px solid #ccc;border-radius:4px;padding:12px;min-height:50px;background:#fafafa;font-size:11pt;white-space:pre-wrap}
+.notice{background:#fff8e1;border:1px solid #e0c000;border-radius:4px;padding:10px 14px;font-size:11pt}
+.sigs{display:flex;gap:28px;margin-top:32px}
+.sig{flex:1}
+.sig .line{border-bottom:1px solid #000;height:32px;margin-bottom:5px}
+.sig .lbl{font-size:10pt;color:#555;line-height:1.4}
+.ack{margin-top:18px;font-size:11pt;background:#f5f5f5;border:1px solid #ddd;border-radius:4px;padding:10px 14px}
+.footer{margin-top:24px;font-size:9pt;color:#999;text-align:center;border-top:1px solid #ddd;padding-top:8px}
+ul{margin-left:18px}
+@media print{body{print-color-adjust:exact;-webkit-print-color-adjust:exact}}
+</style></head>
+<body><div class="page">
+<div style="text-align:center;border-bottom:2px solid #000;padding-bottom:14px;margin-bottom:20px">
+  <h1>${storeName || 'COMPLITRACK'}</h1>
+  <h2>${warningType.toUpperCase()}</h2>
+</div>
+
+<div class="sec">
+  <div class="sec-title">Employee Details</div>
+  <table class="det">
+    <tr><td>Employee Name:</td><td>${employee.full_name}</td></tr>
+    <tr><td>Position / Role:</td><td>${employee.role}</td></tr>
+    <tr><td>Employment Type:</td><td>${employmentLabel}</td></tr>
+    <tr><td>Date of Employment:</td><td>${fmtDate(employee.start_date || '')}</td></tr>
+    <tr><td>Date of Incident:</td><td>${fmtDate(incidentDate)}</td></tr>
+    <tr><td>Date of Warning:</td><td>${todayStr}</td></tr>
+    <tr><td>Warning Type:</td><td><strong>${warningType}</strong></td></tr>
+  </table>
+</div>
+
+<div class="sec">
+  <div class="sec-title">Previous Disciplinary Record</div>
+  <ul>${prevLines}</ul>
+</div>
+
+<div class="sec">
+  <div class="sec-title">Nature of Offence / Reason</div>
+  <div class="box">${reason.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>')}</div>
+</div>
+
+${notes ? `<div class="sec"><div class="sec-title">Additional Notes</div><div class="box">${notes.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>')}</div></div>` : ''}
+
+<div class="sec">
+  <div class="sec-title">Outcome &amp; Consequence</div>
+  <div class="notice">${outcomeText}</div>
+</div>
+
+<div class="sec">
+  <div class="sec-title">Right of Appeal</div>
+  <p style="font-size:11pt">You have the right to appeal this decision. Any appeal must be submitted in writing within <strong>5 working days</strong> of receipt of this warning to the Store Manager or Franchisor.</p>
+</div>
+
+<div class="sigs">
+  <div class="sig"><div class="line"></div><div class="lbl"><strong>Issued By:</strong> ${issuedBy}<br>Signature &amp; Date</div></div>
+  <div class="sig"><div class="line"></div><div class="lbl"><strong>Employee:</strong> ${employee.full_name}<br>Signature &amp; Date</div></div>
+  <div class="sig"><div class="line"></div><div class="lbl"><strong>Witness:</strong><br>Signature &amp; Date</div></div>
+</div>
+
+<div class="ack"><strong>Employee Acknowledgement:</strong> I acknowledge receipt of this warning. My signature does not necessarily indicate agreement with the content of this warning.</div>
+
+<div class="footer">Generated by CompliTrack &bull; ${storeName || ''} &bull; ${new Date().toLocaleDateString('en-ZA')}</div>
+</div>
+<script>window.onload=function(){window.print();}</script>
+</body></html>`;
+  const win = window.open('', '_blank');
+  if (win) { win.document.write(html); win.document.close(); }
+}
+
 // ─── UPLOAD HELPER ────────────────────────────────────────────────────────────
 async function uploadToStorage(bucket: string, path: string, file: File): Promise<string> {
   const { error } = await supabase.storage.from(bucket).upload(path, file, { upsert: true });
@@ -202,6 +311,7 @@ export default function PeoplePage() {
   const [leaveForm, setLeaveForm] = useState({ leave_type: 'Annual', start_date: '', end_date: '', days_taken: '', status: 'approved', reason: '', notes: '', paid_hours_per_day: '' });
   const [warningForm, setWarningForm] = useState({ warning_type: 'Written Warning', reason: '', incident_date: '', issued_by: '', notes: '' });
   const [warningFile, setWarningFile] = useState<File | null>(null);
+  const [storeName, setStoreName] = useState<string>('');
   const [advanceForm, setAdvanceForm] = useState({ amount: '', reason: '', advance_date: new Date().toISOString().split('T')[0], repayment_status: 'outstanding', deduct_from_wages: true, notes: '' });
   const [attendanceForm, setAttendanceForm] = useState({ work_date: new Date().toISOString().split('T')[0], clock_in: '', clock_out: '', is_late: false, notes: '' });
   const [editingAttendance, setEditingAttendance] = useState<Attendance | null>(null);
@@ -216,6 +326,8 @@ export default function PeoplePage() {
   async function checkAuthAndLoad() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { router.push('/login'); return; }
+    const { data: storeData } = await supabase.from('stores').select('name').eq('id', STORE_ID).maybeSingle();
+    setStoreName(storeData?.name || '');
     await loadEmployees();
   }
 
@@ -450,7 +562,10 @@ export default function PeoplePage() {
             <div><label style={lbl}>Notes</label><textarea value={warningForm.notes} onChange={e => setWarningForm(p => ({ ...p, notes: e.target.value }))} rows={2} style={{ ...inp, resize: 'vertical' as const }} /></div>
           </div>
           <ErrorBanner msg={saveError} />
-          <button onClick={saveWarning} disabled={saving || !warningForm.reason.trim() || !warningForm.incident_date || !warningForm.issued_by.trim()} style={{ width: '100%', marginTop: 20, padding: '12px', background: '#ef4444', color: '#fff', border: 'none', borderRadius: 12, fontWeight: 700, cursor: 'pointer' }}>{saving ? 'Saving...' : 'Issue Warning'}</button>
+          <div style={{ display: 'flex', gap: 10, marginTop: 20 }}>
+            <button onClick={() => { if (selectedEmployee) printWarningLetter({ warningType: warningForm.warning_type, incidentDate: warningForm.incident_date, reason: warningForm.reason, issuedBy: warningForm.issued_by, notes: warningForm.notes, employee: selectedEmployee, storeName, previousWarnings: warnings }); }} disabled={!warningForm.reason.trim() || !warningForm.incident_date || !warningForm.issued_by.trim()} style={{ flex: 1, padding: '12px', background: '#fff', color: '#333', border: '1px solid #ccc', borderRadius: 12, fontWeight: 600, cursor: 'pointer' }}>🖨️ Print Preview</button>
+            <button onClick={saveWarning} disabled={saving || !warningForm.reason.trim() || !warningForm.incident_date || !warningForm.issued_by.trim()} style={{ flex: 2, padding: '12px', background: '#ef4444', color: '#fff', border: 'none', borderRadius: 12, fontWeight: 700, cursor: 'pointer' }}>{saving ? 'Saving...' : 'Issue Warning'}</button>
+          </div>
         </ModalWrap>
       )}
 
@@ -765,12 +880,16 @@ export default function PeoplePage() {
                             </div>
                             <div style={{ fontSize: 14, color: '#333', fontWeight: 500, marginBottom: 6 }}>{w.reason}</div>
                             <div style={{ fontSize: 12, color: '#888' }}>Issued by: {w.issued_by}</div>
-                            {w.document_url && (
-                              <div style={{ marginTop: 8 }}>
-                                {isImage(w.document_url) && <img src={w.document_url} alt="warning doc" style={{ width: '100%', maxHeight: 100, objectFit: 'cover', borderRadius: 8, marginBottom: 4 }} />}
-                                <a href={w.document_url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: PRIMARY, fontWeight: 600 }}>{isImage(w.document_url) ? '🖼️ View Document' : '📄 Open Document'} →</a>
-                              </div>
-                            )}
+                            <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center' }}>
+                              <button onClick={() => { if (selectedEmployee) printWarningLetter({ warningType: w.warning_type, incidentDate: w.incident_date, reason: w.reason, issuedBy: w.issued_by, notes: w.notes || '', employee: selectedEmployee, storeName, previousWarnings: warnings.filter(pw => pw.id !== w.id && pw.incident_date <= w.incident_date) }); }} style={{ fontSize: 12, color: PRIMARY, fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>🖨️ Print Letter</button>
+                              {w.document_url && (
+                                <>
+                                  <span style={{ color: '#ccc' }}>|</span>
+                                  {isImage(w.document_url) && <img src={w.document_url} alt="warning doc" style={{ width: '100%', maxHeight: 100, objectFit: 'cover', borderRadius: 8, marginBottom: 4 }} />}
+                                  <a href={w.document_url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: PRIMARY, fontWeight: 600 }}>{isImage(w.document_url) ? '🖼️ View Document' : '📄 Open Document'} →</a>
+                                </>
+                              )}
+                            </div>
                           </div>
                         );
                       })}

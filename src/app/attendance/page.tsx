@@ -16,7 +16,7 @@ type Leave = { id: string; employee_id: string; leave_type: string; start_date: 
 type Advance = { id: string; employee_id: string; amount: number; advance_date: string; repayment_status: string; deduct_from_wages: boolean; reason: string | null };
 type Holiday = { id: string; holiday_date: string; name: string };
 type EmployeeSavings = { id: string; employee_id: string; store_id: string; deduction_per_payroll: number; balance: number };
-type WagePayment = { id: string; employee_id: string; period: string; paid_date: string; net_pay: number; payment_method: string | null };
+type WagePayment = { id: string; employee_id: string; period: string; paid_date: string; gross_pay?: number; uif_employee?: number; uif_employer?: number; advances_deducted?: number; net_pay: number; payment_method: string | null; expense_id?: string | null };
 type PayrollSettings = { sunday_multiplier: number; holiday_multiplier: number; overtime_multiplier: number; weekly_ot_threshold: number; monthly_ot_threshold: number; night_allowance_start_hour: number; default_night_rate: number; uif_employee_rate: number; uif_employer_rate: number; uif_ceiling: number; uif_reference_number: string };
 
 const ROLE_COLORS: Record<string, { bg: string; color: string }> = {
