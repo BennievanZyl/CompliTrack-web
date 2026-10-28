@@ -6,7 +6,7 @@ import { supabase } from '@/lib/supabase'
 
 const VAT_RATE = 0.15
 
-const TABS = ['Summary', 'Cash-Ups / Sales', 'Supplier Bills', 'Quick Expenses', 'Food Cost', 'History']
+const TABS = ['Summary', 'Cash-Ups / Sales', 'Supplier Bills', 'Quick Expenses', 'Food Cost', 'History', 'Debit Orders']
 
 const COLOUR_PALETTE = ['#10b981','#ef4444','#3b82f6','#f59e0b','#8b5cf6','#06b6d4','#f97316','#ec4899','#84cc16','#6b7280','#dc2626','#0ea5e9','#a855f7','#22c55e','#1d4ed8']
 
@@ -167,6 +167,19 @@ export default function FinancesPage() {
   const [qForm, setQForm] = useState(emptyQuick())
 
   const CAT_MAP = Object.fromEntries(categories.map(c => [c.key, c]))
+
+  // ── Debit Orders state ──
+  type DebitOrder = { id: string; name: string; category_key: string; default_amount: number; is_active: boolean; sort_order: number }
+  type DebitOrderMonth = { id?: string; debit_order_id: string; month: string; amount: number; is_included: boolean; is_allocated: boolean; allocated_at?: string; quick_expense_id?: string }
+  const [debitOrders, setDebitOrders] = useState<DebitOrder[]>([])
+  const [debitOrderMonths, setDebitOrderMonths] = useState<DebitOrderMonth[]>([])
+  const [doLoaded, setDoLoaded] = useState(false)
+  const [doLoading, setDoLoading] = useState(false)
+  const [doSaving, setDoSaving] = useState(false)
+  const [doAllocating, setDoAllocating] = useState(false)
+  const [showDoForm, setShowDoForm] = useState(false)
+  const [editDo, setEditDo] = useState<DebitOrder | null>(null)
+  const [doForm, setDoForm] = useState({ name: '', category_key: 'other', default_amount: '' })
   const defaultCatKey = categories.find(c => /stock|cogs/i.test(c.name))?.key || categories[0]?.key || 'cost_of_sales'
   // Stock/COGS is used daily (deliveries, packaging, cleaning) so it should always lead the dropdown,
   // ahead of monthly items like Rent.
@@ -503,6 +516,92 @@ export default function FinancesPage() {
     }
     return true
   })
+
+  // ── Debit Orders load + allocate ──
+  async function loadDebitOrders() {
+    if (!STORE_ID) return
+    setDoLoading(true)
+    const [{ data: orders }, { data: months }] = await Promise.all([
+      supabase.from('debit_orders').select('*').eq('store_id', STORE_ID).eq('is_active', true).order('sort_order'),
+      supabase.from('debit_order_months').select('*').eq('store_id', STORE_ID).eq('month', month),
+    ])
+    const doList: DebitOrder[] = orders || []
+    setDebitOrders(doList)
+    // Merge: for any debit order without a month record, create an in-memory default
+    const monthMap = new Map((months || []).map((m: any) => [m.debit_order_id, m]))
+    const merged: DebitOrderMonth[] = doList.map(o => {
+      if (monthMap.has(o.id)) return monthMap.get(o.id)
+      // Get previous month amount: fallback to default_amount
+      return { debit_order_id: o.id, month, amount: o.default_amount, is_included: true, is_allocated: false }
+    })
+    setDebitOrderMonths(merged)
+    setDoLoading(false)
+    setDoLoaded(true)
+  }
+  useEffect(() => { if (tab === 6 && !doLoaded && STORE_ID) loadDebitOrders() }, [tab, doLoaded, STORE_ID, month])
+  useEffect(() => { setDoLoaded(false) }, [month])
+
+  async function saveDebitOrderMonth(dom: DebitOrderMonth) {
+    // Upsert month record
+    const { data: existing } = await supabase.from('debit_order_months').select('id').eq('debit_order_id', dom.debit_order_id).eq('month', dom.month).single()
+    if (existing?.id) {
+      await supabase.from('debit_order_months').update({ amount: dom.amount, is_included: dom.is_included }).eq('id', existing.id)
+    } else {
+      await supabase.from('debit_order_months').insert({ store_id: STORE_ID, debit_order_id: dom.debit_order_id, month: dom.month, amount: dom.amount, is_included: dom.is_included, is_allocated: false })
+    }
+  }
+
+  async function allocateDebitOrders() {
+    const toAllocate = debitOrderMonths.filter(m => m.is_included && !m.is_allocated && m.amount > 0)
+    if (toAllocate.length === 0) { alert('Nothing to allocate — all included debit orders are already allocated or have R 0 amount.'); return }
+    if (!confirm(`Allocate ${toAllocate.length} debit order(s) as Quick Expenses for ${month}?`)) return
+    setDoAllocating(true)
+    const lastDay = new Date(parseInt(month.split('-')[0]), parseInt(month.split('-')[1]), 0).toISOString().split('T')[0]
+    for (const dom of toAllocate) {
+      const order = debitOrders.find(o => o.id === dom.debit_order_id)
+      if (!order) continue
+      const cat = categories.find(c => c.key === dom.debit_order_id || c.key === order.category_key)
+      // Upsert month record first
+      const { data: existing } = await supabase.from('debit_order_months').select('id').eq('debit_order_id', dom.debit_order_id).eq('month', month).single()
+      let monthId = existing?.id
+      // Insert quick expense
+      const { data: exp } = await supabase.from('expenses').insert({
+        store_id: STORE_ID, expense_date: lastDay,
+        category_key: order.category_key, category_name: categories.find(c => c.key === order.category_key)?.name || order.category_key,
+        description: order.name, amount: dom.amount, supplier: 'Debit Order',
+        payment_method: 'debit_order', notes: `Auto-allocated debit order — ${month}`,
+      }).select('id').single()
+      // Mark as allocated
+      if (monthId) {
+        await supabase.from('debit_order_months').update({ is_allocated: true, allocated_at: new Date().toISOString(), quick_expense_id: exp?.id || null }).eq('id', monthId)
+      } else {
+        await supabase.from('debit_order_months').insert({ store_id: STORE_ID, debit_order_id: dom.debit_order_id, month, amount: dom.amount, is_included: true, is_allocated: true, allocated_at: new Date().toISOString(), quick_expense_id: exp?.id || null })
+      }
+    }
+    setDoAllocating(false)
+    setDoLoaded(false)
+    load()
+    loadDebitOrders()
+    alert(`✅ ${toAllocate.length} debit order(s) allocated as Quick Expenses!`)
+  }
+
+  async function saveDoForm() {
+    if (!doForm.name.trim()) return
+    setDoSaving(true)
+    const payload = { store_id: STORE_ID, name: doForm.name.trim(), category_key: doForm.category_key, default_amount: parseFloat(doForm.default_amount) || 0, is_active: true, sort_order: debitOrders.length }
+    if (editDo) {
+      await supabase.from('debit_orders').update(payload).eq('id', editDo.id)
+    } else {
+      await supabase.from('debit_orders').insert(payload)
+    }
+    setDoSaving(false); setShowDoForm(false); setEditDo(null); setDoLoaded(false); loadDebitOrders()
+  }
+
+  async function deleteDebitOrder(id: string) {
+    if (!confirm('Remove this debit order from the list?')) return
+    await supabase.from('debit_orders').update({ is_active: false }).eq('id', id)
+    setDoLoaded(false); loadDebitOrders()
+  }
 
   // ── Summary calcs ──
   const totalSales = cashUps.reduce((s, r) => s + Number(r.cash_up_total || 0), 0)
@@ -1982,6 +2081,128 @@ export default function FinancesPage() {
               </div>
             )
           })()}
+
+          {tab === 6 && (
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
+                <div>
+                  <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Debit Orders</h2>
+                  <p style={{ margin: '4px 0 0', fontSize: 13, color: '#6b7280' }}>Recurring monthly debit orders — review amounts, then allocate all in one click.</p>
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button onClick={() => { setEditDo(null); setDoForm({ name: '', category_key: categories[0]?.key || 'other', default_amount: '' }); setShowDoForm(true) }} style={{ padding: '8px 16px', background: '#f3f4f6', color: '#374151', border: '1px solid #e5e7eb', borderRadius: 8, fontWeight: 600, cursor: 'pointer', fontSize: 13 }}>+ Add Debit Order</button>
+                  <button onClick={allocateDebitOrders} disabled={doAllocating || debitOrderMonths.filter(m => m.is_included && !m.is_allocated).length === 0} style={{ padding: '8px 20px', background: debitOrderMonths.filter(m => m.is_included && !m.is_allocated).length > 0 ? '#1a5c38' : '#9ca3af', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 700, cursor: debitOrderMonths.filter(m => m.is_included && !m.is_allocated).length > 0 ? 'pointer' : 'not-allowed', fontSize: 14 }}>
+                    {doAllocating ? 'Allocating…' : `✅ Allocate All (${debitOrderMonths.filter(m => m.is_included && !m.is_allocated).length})`}
+                  </button>
+                </div>
+              </div>
+
+              {doLoading ? <div style={{ textAlign: 'center', padding: 60, color: '#6b7280' }}>Loading…</div> : debitOrders.length === 0 ? (
+                <div style={{ ...card, textAlign: 'center', padding: 48 }}>
+                  <div style={{ fontSize: 40, marginBottom: 8 }}>🏦</div>
+                  <p style={{ color: '#6b7280', marginBottom: 16 }}>No debit orders set up yet. Add your recurring monthly debits — insurance, alarm, internet, etc.</p>
+                  <button onClick={() => { setShowDoForm(true); setDoForm({ name: '', category_key: categories[0]?.key || 'other', default_amount: '' }) }} style={{ padding: '10px 24px', background: '#1a5c38', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 700, cursor: 'pointer' }}>+ Add First Debit Order</button>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 10 }}>
+                  {/* Header */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '28px 1fr 180px 130px 100px 80px', gap: 12, padding: '8px 16px', fontSize: 11, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase' as const }}>
+                    <div></div><div>Name</div><div>Category</div><div style={{ textAlign: 'right' }}>Amount (R)</div><div style={{ textAlign: 'center' }}>Status</div><div></div>
+                  </div>
+                  {debitOrders.map(order => {
+                    const dom = debitOrderMonths.find(m => m.debit_order_id === order.id)
+                    const included = dom?.is_included ?? true
+                    const allocated = dom?.is_allocated ?? false
+                    const amt = dom?.amount ?? order.default_amount
+                    const catName = categories.find(c => c.key === order.category_key)?.name || order.category_key
+                    return (
+                      <div key={order.id} style={{ ...card, marginBottom: 0, padding: '14px 16px', display: 'grid', gridTemplateColumns: '28px 1fr 180px 130px 100px 80px', gap: 12, alignItems: 'center', opacity: included ? 1 : 0.5 }}>
+                        {/* Include checkbox */}
+                        <input type="checkbox" checked={included} onChange={async e => {
+                          const updated = debitOrderMonths.map(m => m.debit_order_id === order.id ? { ...m, is_included: e.target.checked } : m)
+                          setDebitOrderMonths(updated)
+                          const newDom = updated.find(m => m.debit_order_id === order.id)
+                          if (newDom) await saveDebitOrderMonth(newDom)
+                        }} style={{ width: 18, height: 18, cursor: 'pointer', accentColor: '#1a5c38' }} />
+                        {/* Name */}
+                        <div>
+                          <div style={{ fontWeight: 700, fontSize: 14, color: '#111' }}>{order.name}</div>
+                          {!included && <div style={{ fontSize: 11, color: '#9ca3af' }}>Skipped this month</div>}
+                        </div>
+                        {/* Category */}
+                        <div style={{ fontSize: 13, color: '#6b7280' }}>{catName}</div>
+                        {/* Amount — editable if not yet allocated */}
+                        <div style={{ textAlign: 'right' }}>
+                          {allocated ? (
+                            <span style={{ fontWeight: 700, color: '#1a5c38' }}>{fmt(amt)}</span>
+                          ) : (
+                            <input type="number" value={amt} min={0} step={0.01}
+                              onChange={async e => {
+                                const newAmt = parseFloat(e.target.value) || 0
+                                const updated = debitOrderMonths.map(m => m.debit_order_id === order.id ? { ...m, amount: newAmt } : m)
+                                setDebitOrderMonths(updated)
+                              }}
+                              onBlur={async e => {
+                                const newAmt = parseFloat(e.target.value) || 0
+                                const newDom = debitOrderMonths.find(m => m.debit_order_id === order.id)
+                                if (newDom) await saveDebitOrderMonth({ ...newDom, amount: newAmt })
+                              }}
+                              style={{ width: 100, textAlign: 'right', padding: '4px 8px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 14, fontWeight: 600 }} />
+                          )}
+                        </div>
+                        {/* Status badge */}
+                        <div style={{ textAlign: 'center' }}>
+                          <span style={{ fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 20, background: allocated ? '#dcfce7' : '#fef9c3', color: allocated ? '#166534' : '#854d0e' }}>
+                            {allocated ? '✓ Allocated' : 'Pending'}
+                          </span>
+                        </div>
+                        {/* Actions */}
+                        <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                          <button onClick={() => { setEditDo(order); setDoForm({ name: order.name, category_key: order.category_key, default_amount: String(order.default_amount) }); setShowDoForm(true) }} style={{ padding: '4px 8px', background: '#f3f4f6', border: '1px solid #e5e7eb', borderRadius: 6, cursor: 'pointer', fontSize: 12 }}>Edit</button>
+                          <button onClick={() => deleteDebitOrder(order.id)} style={{ padding: '4px 8px', background: '#fee2e2', border: '1px solid #fecaca', color: '#dc2626', borderRadius: 6, cursor: 'pointer', fontSize: 12 }}>✕</button>
+                        </div>
+                      </div>
+                    )
+                  })}
+                  {/* Total row */}
+                  <div style={{ ...card, marginBottom: 0, padding: '12px 16px', background: '#f9fafb', display: 'grid', gridTemplateColumns: '28px 1fr 180px 130px 100px 80px', gap: 12, alignItems: 'center' }}>
+                    <div></div><div style={{ fontWeight: 700, fontSize: 14 }}>Total This Month</div><div></div>
+                    <div style={{ textAlign: 'right', fontWeight: 700, fontSize: 16, color: '#1a5c38' }}>{fmt(debitOrderMonths.filter(m => m.is_included).reduce((s, m) => s + (m.amount || 0), 0))}</div>
+                    <div></div><div></div>
+                  </div>
+                </div>
+              )}
+
+              {/* Add/Edit Debit Order modal */}
+              {showDoForm && (
+                <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+                  <div style={{ background: '#fff', borderRadius: 16, padding: 28, width: 420, maxWidth: '95vw' }}>
+                    <h3 style={{ margin: '0 0 20px', fontSize: 17, fontWeight: 700 }}>{editDo ? 'Edit Debit Order' : 'Add Debit Order'}</h3>
+                    <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 14 }}>
+                      <div>
+                        <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 4 }}>Name</label>
+                        <input value={doForm.name} onChange={e => setDoForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Telkom ADSL, Insurance, Alarm Monitoring" style={{ ...inp, width: '100%' }} />
+                      </div>
+                      <div>
+                        <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 4 }}>Category</label>
+                        <select value={doForm.category_key} onChange={e => setDoForm(f => ({ ...f, category_key: e.target.value }))} style={{ ...inp, width: '100%' }}>
+                          {categories.map(c => <option key={c.key} value={c.key}>{c.name}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 4 }}>Default Monthly Amount (R)</label>
+                        <input type="number" value={doForm.default_amount} onChange={e => setDoForm(f => ({ ...f, default_amount: e.target.value }))} placeholder="0.00" min={0} step={0.01} style={{ ...inp, width: '100%' }} />
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: 10, marginTop: 24 }}>
+                      <button onClick={() => { setShowDoForm(false); setEditDo(null) }} style={{ flex: 1, padding: '10px', background: '#f3f4f6', color: '#374151', border: 'none', borderRadius: 8, fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
+                      <button onClick={saveDoForm} disabled={doSaving || !doForm.name.trim()} style={{ flex: 2, padding: '10px', background: '#1a5c38', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 700, cursor: 'pointer' }}>{doSaving ? 'Saving…' : editDo ? 'Save Changes' : 'Add Debit Order'}</button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {tab === 5 && (
             <div>
