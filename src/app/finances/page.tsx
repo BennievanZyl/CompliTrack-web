@@ -169,7 +169,7 @@ export default function FinancesPage() {
   const CAT_MAP = Object.fromEntries(categories.map(c => [c.key, c]))
 
   // ── Debit Orders state ──
-  type DebitOrder = { id: string; name: string; category_key: string; default_amount: number; is_active: boolean; sort_order: number }
+  type DebitOrder = { id: string; name: string; category_key: string; default_amount: number; vat_inclusive: boolean; is_active: boolean; sort_order: number }
   type DebitOrderMonth = { id?: string; debit_order_id: string; month: string; amount: number; debit_date: string; is_included: boolean; is_allocated: boolean; allocated_at?: string; quick_expense_id?: string }
   const [debitOrders, setDebitOrders] = useState<DebitOrder[]>([])
   const [debitOrderMonths, setDebitOrderMonths] = useState<DebitOrderMonth[]>([])
@@ -179,7 +179,7 @@ export default function FinancesPage() {
   const [doAllocating, setDoAllocating] = useState(false)
   const [showDoForm, setShowDoForm] = useState(false)
   const [editDo, setEditDo] = useState<DebitOrder | null>(null)
-  const [doForm, setDoForm] = useState({ name: '', category_key: 'other', default_amount: '' })
+  const [doForm, setDoForm] = useState({ name: '', category_key: 'other', default_amount: '', vat_inclusive: true })
   const defaultCatKey = categories.find(c => /stock|cogs/i.test(c.name))?.key || categories[0]?.key || 'cost_of_sales'
   // Stock/COGS is used daily (deliveries, packaging, cleaning) so it should always lead the dropdown,
   // ahead of monthly items like Rent.
@@ -564,11 +564,14 @@ export default function FinancesPage() {
       const { data: existing } = await supabase.from('debit_order_months').select('id').eq('debit_order_id', dom.debit_order_id).eq('month', month).single()
       let monthId = existing?.id
       // Insert quick expense
+      const isVatIncl = order.vat_inclusive !== false
+      const exclAmt = isVatIncl ? Math.round(dom.amount / 1.15 * 100) / 100 : dom.amount
+      const vatAmt  = isVatIncl ? Math.round((dom.amount - exclAmt) * 100) / 100 : 0
       const { data: exp } = await supabase.from('expenses').insert({
         store_id: STORE_ID, expense_date: dom.debit_date || today(),
         category_key: order.category_key, category_name: categories.find(c => c.key === order.category_key)?.name || order.category_key,
-        description: order.name, amount: dom.amount, supplier: 'Debit Order',
-        payment_method: 'debit_order', notes: `Auto-allocated debit order — ${month}`,
+        description: order.name, amount: exclAmt, vat_amount: vatAmt, supplier: 'Debit Order',
+        payment_method: 'debit_order', notes: `Auto-allocated debit order — ${month}${isVatIncl ? ' (incl. VAT split)' : ''}`,
       }).select('id').single()
       // Mark as allocated
       if (monthId) {
@@ -587,7 +590,7 @@ export default function FinancesPage() {
   async function saveDoForm() {
     if (!doForm.name.trim()) return
     setDoSaving(true)
-    const payload = { store_id: STORE_ID, name: doForm.name.trim(), category_key: doForm.category_key, default_amount: parseFloat(doForm.default_amount) || 0, is_active: true, sort_order: debitOrders.length }
+    const payload = { store_id: STORE_ID, name: doForm.name.trim(), category_key: doForm.category_key, default_amount: parseFloat(doForm.default_amount) || 0, vat_inclusive: doForm.vat_inclusive, is_active: true, sort_order: debitOrders.length }
     if (editDo) {
       await supabase.from('debit_orders').update(payload).eq('id', editDo.id)
       // Also update this month's amount if it hasn't been allocated yet
@@ -2098,7 +2101,7 @@ export default function FinancesPage() {
                   <p style={{ margin: '4px 0 0', fontSize: 13, color: '#6b7280' }}>Recurring monthly debit orders — review amounts, then allocate all in one click.</p>
                 </div>
                 <div style={{ display: 'flex', gap: 8 }}>
-                  <button onClick={() => { setEditDo(null); setDoForm({ name: '', category_key: categories[0]?.key || 'other', default_amount: '' }); setShowDoForm(true) }} style={{ padding: '8px 16px', background: '#f3f4f6', color: '#374151', border: '1px solid #e5e7eb', borderRadius: 8, fontWeight: 600, cursor: 'pointer', fontSize: 13 }}>+ Add Debit Order</button>
+                  <button onClick={() => { setEditDo(null); setDoForm({ name: '', category_key: categories[0]?.key || 'other', default_amount: '', vat_inclusive: true }); setShowDoForm(true) }} style={{ padding: '8px 16px', background: '#f3f4f6', color: '#374151', border: '1px solid #e5e7eb', borderRadius: 8, fontWeight: 600, cursor: 'pointer', fontSize: 13 }}>+ Add Debit Order</button>
                   <button onClick={allocateDebitOrders} disabled={doAllocating || debitOrderMonths.filter(m => m.is_included && !m.is_allocated).length === 0} style={{ padding: '8px 20px', background: debitOrderMonths.filter(m => m.is_included && !m.is_allocated).length > 0 ? '#1a5c38' : '#9ca3af', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 700, cursor: debitOrderMonths.filter(m => m.is_included && !m.is_allocated).length > 0 ? 'pointer' : 'not-allowed', fontSize: 14 }}>
                     {doAllocating ? 'Allocating…' : `✅ Allocate All (${debitOrderMonths.filter(m => m.is_included && !m.is_allocated).length})`}
                   </button>
@@ -2109,7 +2112,7 @@ export default function FinancesPage() {
                 <div style={{ ...card, textAlign: 'center', padding: 48 }}>
                   <div style={{ fontSize: 40, marginBottom: 8 }}>🏦</div>
                   <p style={{ color: '#6b7280', marginBottom: 16 }}>No debit orders set up yet. Add your recurring monthly debits — insurance, alarm, internet, etc.</p>
-                  <button onClick={() => { setShowDoForm(true); setDoForm({ name: '', category_key: categories[0]?.key || 'other', default_amount: '' }) }} style={{ padding: '10px 24px', background: '#1a5c38', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 700, cursor: 'pointer' }}>+ Add First Debit Order</button>
+                  <button onClick={() => { setShowDoForm(true); setDoForm({ name: '', category_key: categories[0]?.key || 'other', default_amount: '', vat_inclusive: true }) }} style={{ padding: '10px 24px', background: '#1a5c38', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 700, cursor: 'pointer' }}>+ Add First Debit Order</button>
                 </div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 10 }}>
@@ -2134,7 +2137,7 @@ export default function FinancesPage() {
                         }} style={{ width: 18, height: 18, cursor: 'pointer', accentColor: '#1a5c38' }} />
                         {/* Name */}
                         <div>
-                          <div style={{ fontWeight: 700, fontSize: 14, color: '#111' }}>{order.name}</div>
+                          <div style={{ fontWeight: 700, fontSize: 14, color: '#111', display: 'flex', alignItems: 'center', gap: 6 }}>{order.name}{order.vat_inclusive !== false && <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 10, background: '#eff6ff', color: '#3b82f6' }}>VAT</span>}</div>
                           {!included && <div style={{ fontSize: 11, color: '#9ca3af' }}>Skipped this month</div>}
                         </div>
                         {/* Category */}
@@ -2177,7 +2180,7 @@ export default function FinancesPage() {
                         </div>
                         {/* Actions */}
                         <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-                          <button onClick={() => { setEditDo(order); setDoForm({ name: order.name, category_key: order.category_key, default_amount: String(order.default_amount) }); setShowDoForm(true) }} style={{ padding: '4px 8px', background: '#f3f4f6', border: '1px solid #e5e7eb', borderRadius: 6, cursor: 'pointer', fontSize: 12 }}>Edit</button>
+                          <button onClick={() => { setEditDo(order); setDoForm({ name: order.name, category_key: order.category_key, default_amount: String(order.default_amount), vat_inclusive: order.vat_inclusive !== false }); setShowDoForm(true) }} style={{ padding: '4px 8px', background: '#f3f4f6', border: '1px solid #e5e7eb', borderRadius: 6, cursor: 'pointer', fontSize: 12 }}>Edit</button>
                           <button onClick={() => deleteDebitOrder(order.id)} style={{ padding: '4px 8px', background: '#fee2e2', border: '1px solid #fecaca', color: '#dc2626', borderRadius: 6, cursor: 'pointer', fontSize: 12 }}>✕</button>
                         </div>
                       </div>
@@ -2213,7 +2216,14 @@ export default function FinancesPage() {
                         <input type="number" value={doForm.default_amount} onChange={e => setDoForm(f => ({ ...f, default_amount: e.target.value }))} placeholder="0.00" min={0} step={0.01} style={{ ...inp, width: '100%' }} />
                       </div>
                     </div>
-                    <div style={{ display: 'flex', gap: 10, marginTop: 24 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 0', borderTop: '1px solid #f3f4f6', marginTop: 4 }}>
+                        <input type="checkbox" id="vat_incl_chk" checked={doForm.vat_inclusive} onChange={e => setDoForm(f => ({ ...f, vat_inclusive: e.target.checked }))} style={{ width: 18, height: 18, accentColor: '#1a5c38', cursor: 'pointer' }} />
+                        <label htmlFor="vat_incl_chk" style={{ fontSize: 13, fontWeight: 600, color: '#374151', cursor: 'pointer' }}>
+                          Amount is VAT inclusive (÷1.15 on allocation)
+                          <div style={{ fontSize: 11, color: '#9ca3af', fontWeight: 400, marginTop: 1 }}>Tick for bank debit orders — the ex-VAT amount will be posted to P&amp;L</div>
+                        </label>
+                      </div>
+                    <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
                       <button onClick={() => { setShowDoForm(false); setEditDo(null) }} style={{ flex: 1, padding: '10px', background: '#f3f4f6', color: '#374151', border: 'none', borderRadius: 8, fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
                       <button onClick={saveDoForm} disabled={doSaving || !doForm.name.trim()} style={{ flex: 2, padding: '10px', background: '#1a5c38', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 700, cursor: 'pointer' }}>{doSaving ? 'Saving…' : editDo ? 'Save Changes' : 'Add Debit Order'}</button>
                     </div>
