@@ -170,7 +170,7 @@ export default function FinancesPage() {
 
   // ── Debit Orders state ──
   type DebitOrder = { id: string; name: string; category_key: string; default_amount: number; is_active: boolean; sort_order: number }
-  type DebitOrderMonth = { id?: string; debit_order_id: string; month: string; amount: number; is_included: boolean; is_allocated: boolean; allocated_at?: string; quick_expense_id?: string }
+  type DebitOrderMonth = { id?: string; debit_order_id: string; month: string; amount: number; debit_date: string; is_included: boolean; is_allocated: boolean; allocated_at?: string; quick_expense_id?: string }
   const [debitOrders, setDebitOrders] = useState<DebitOrder[]>([])
   const [debitOrderMonths, setDebitOrderMonths] = useState<DebitOrderMonth[]>([])
   const [doLoaded, setDoLoaded] = useState(false)
@@ -530,9 +530,9 @@ export default function FinancesPage() {
     // Merge: for any debit order without a month record, create an in-memory default
     const monthMap = new Map((months || []).map((m: any) => [m.debit_order_id, m]))
     const merged: DebitOrderMonth[] = doList.map(o => {
-      if (monthMap.has(o.id)) return monthMap.get(o.id)
+      if (monthMap.has(o.id)) { const r = monthMap.get(o.id); return { ...r, debit_date: r.debit_date || today() } }
       // Get previous month amount: fallback to default_amount
-      return { debit_order_id: o.id, month, amount: o.default_amount, is_included: true, is_allocated: false }
+      return { debit_order_id: o.id, month, amount: o.default_amount, debit_date: today(), is_included: true, is_allocated: false }
     })
     setDebitOrderMonths(merged)
     setDoLoading(false)
@@ -545,9 +545,9 @@ export default function FinancesPage() {
     // Upsert month record
     const { data: existing } = await supabase.from('debit_order_months').select('id').eq('debit_order_id', dom.debit_order_id).eq('month', dom.month).single()
     if (existing?.id) {
-      await supabase.from('debit_order_months').update({ amount: dom.amount, is_included: dom.is_included }).eq('id', existing.id)
+      await supabase.from('debit_order_months').update({ amount: dom.amount, is_included: dom.is_included, debit_date: dom.debit_date }).eq('id', existing.id)
     } else {
-      await supabase.from('debit_order_months').insert({ store_id: STORE_ID, debit_order_id: dom.debit_order_id, month: dom.month, amount: dom.amount, is_included: dom.is_included, is_allocated: false })
+      await supabase.from('debit_order_months').insert({ store_id: STORE_ID, debit_order_id: dom.debit_order_id, month: dom.month, amount: dom.amount, debit_date: dom.debit_date, is_included: dom.is_included, is_allocated: false })
     }
   }
 
@@ -556,7 +556,6 @@ export default function FinancesPage() {
     if (toAllocate.length === 0) { alert('Nothing to allocate — all included debit orders are already allocated or have R 0 amount.'); return }
     if (!confirm(`Allocate ${toAllocate.length} debit order(s) as Quick Expenses for ${month}?`)) return
     setDoAllocating(true)
-    const lastDay = new Date(parseInt(month.split('-')[0]), parseInt(month.split('-')[1]), 0).toISOString().split('T')[0]
     for (const dom of toAllocate) {
       const order = debitOrders.find(o => o.id === dom.debit_order_id)
       if (!order) continue
@@ -566,7 +565,7 @@ export default function FinancesPage() {
       let monthId = existing?.id
       // Insert quick expense
       const { data: exp } = await supabase.from('expenses').insert({
-        store_id: STORE_ID, expense_date: lastDay,
+        store_id: STORE_ID, expense_date: dom.debit_date || today(),
         category_key: order.category_key, category_name: categories.find(c => c.key === order.category_key)?.name || order.category_key,
         description: order.name, amount: dom.amount, supplier: 'Debit Order',
         payment_method: 'debit_order', notes: `Auto-allocated debit order — ${month}`,
@@ -575,7 +574,7 @@ export default function FinancesPage() {
       if (monthId) {
         await supabase.from('debit_order_months').update({ is_allocated: true, allocated_at: new Date().toISOString(), quick_expense_id: exp?.id || null }).eq('id', monthId)
       } else {
-        await supabase.from('debit_order_months').insert({ store_id: STORE_ID, debit_order_id: dom.debit_order_id, month, amount: dom.amount, is_included: true, is_allocated: true, allocated_at: new Date().toISOString(), quick_expense_id: exp?.id || null })
+        await supabase.from('debit_order_months').insert({ store_id: STORE_ID, debit_order_id: dom.debit_order_id, month, amount: dom.amount, debit_date: dom.debit_date || today(), is_included: true, is_allocated: true, allocated_at: new Date().toISOString(), quick_expense_id: exp?.id || null })
       }
     }
     setDoAllocating(false)
@@ -2106,8 +2105,8 @@ export default function FinancesPage() {
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 10 }}>
                   {/* Header */}
-                  <div style={{ display: 'grid', gridTemplateColumns: '28px 1fr 180px 130px 100px 80px', gap: 12, padding: '8px 16px', fontSize: 11, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase' as const }}>
-                    <div></div><div>Name</div><div>Category</div><div style={{ textAlign: 'right' }}>Amount (R)</div><div style={{ textAlign: 'center' }}>Status</div><div></div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '28px 1fr 160px 120px 120px 100px 80px', gap: 12, padding: '8px 16px', fontSize: 11, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase' as const }}>
+                    <div></div><div>Name</div><div>Category</div><div>Date</div><div style={{ textAlign: 'right' }}>Amount (R)</div><div style={{ textAlign: 'center' }}>Status</div><div></div>
                   </div>
                   {debitOrders.map(order => {
                     const dom = debitOrderMonths.find(m => m.debit_order_id === order.id)
@@ -2116,7 +2115,7 @@ export default function FinancesPage() {
                     const amt = dom?.amount ?? order.default_amount
                     const catName = categories.find(c => c.key === order.category_key)?.name || order.category_key
                     return (
-                      <div key={order.id} style={{ ...card, marginBottom: 0, padding: '14px 16px', display: 'grid', gridTemplateColumns: '28px 1fr 180px 130px 100px 80px', gap: 12, alignItems: 'center', opacity: included ? 1 : 0.5 }}>
+                      <div key={order.id} style={{ ...card, marginBottom: 0, padding: '14px 16px', display: 'grid', gridTemplateColumns: '28px 1fr 160px 120px 120px 100px 80px', gap: 12, alignItems: 'center', opacity: included ? 1 : 0.5 }}>
                         {/* Include checkbox */}
                         <input type="checkbox" checked={included} onChange={async e => {
                           const updated = debitOrderMonths.map(m => m.debit_order_id === order.id ? { ...m, is_included: e.target.checked } : m)
@@ -2131,6 +2130,17 @@ export default function FinancesPage() {
                         </div>
                         {/* Category */}
                         <div style={{ fontSize: 13, color: '#6b7280' }}>{catName}</div>
+                        {/* Date */}
+                        <input type="date" value={dom?.debit_date || ''} disabled={allocated}
+                          onChange={async e => {
+                            const updated = debitOrderMonths.map(m => m.debit_order_id === order.id ? { ...m, debit_date: e.target.value } : m)
+                            setDebitOrderMonths(updated)
+                          }}
+                          onBlur={async e => {
+                            const newDom = debitOrderMonths.find(m => m.debit_order_id === order.id)
+                            if (newDom) await saveDebitOrderMonth({ ...newDom, debit_date: e.target.value })
+                          }}
+                          style={{ padding: '4px 6px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 13, background: allocated ? '#f9fafb' : '#fff', color: allocated ? '#9ca3af' : '#111', cursor: allocated ? 'not-allowed' : 'pointer', width: '100%' }} />
                         {/* Amount — editable if not yet allocated */}
                         <div style={{ textAlign: 'right' }}>
                           {allocated ? (
@@ -2165,8 +2175,8 @@ export default function FinancesPage() {
                     )
                   })}
                   {/* Total row */}
-                  <div style={{ ...card, marginBottom: 0, padding: '12px 16px', background: '#f9fafb', display: 'grid', gridTemplateColumns: '28px 1fr 180px 130px 100px 80px', gap: 12, alignItems: 'center' }}>
-                    <div></div><div style={{ fontWeight: 700, fontSize: 14 }}>Total This Month</div><div></div>
+                  <div style={{ ...card, marginBottom: 0, padding: '12px 16px', background: '#f9fafb', display: 'grid', gridTemplateColumns: '28px 1fr 160px 120px 120px 100px 80px', gap: 12, alignItems: 'center' }}>
+                    <div></div><div style={{ fontWeight: 700, fontSize: 14 }}>Total This Month</div><div></div><div></div>
                     <div style={{ textAlign: 'right', fontWeight: 700, fontSize: 16, color: '#1a5c38' }}>{fmt(debitOrderMonths.filter(m => m.is_included).reduce((s, m) => s + (m.amount || 0), 0))}</div>
                     <div></div><div></div>
                   </div>
