@@ -12,6 +12,7 @@ type Employee = {
   id: string; full_name: string; role: string; phone: string | null;
   id_number: string | null; start_date: string | null; employment_type: string | null;
   is_active: boolean; avatar_url: string | null; notes: string | null; created_at: string;
+  annual_leave_entitlement: number | null; sick_leave_cycle_days: number | null; family_leave_entitlement: number | null;
 };
 type EmployeeDocument = {
   id: string; document_type: string; document_name: string; file_url: string;
@@ -44,6 +45,31 @@ const ROLES = ['Store Manager', 'Assistant Manager', 'Cashier', 'Kitchen Staff',
 const EMPLOYMENT_TYPES = ['full_time', 'part_time', 'casual', 'contract'];
 const EMPLOYMENT_LABELS: Record<string, string> = { full_time: 'Full Time', part_time: 'Part Time', casual: 'Casual', contract: 'Contract' };
 const LEAVE_TYPES = ['Annual', 'Sick', 'Family Responsibility', 'Unpaid', 'Maternity', 'Paternity', 'Study'];
+
+// BCEA Section 22 — Sick leave cycle calculator
+function getSickLeaveCycle(startDateStr: string | null, cycleEntitlement: number = 30) {
+  if (!startDateStr) return null;
+  const start = new Date(startDateStr);
+  const today = new Date();
+  // Total months worked
+  const monthsWorked = (today.getFullYear() - start.getFullYear()) * 12 + (today.getMonth() - start.getMonth());
+  // Which 36-month cycle are we in (0-based)
+  const cycleIndex = Math.floor(Math.max(0, monthsWorked) / 36);
+  // Cycle boundaries
+  const cycleStart = new Date(start);
+  cycleStart.setMonth(cycleStart.getMonth() + cycleIndex * 36);
+  const cycleEnd = new Date(cycleStart);
+  cycleEnd.setMonth(cycleEnd.getMonth() + 36);
+  cycleEnd.setDate(cycleEnd.getDate() - 1);
+  // First 6 months of EMPLOYMENT (not of each cycle) — 1 day per 26 days worked
+  const isFirst6Months = monthsWorked < 6;
+  // Approx working days elapsed in first 6 months (5-day week)
+  const daysWorkedInFirst6 = isFirst6Months
+    ? Math.max(0, Math.floor((today.getTime() - start.getTime()) / (1000 * 60 * 60 * 24) * (5 / 7)))
+    : 0;
+  const accruedLimit = isFirst6Months ? Math.floor(daysWorkedInFirst6 / 26) : null;
+  return { cycleIndex, cycleStart, cycleEnd, isFirst6Months, accruedLimit, cycleEntitlement };
+}
 const WARNING_TYPES = ['Verbal Warning', 'Written Warning', 'Final Written Warning', 'Suspension', 'Disciplinary Hearing'];
 const DOCUMENT_TYPES = ['Employment Contract', 'ID Document', 'Food Safety Certificate', 'Medical Certificate', 'Bank Details', 'Tax Certificate', 'Other'];
 const ROLE_COLORS: Record<string, { bg: string; color: string }> = {
@@ -314,7 +340,8 @@ export default function PeoplePage() {
   const [showWarningModal, setShowWarningModal] = useState(false);
   const [showAdvanceModal, setShowAdvanceModal] = useState(false);
   const [showAttendanceModal, setShowAttendanceModal] = useState(false);
-  const [empForm, setEmpForm] = useState({ full_name: '', role: 'Cashier', phone: '', id_number: '', start_date: '', employment_type: 'full_time', notes: '', is_active: true });
+  const [empForm, setEmpForm] = useState({ full_name: '', role: 'Cashier', phone: '', id_number: '', start_date: '', employment_type: 'full_time', notes: '', is_active: true, annual_leave_entitlement: 15, sick_leave_cycle_days: 30, family_leave_entitlement: 3 });
+  const [leaveYear, setLeaveYear] = useState(new Date().getFullYear());
   const [docForm, setDocForm] = useState({ document_type: 'Employment Contract', document_name: '', expiry_date: '', notes: '' });
   const [docFile, setDocFile] = useState<File | null>(null);
   const [leaveForm, setLeaveForm] = useState({ leave_type: 'Annual', start_date: '', end_date: '', days_taken: '', status: 'approved', reason: '', notes: '', paid_hours_per_day: '' });
@@ -367,14 +394,14 @@ export default function PeoplePage() {
   }
 
   function openProfile(emp: Employee) { setSelectedEmployee(emp); setProfileTab('overview'); loadEmployeeProfile(emp); }
-  function openAdd() { setEditEmployee(null); setEmpForm({ full_name: '', role: 'Cashier', phone: '', id_number: '', start_date: '', employment_type: 'full_time', notes: '', is_active: true }); setSaveError(null); setShowEmployeeModal(true); }
-  function openEdit(emp: Employee) { setEditEmployee(emp); setEmpForm({ full_name: emp.full_name, role: emp.role, phone: emp.phone || '', id_number: emp.id_number || '', start_date: emp.start_date || '', employment_type: emp.employment_type || 'full_time', notes: emp.notes || '', is_active: emp.is_active }); setSaveError(null); setShowEmployeeModal(true); }
+  function openAdd() { setEditEmployee(null); setEmpForm({ full_name: '', role: 'Cashier', phone: '', id_number: '', start_date: '', employment_type: 'full_time', notes: '', is_active: true, annual_leave_entitlement: 15, sick_leave_cycle_days: 30, family_leave_entitlement: 3 }); setSaveError(null); setShowEmployeeModal(true); }
+  function openEdit(emp: Employee) { setEditEmployee(emp); setEmpForm({ full_name: emp.full_name, role: emp.role, phone: emp.phone || '', id_number: emp.id_number || '', start_date: emp.start_date || '', employment_type: emp.employment_type || 'full_time', notes: emp.notes || '', is_active: emp.is_active, annual_leave_entitlement: emp.annual_leave_entitlement ?? 15, sick_leave_cycle_days: emp.sick_leave_cycle_days ?? 30, family_leave_entitlement: emp.family_leave_entitlement ?? 3 }); setSaveError(null); setShowEmployeeModal(true); }
 
   async function saveEmployee() {
     if (!empForm.full_name.trim()) return;
     setSaving(true); setSaveError(null);
     try {
-      const payload = { store_id: STORE_ID, organisation_id: ORG_ID, full_name: empForm.full_name.trim(), role: empForm.role, phone: empForm.phone || null, id_number: empForm.id_number || null, start_date: empForm.start_date || null, employment_type: empForm.employment_type, notes: empForm.notes || null, is_active: empForm.is_active };
+      const payload = { store_id: STORE_ID, organisation_id: ORG_ID, full_name: empForm.full_name.trim(), role: empForm.role, phone: empForm.phone || null, id_number: empForm.id_number || null, start_date: empForm.start_date || null, employment_type: empForm.employment_type, notes: empForm.notes || null, is_active: empForm.is_active, annual_leave_entitlement: empForm.annual_leave_entitlement, sick_leave_cycle_days: empForm.sick_leave_cycle_days, family_leave_entitlement: empForm.family_leave_entitlement };
       if (editEmployee) { await supabase.from('employees').update(payload).eq('id', editEmployee.id); }
       else { await supabase.from('employees').insert(payload); }
       await loadEmployees(); setShowEmployeeModal(false);
@@ -556,6 +583,15 @@ export default function PeoplePage() {
             <div><label style={lbl}>Phone Number</label><input value={empForm.phone} onChange={e => setEmpForm(p => ({ ...p, phone: e.target.value }))} placeholder="072 123 4567" style={inp} /></div>
             <div><label style={lbl}>ID Number</label><input value={empForm.id_number} onChange={e => setEmpForm(p => ({ ...p, id_number: e.target.value }))} placeholder="13-digit SA ID" style={inp} /></div>
             <div><label style={lbl}>Notes</label><textarea value={empForm.notes} onChange={e => setEmpForm(p => ({ ...p, notes: e.target.value }))} rows={3} style={{ ...inp, resize: 'vertical' as const }} /></div>
+            <div style={{ borderTop: '1px solid #eee', paddingTop: 12, marginTop: 4 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: '#888', marginBottom: 10, textTransform: 'uppercase' as const, letterSpacing: 1 }}>Leave Entitlements</div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
+                <div><label style={lbl}>Annual (days/year)</label><input type="number" min="0" value={empForm.annual_leave_entitlement} onChange={e => setEmpForm(p => ({ ...p, annual_leave_entitlement: parseInt(e.target.value) || 0 }))} style={inp} /></div>
+                <div><label style={lbl}>Sick (days/36 months)</label><input type="number" min="0" value={empForm.sick_leave_cycle_days} onChange={e => setEmpForm(p => ({ ...p, sick_leave_cycle_days: parseInt(e.target.value) || 0 }))} style={inp} /></div>
+                <div><label style={lbl}>Family Resp. (days/year)</label><input type="number" min="0" value={empForm.family_leave_entitlement} onChange={e => setEmpForm(p => ({ ...p, family_leave_entitlement: parseInt(e.target.value) || 0 }))} style={inp} /></div>
+              </div>
+              <div style={{ fontSize: 11, color: '#aaa', marginTop: 6 }}>Sick leave runs in a 36-month BCEA cycle. Default: 30 days (5-day worker) or 36 days (6-day worker).</div>
+            </div>
             {editEmployee && <Toggle value={empForm.is_active} onChange={() => setEmpForm(p => ({ ...p, is_active: !p.is_active }))} label="Active Employee" />}
           </div>
           <ErrorBanner msg={saveError} />
