@@ -305,8 +305,6 @@ export default function PeoplePage() {
   const [warnings, setWarnings] = useState<EmployeeWarning[]>([]);
   const [advances, setAdvances] = useState<EmployeeAdvance[]>([]);
   const [evaluations, setEvaluations] = useState<EmployeeEvaluation[]>([]);
-  const [allStoreEvals, setAllStoreEvals] = useState<{employee_id: string; overall_score: number; eval_date: string}[]>([]);
-  const [allStoreWarnings, setAllStoreWarnings] = useState<{employee_id: string; warning_type: string}[]>([]);
   const [showEvalModal, setShowEvalModal] = useState(false);
   const [evalForm, setEvalForm] = useState({ eval_date: new Date().toISOString().split('T')[0], evaluated_by: '', punctuality: 3, attitude: 3, performance: 3, appearance: 3, teamwork: 3, notes: '' });
   const [attendance, setAttendance] = useState<Attendance[]>([]);
@@ -344,14 +342,8 @@ export default function PeoplePage() {
 
   async function loadEmployees() {
     setLoading(true);
-    const [{ data }, { data: evalsData }, { data: warnsData }] = await Promise.all([
-      supabase.from('employees').select('*').eq('store_id', STORE_ID).order('full_name'),
-      supabase.from('employee_evaluations').select('employee_id, overall_score, eval_date').eq('store_id', STORE_ID).order('eval_date', { ascending: false }),
-      supabase.from('employee_warnings').select('employee_id, warning_type').eq('store_id', STORE_ID),
-    ]);
+    const { data } = await supabase.from('employees').select('*').eq('store_id', STORE_ID).order('full_name');
     setEmployees(data || []);
-    setAllStoreEvals(evalsData || []);
-    setAllStoreWarnings(warnsData || []);
     setLoading(false);
   }
 
@@ -363,7 +355,7 @@ export default function PeoplePage() {
       supabase.from('employee_warnings').select('*').eq('employee_id', emp.id).order('incident_date', { ascending: false }),
       supabase.from('employee_advances').select('*').eq('employee_id', emp.id).order('advance_date', { ascending: false }),
       supabase.from('attendance').select('*').eq('employee_id', emp.id).order('work_date', { ascending: false }).limit(30),
-      supabase.from('employee_evaluations').select('*').eq('employee_id', emp.id).eq('store_id', STORE_ID).order('eval_date', { ascending: false }),
+      supabase.from('employee_evaluations').select('*').eq('employee_id', emp.id).order('eval_date', { ascending: false }),
     ]);
     setDocuments(docsRes.data || []);
     setLeave(leaveRes.data || []);
@@ -430,7 +422,19 @@ export default function PeoplePage() {
     setSaving(false);
   }
 
-  function computeEmployeeGrade(evals: EmployeeEvaluation[], warns: EmployeeWarning[]) {
+  function computeAttendanceDeduction(attendanceRecs: Array<{ is_late: boolean; hours_worked: number | null }>) {
+    const sessions = attendanceRecs.filter(a => (a.hours_worked ?? 0) > 0 || a.is_late);
+    if (sessions.length === 0) return { deduction: 0, lateRate: 0, lateCount: 0, totalSessions: 0 };
+    const lateCount = sessions.filter(a => a.is_late).length;
+    const lateRate = lateCount / sessions.length;
+    let deduction = 0;
+    if (lateRate >= 0.5) deduction = 1.0;
+    else if (lateRate >= 0.25) deduction = 0.5;
+    else if (lateRate >= 0.1) deduction = 0.25;
+    return { deduction, lateRate, lateCount, totalSessions: sessions.length };
+  }
+
+  function computeEmployeeGrade(evals: EmployeeEvaluation[], warns: EmployeeWarning[], attendanceRecs?: Array<{ is_late: boolean; hours_worked: number | null }>) {
     const baseScore = evals.length > 0 ? evals[0].overall_score : 3.5;
     const warningDeductions = warns.reduce((sum, w) => {
       if (w.warning_type === 'Final Written Warning') return sum + 1;
@@ -438,12 +442,15 @@ export default function PeoplePage() {
       if (w.warning_type === 'Verbal Warning') return sum + 0.25;
       return sum;
     }, 0);
-    const score = Math.max(1, baseScore - warningDeductions);
-    if (score >= 4.5) return { score, grade: 'A', label: 'Excellent', color: '#16a34a' };
-    if (score >= 3.5) return { score, grade: 'B', label: 'Good', color: '#2563eb' };
-    if (score >= 2.5) return { score, grade: 'C', label: 'Satisfactory', color: '#d97706' };
-    if (score >= 1.5) return { score, grade: 'D', label: 'Below Standard', color: '#dc2626' };
-    return { score, grade: 'F', label: 'Unsatisfactory', color: '#7f1d1d' };
+    const { deduction: attendanceDeduction, lateRate, lateCount, totalSessions } = attendanceRecs ? computeAttendanceDeduction(attendanceRecs) : { deduction: 0, lateRate: 0, lateCount: 0, totalSessions: 0 };
+    const score = Math.max(1, baseScore - warningDeductions - attendanceDeduction);
+    const evalDue = evals.length === 0 || (new Date().getTime() - new Date(evals[0].eval_date).getTime()) > 90 * 24 * 60 * 60 * 1000;
+    const lastEvalDaysAgo = evals.length > 0 ? Math.floor((new Date().getTime() - new Date(evals[0].eval_date).getTime()) / (24 * 60 * 60 * 1000)) : null;
+    if (score >= 4.5) return { score, grade: 'A', label: 'Excellent', color: '#16a34a', attendanceDeduction, lateRate, lateCount, totalSessions, evalDue, lastEvalDaysAgo };
+    if (score >= 3.5) return { score, grade: 'B', label: 'Good', color: '#2563eb', attendanceDeduction, lateRate, lateCount, totalSessions, evalDue, lastEvalDaysAgo };
+    if (score >= 2.5) return { score, grade: 'C', label: 'Satisfactory', color: '#d97706', attendanceDeduction, lateRate, lateCount, totalSessions, evalDue, lastEvalDaysAgo };
+    if (score >= 1.5) return { score, grade: 'D', label: 'Below Standard', color: '#dc2626', attendanceDeduction, lateRate, lateCount, totalSessions, evalDue, lastEvalDaysAgo };
+    return { score, grade: 'F', label: 'Unsatisfactory', color: '#7f1d1d', attendanceDeduction, lateRate, lateCount, totalSessions, evalDue, lastEvalDaysAgo };
   }
 
   async function saveEvaluation() {
@@ -452,7 +459,7 @@ export default function PeoplePage() {
     const overall_score = parseFloat(((evalForm.punctuality + evalForm.attitude + evalForm.performance + evalForm.appearance + evalForm.teamwork) / 5).toFixed(2));
     try {
       await supabase.from('employee_evaluations').insert({ employee_id: selectedEmployee.id, store_id: STORE_ID, eval_date: evalForm.eval_date, evaluated_by: evalForm.evaluated_by, punctuality: evalForm.punctuality, attitude: evalForm.attitude, performance: evalForm.performance, appearance: evalForm.appearance, teamwork: evalForm.teamwork, overall_score, notes: evalForm.notes || null });
-      await Promise.all([loadEmployeeProfile(selectedEmployee), loadEmployees()]); setShowEvalModal(false); setEvalForm({ eval_date: new Date().toISOString().split('T')[0], evaluated_by: '', punctuality: 3, attitude: 3, performance: 3, appearance: 3, teamwork: 3, notes: '' });
+      await loadEmployeeProfile(selectedEmployee); setShowEvalModal(false); setEvalForm({ eval_date: new Date().toISOString().split('T')[0], evaluated_by: '', punctuality: 3, attitude: 3, performance: 3, appearance: 3, teamwork: 3, notes: '' });
     } catch (e: unknown) { setSaveError(e instanceof Error ? e.message : 'Failed to save'); }
     setSaving(false);
   }
@@ -758,14 +765,14 @@ export default function PeoplePage() {
                 </div>
               </div>
               {!profileLoading && (() => {
-                const gradeInfo = computeEmployeeGrade(evaluations, warnings);
+                const gradeInfo = computeEmployeeGrade(evaluations, warnings, attendance);
                 return (
                   <>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, background: 'rgba(255,255,255,0.12)', borderRadius: 10, padding: '8px 12px' }}>
                       <div style={{ fontWeight: 900, fontSize: 28, color: gradeInfo.color, background: '#fff', borderRadius: 8, width: 44, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{gradeInfo.grade}</div>
                       <div>
-                        <div style={{ color: '#fff', fontWeight: 700, fontSize: 13 }}>{gradeInfo.label}</div>
-                        <div style={{ color: 'rgba(255,255,255,0.65)', fontSize: 11 }}>Employee Grade · Score {gradeInfo.score.toFixed(2)}/5.00</div>
+                        <div style={{ color: '#fff', fontWeight: 700, fontSize: 13 }}>{gradeInfo.label}{gradeInfo.evalDue && <span style={{ marginLeft: 8, fontSize: 10, background: '#dc2626', color: '#fff', borderRadius: 4, padding: '1px 6px', fontWeight: 700 }}>EVAL DUE</span>}</div>
+                        <div style={{ color: 'rgba(255,255,255,0.65)', fontSize: 11 }}>Score {gradeInfo.score.toFixed(2)}/5.00{gradeInfo.attendanceDeduction > 0 ? ` · Late −${gradeInfo.attendanceDeduction.toFixed(2)} (${Math.round(gradeInfo.lateRate * 100)}% of sessions)` : ''}</div>
                       </div>
                     </div>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, marginTop: 10 }}>
@@ -1087,16 +1094,36 @@ export default function PeoplePage() {
                       <button onClick={() => setShowEvalModal(true)} style={{ background: PRIMARY, color: '#fff', border: 'none', borderRadius: 10, padding: '8px 18px', fontWeight: 700, cursor: 'pointer', fontSize: 13 }}>+ New Evaluation</button>
                     </div>
                     {(() => {
-                      const gradeInfo = computeEmployeeGrade(evaluations, warnings);
+                      const gradeInfo = computeEmployeeGrade(evaluations, warnings, attendance);
+                      const nextEvalDate = evaluations.length > 0 ? new Date(new Date(evaluations[0].eval_date).getTime() + 90 * 24 * 60 * 60 * 1000).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' }) : 'Now';
                       return (
-                        <div style={{ background: `linear-gradient(135deg, ${gradeInfo.color}22, ${gradeInfo.color}11)`, border: `1.5px solid ${gradeInfo.color}55`, borderRadius: 14, padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 16 }}>
-                          <div style={{ fontWeight: 900, fontSize: 36, color: gradeInfo.color, background: '#fff', borderRadius: 10, width: 56, height: 56, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>{gradeInfo.grade}</div>
-                          <div>
-                            <div style={{ fontWeight: 800, fontSize: 17, color: '#333' }}>{gradeInfo.label}</div>
-                            <div style={{ fontSize: 12, color: '#666', marginTop: 3 }}>Current employee grade — Score: {gradeInfo.score.toFixed(2)} / 5.00</div>
-                            {warnings.length > 0 && <div style={{ fontSize: 11, color: '#dc2626', marginTop: 3 }}>⚠ {warnings.length} active warning{warnings.length > 1 ? 's' : ''} affecting grade</div>}
+                        <>
+                          <div style={{ background: `linear-gradient(135deg, ${gradeInfo.color}22, ${gradeInfo.color}11)`, border: `1.5px solid ${gradeInfo.color}55`, borderRadius: 14, padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 16 }}>
+                            <div style={{ fontWeight: 900, fontSize: 36, color: gradeInfo.color, background: '#fff', borderRadius: 10, width: 56, height: 56, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>{gradeInfo.grade}</div>
+                            <div style={{ flex: 1 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <div style={{ fontWeight: 800, fontSize: 17, color: '#333' }}>{gradeInfo.label}</div>
+                                {gradeInfo.evalDue && <span style={{ fontSize: 10, background: '#dc2626', color: '#fff', borderRadius: 4, padding: '2px 8px', fontWeight: 700 }}>EVAL OVERDUE</span>}
+                              </div>
+                              <div style={{ fontSize: 12, color: '#666', marginTop: 3 }}>Score: <b>{gradeInfo.score.toFixed(2)}</b> / 5.00 · {gradeInfo.lastEvalDaysAgo !== null ? `Last evaluated ${gradeInfo.lastEvalDaysAgo}d ago` : 'Never evaluated'}</div>
+                              {!gradeInfo.evalDue && <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>Next evaluation due: {nextEvalDate}</div>}
+                            </div>
                           </div>
-                        </div>
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+                            <div style={{ background: '#f8faf8', borderRadius: 10, padding: '10px 12px', border: '1px solid #eef2ee', fontSize: 12 }}>
+                              <div style={{ fontWeight: 700, color: '#333', marginBottom: 4 }}>📋 Evaluation Score</div>
+                              <div style={{ color: evaluations.length > 0 ? '#2563eb' : '#888' }}>{evaluations.length > 0 ? `${evaluations[0].overall_score.toFixed(2)}/5 (${evaluations.length} eval${evaluations.length > 1 ? 's' : ''})` : 'Default 3.50/5'}</div>
+                            </div>
+                            <div style={{ background: '#f8faf8', borderRadius: 10, padding: '10px 12px', border: '1px solid #eef2ee', fontSize: 12 }}>
+                              <div style={{ fontWeight: 700, color: '#333', marginBottom: 4 }}>⚠ Warnings</div>
+                              <div style={{ color: warnings.length > 0 ? '#dc2626' : '#16a34a' }}>{warnings.length > 0 ? `−${warnings.reduce((s, w) => s + (w.warning_type === 'Final Written Warning' ? 1 : w.warning_type === 'Written Warning' ? 0.5 : w.warning_type === 'Verbal Warning' ? 0.25 : 0), 0).toFixed(2)} pts (${warnings.length} warning${warnings.length > 1 ? 's' : ''})` : 'None'}</div>
+                            </div>
+                            <div style={{ background: '#f8faf8', borderRadius: 10, padding: '10px 12px', border: '1px solid #eef2ee', fontSize: 12 }}>
+                              <div style={{ fontWeight: 700, color: '#333', marginBottom: 4 }}>⏰ Attendance</div>
+                              <div style={{ color: gradeInfo.attendanceDeduction > 0 ? '#dc2626' : '#16a34a' }}>{gradeInfo.totalSessions > 0 ? `${gradeInfo.lateCount}/${gradeInfo.totalSessions} late (${Math.round(gradeInfo.lateRate * 100)}%)${gradeInfo.attendanceDeduction > 0 ? ` −${gradeInfo.attendanceDeduction.toFixed(2)} pts` : ''}` : 'No records'}</div>
+                            </div>
+                          </div>
+                        </>
                       );
                     })()}
                     {evaluations.length === 0 && <div style={{ textAlign: 'center' as const, padding: 40, color: '#aaa' }}>No evaluations yet — add the first one</div>}
@@ -1186,25 +1213,14 @@ export default function PeoplePage() {
                     onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 6px 20px rgba(0,0,0,0.1)'; }}
                     onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 2px 6px rgba(0,0,0,0.04)'; }}
                   >
-                    {(() => {
-                      const empEvals = allStoreEvals.filter(e => e.employee_id === emp.id);
-                      const empWarns = allStoreWarnings.filter(w => w.employee_id === emp.id);
-                      const cardGrade = computeEmployeeGrade(empEvals.length > 0 ? [{ ...empEvals[0], id: '', eval_date: empEvals[0].eval_date, evaluated_by: '', punctuality: 0, attitude: 0, performance: 0, appearance: 0, teamwork: 0, notes: null, created_at: '' }] : [], empWarns.map(w => ({ ...w, id: '', employee_id: emp.id, incident_date: '', reason: '', issued_by: '', document_url: null, notes: null, created_at: '' })));
-                      return (
                     <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 14 }}>
                       <div style={{ width: 52, height: 52, borderRadius: '50%', background: rc.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, fontWeight: 800, color: rc.color, flexShrink: 0 }}>{initials(emp.full_name)}</div>
                       <div style={{ flex: 1 }}>
                         <div style={{ fontWeight: 700, color: '#333', fontSize: 15 }}>{emp.full_name}</div>
                         <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: rc.bg, color: rc.color }}>{emp.role}</span>
                       </div>
-                      <div style={{ display: 'flex', flexDirection: 'column' as const, alignItems: 'center', gap: 2 }}>
-                        <div style={{ width: 34, height: 34, borderRadius: '50%', background: cardGrade.color + '18', border: `2px solid ${cardGrade.color}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 900, fontSize: 15, color: cardGrade.color }}>{cardGrade.grade}</div>
-                        <span style={{ fontSize: 9, fontWeight: 600, color: cardGrade.color }}>{cardGrade.label.split(' ')[0].toUpperCase()}</span>
-                      </div>
                       {!emp.is_active && <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: '#f5f5f5', color: '#aaa' }}>INACTIVE</span>}
                     </div>
-                      );
-                    })()}
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' as const }}>
                       {emp.employment_type && <span style={{ fontSize: 11, padding: '3px 8px', borderRadius: 20, background: '#f0f4f0', color: '#666' }}>{EMPLOYMENT_LABELS[emp.employment_type]}</span>}
                       {emp.phone && <span style={{ fontSize: 11, padding: '3px 8px', borderRadius: 20, background: '#f0f4f0', color: '#666' }}>📞 {emp.phone}</span>}
