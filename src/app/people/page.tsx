@@ -969,24 +969,92 @@ export default function PeoplePage() {
                   </div>
                 )}
 
-                {profileTab === 'leave' && (
+                {profileTab === 'leave' && (() => {
+                  // Per-year leave (Annual, Family)
+                  const annualEnt = selectedEmployee?.annual_leave_entitlement ?? 15;
+                  const familyEnt = selectedEmployee?.family_leave_entitlement ?? 3;
+                  const leaveInYear = leave.filter(l => new Date(l.start_date).getFullYear() === leaveYear && l.status === 'approved');
+                  const annualUsed = leaveInYear.filter(l => l.leave_type === 'Annual').reduce((s, l) => s + l.days_taken, 0);
+                  const familyUsed = leaveInYear.filter(l => l.leave_type === 'Family Responsibility').reduce((s, l) => s + l.days_taken, 0);
+                  const otherUsed = leaveInYear.filter(l => !['Annual','Sick','Family Responsibility'].includes(l.leave_type)).reduce((s, l) => s + l.days_taken, 0);
+                  // BCEA sick leave — 36-month cycle from start_date
+                  const sickCycle = getSickLeaveCycle(selectedEmployee?.start_date || null, selectedEmployee?.sick_leave_cycle_days ?? 30);
+                  const sickUsedInCycle = sickCycle
+                    ? leave.filter(l => l.leave_type === 'Sick' && l.status === 'approved' && new Date(l.start_date) >= sickCycle.cycleStart && new Date(l.start_date) <= sickCycle.cycleEnd).reduce((s, l) => s + l.days_taken, 0)
+                    : 0;
+                  const sickEffectiveLimit = sickCycle?.isFirst6Months ? (sickCycle.accruedLimit ?? 0) : (sickCycle?.cycleEntitlement ?? 30);
+                  const sickRemaining = Math.max(0, sickEffectiveLimit - sickUsedInCycle);
+                  const leaveListYear = leave.filter(l => new Date(l.start_date).getFullYear() === leaveYear);
+                  const fmt = (d: Date) => d.toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' });
+                  return (
                   <div>
-                    <button onClick={() => { setSaveError(null); setShowLeaveModal(true); }} style={{ width: '100%', padding: '12px', background: PRIMARY, color: '#fff', border: 'none', borderRadius: 12, fontWeight: 700, cursor: 'pointer', marginBottom: 16 }}>+ Record Leave</button>
+                    {/* Header row */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                      <button onClick={() => { setSaveError(null); setShowLeaveModal(true); }} style={{ padding: '10px 18px', background: PRIMARY, color: '#fff', border: 'none', borderRadius: 10, fontWeight: 700, cursor: 'pointer', fontSize: 14 }}>+ Record Leave</button>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <button onClick={() => setLeaveYear(y => y - 1)} style={{ background: '#eee', border: 'none', borderRadius: 8, padding: '6px 10px', cursor: 'pointer', fontWeight: 700, color: '#555' }}>‹</button>
+                        <span style={{ fontWeight: 700, fontSize: 14, color: '#333', minWidth: 44, textAlign: 'center' as const }}>{leaveYear}</span>
+                        <button onClick={() => setLeaveYear(y => y + 1)} style={{ background: '#eee', border: 'none', borderRadius: 8, padding: '6px 10px', cursor: 'pointer', fontWeight: 700, color: '#555' }}>›</button>
+                      </div>
+                    </div>
+                    {/* Sick leave BCEA cycle card */}
+                    {sickCycle && (
+                      <div style={{ background: sickCycle.isFirst6Months ? '#fff8e1' : '#f8faf8', borderRadius: 12, padding: '14px 16px', border: `1px solid ${sickCycle.isFirst6Months ? '#fde68a' : '#eef2ee'}`, marginBottom: 12 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+                          <div>
+                            <div style={{ fontWeight: 700, fontSize: 13, color: '#333' }}>🏥 Sick Leave — BCEA Cycle {sickCycle.cycleIndex + 1}</div>
+                            <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>{fmt(sickCycle.cycleStart)} – {fmt(sickCycle.cycleEnd)}</div>
+                          </div>
+                          <div style={{ textAlign: 'right' as const }}>
+                            <div style={{ fontWeight: 800, fontSize: 20, color: sickUsedInCycle >= sickEffectiveLimit ? '#ef4444' : PRIMARY }}>{sickUsedInCycle}<span style={{ fontWeight: 400, fontSize: 13, color: '#aaa' }}> / {sickEffectiveLimit}</span></div>
+                            <div style={{ fontSize: 11, color: sickRemaining === 0 ? '#ef4444' : '#666' }}>{sickRemaining} days remaining</div>
+                          </div>
+                        </div>
+                        <div style={{ height: 6, background: '#e0e0e0', borderRadius: 4, marginBottom: 6 }}>
+                          <div style={{ height: '100%', width: `${Math.min(100, sickEffectiveLimit > 0 ? (sickUsedInCycle / sickEffectiveLimit) * 100 : 0)}%`, background: sickUsedInCycle >= sickEffectiveLimit ? '#ef4444' : sickUsedInCycle / sickEffectiveLimit >= 0.8 ? '#f59e0b' : PRIMARY, borderRadius: 4, transition: 'width 0.3s' }} />
+                        </div>
+                        {sickCycle.isFirst6Months && (
+                          <div style={{ fontSize: 11, color: '#92400e', background: '#fef3c7', borderRadius: 8, padding: '6px 10px', marginTop: 6 }}>
+                            ⚠️ <strong>First 6 months:</strong> limited to 1 day per 26 days worked (accrued: ~{sickCycle.accruedLimit} days). Full {sickCycle.cycleEntitlement}-day entitlement unlocks after 6 months.
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {/* Annual + Family + Other tiles */}
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 20 }}>
                       {[
-                        { label: 'Annual', count: leave.filter(l => l.leave_type === 'Annual' && l.status === 'approved').reduce((s, l) => s + l.days_taken, 0) },
-                        { label: 'Sick', count: leave.filter(l => l.leave_type === 'Sick' && l.status === 'approved').reduce((s, l) => s + l.days_taken, 0) },
-                        { label: 'Total', count: totalLeaveDays },
-                      ].map(item => (
-                        <div key={item.label} style={{ background: '#f8faf8', borderRadius: 10, padding: '12px', textAlign: 'center' as const, border: '1px solid #eef2ee' }}>
-                          <div style={{ fontSize: 22, fontWeight: 800, color: PRIMARY }}>{item.count}</div>
-                          <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>{item.label} days</div>
-                        </div>
-                      ))}
+                        { label: 'Annual Leave', used: annualUsed, ent: annualEnt },
+                        { label: 'Family Resp.', used: familyUsed, ent: familyEnt },
+                        { label: 'Other / Unpaid', used: otherUsed, ent: null },
+                      ].map(item => {
+                        const remaining = item.ent !== null ? Math.max(0, item.ent - item.used) : null;
+                        const pct = item.ent ? (item.used / item.ent) * 100 : 0;
+                        const barColor = pct >= 100 ? '#ef4444' : pct >= 80 ? '#f59e0b' : PRIMARY;
+                        return (
+                          <div key={item.label} style={{ background: '#f8faf8', borderRadius: 12, padding: '12px', border: '1px solid #eef2ee' }}>
+                            <div style={{ fontSize: 10, color: '#888', fontWeight: 700, marginBottom: 4, textTransform: 'uppercase' as const, letterSpacing: 0.5 }}>{item.label}</div>
+                            <div style={{ display: 'flex', alignItems: 'baseline', gap: 3 }}>
+                              <span style={{ fontSize: 22, fontWeight: 800, color: item.ent !== null && item.used >= item.ent ? '#ef4444' : PRIMARY }}>{item.used}</span>
+                              {item.ent !== null && <span style={{ fontSize: 11, color: '#aaa' }}>/{item.ent}</span>}
+                            </div>
+                            {item.ent !== null && (
+                              <>
+                                <div style={{ height: 4, background: '#e8f0e8', borderRadius: 4, marginTop: 6, marginBottom: 3 }}>
+                                  <div style={{ height: '100%', width: `${Math.min(100, pct)}%`, background: barColor, borderRadius: 4 }} />
+                                </div>
+                                <div style={{ fontSize: 10, color: remaining === 0 ? '#ef4444' : '#888' }}>{remaining! > 0 ? `${remaining} left` : 'None left'}</div>
+                              </>
+                            )}
+                            {item.ent === null && <div style={{ fontSize: 10, color: '#aaa' }}>days taken</div>}
+                          </div>
+                        );
+                      })}
                     </div>
+                    {/* Leave list for selected year */}
                     {leave.length === 0 && <div style={{ textAlign: 'center' as const, padding: 40, color: '#aaa' }}>No leave records yet</div>}
+                    {leave.length > 0 && leaveListYear.length === 0 && <div style={{ textAlign: 'center' as const, padding: 24, color: '#aaa', fontSize: 13 }}>No leave in {leaveYear}</div>}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                      {leave.map(l => (
+                      {leaveListYear.map(l => (
                         <div key={l.id} style={{ background: '#f8faf8', borderRadius: 12, padding: '14px 16px', border: '1px solid #eef2ee' }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                             <div>
@@ -1000,7 +1068,8 @@ export default function PeoplePage() {
                       ))}
                     </div>
                   </div>
-                )}
+                  );
+                })()}
 
                 {profileTab === 'warnings' && (
                   <div>
