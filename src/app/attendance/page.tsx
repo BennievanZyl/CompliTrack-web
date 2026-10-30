@@ -525,18 +525,28 @@ export default function AttendancePage() {
     const empEvals = allEvaluations.filter(e => e.employee_id === empId);
     const empWarns = allWarnings.filter(w => w.employee_id === empId);
     const baseScore = empEvals.length > 0 ? empEvals[0].overall_score : 3.5;
-    const deductions = empWarns.reduce((sum, w) => {
+    const warningDeductions = empWarns.reduce((sum, w) => {
       if (w.warning_type === 'Final Written Warning') return sum + 1;
       if (w.warning_type === 'Written Warning') return sum + 0.5;
       if (w.warning_type === 'Verbal Warning') return sum + 0.25;
       return sum;
     }, 0);
-    const score = Math.max(1, baseScore - deductions);
-    if (score >= 4.5) return { score, grade: 'A', label: 'Excellent', color: '#16a34a' };
-    if (score >= 3.5) return { score, grade: 'B', label: 'Good', color: '#2563eb' };
-    if (score >= 2.5) return { score, grade: 'C', label: 'Satisfactory', color: '#d97706' };
-    if (score >= 1.5) return { score, grade: 'D', label: 'Below Standard', color: '#dc2626' };
-    return { score, grade: 'F', label: 'Unsatisfactory', color: '#7f1d1d' };
+    // Attendance deduction from this pay period
+    const empAtt = monthAttendance.filter(a => a.employee_id === empId);
+    const sessions = empAtt.filter(a => (a.hours_worked ?? 0) > 0 || a.is_late);
+    const lateCount = sessions.filter(a => a.is_late).length;
+    const lateRate = sessions.length > 0 ? lateCount / sessions.length : 0;
+    let attendanceDeduction = 0;
+    if (lateRate >= 0.5) attendanceDeduction = 1.0;
+    else if (lateRate >= 0.25) attendanceDeduction = 0.5;
+    else if (lateRate >= 0.1) attendanceDeduction = 0.25;
+    const score = Math.max(1, baseScore - warningDeductions - attendanceDeduction);
+    const gradeBase = { score, lateCount, totalSessions: sessions.length, lateRate, attendanceDeduction };
+    if (score >= 4.5) return { ...gradeBase, grade: 'A', label: 'Excellent', color: '#16a34a' };
+    if (score >= 3.5) return { ...gradeBase, grade: 'B', label: 'Good', color: '#2563eb' };
+    if (score >= 2.5) return { ...gradeBase, grade: 'C', label: 'Satisfactory', color: '#d97706' };
+    if (score >= 1.5) return { ...gradeBase, grade: 'D', label: 'Below Standard', color: '#dc2626' };
+    return { ...gradeBase, grade: 'F', label: 'Unsatisfactory', color: '#7f1d1d' };
   }
 
   function payslipHtml(emp: Employee, summary: ReturnType<typeof employeeMonthSummary>, days: ReturnType<typeof buildRegisterDays>) {
@@ -627,19 +637,25 @@ export default function AttendancePage() {
           <div style="background:#f1f5f9;padding:8px 12px;font-weight:700;font-size:12px;color:#334155;display:flex;justify-content:space-between;align-items:center">
             <span>&#127775; Employee Performance Record</span>
           </div>
-          <div style="padding:10px 12px;display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <div style="padding:10px 12px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
             <div style="background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:8px 10px;display:flex;align-items:center;gap:8px">
               <div style="font-weight:900;font-size:22px;color:${gradeInfo.color};width:32px;height:32px;background:#f8f9fa;border-radius:6px;display:flex;align-items:center;justify-content:center;flex-shrink:0">${gradeInfo.grade}</div>
-              <div><div style="font-weight:700;color:#333">${gradeInfo.label}</div><div style="color:#888">Grade ${gradeInfo.grade} · Score ${gradeInfo.score.toFixed(2)}/5.00</div></div>
+              <div><div style="font-weight:700;color:#333">${gradeInfo.label}</div><div style="color:#888">${gradeInfo.score.toFixed(2)}/5.00</div></div>
             </div>
             <div style="background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:8px 10px">
-              <div style="font-weight:700;color:#333;margin-bottom:4px">&#9888; Disciplinary Record</div>
+              <div style="font-weight:700;color:#333;margin-bottom:4px;font-size:11px">&#9888; Warnings</div>
               ${empWarns.length === 0
-                ? '<div style="color:#16a34a">&#10003; No warnings on record</div>'
-                : `<div style="color:#dc2626">${empWarns.length} warning${empWarns.length > 1 ? 's' : ''} on file</div><div style="color:#666;margin-top:2px">${warnTypeSummary}</div>`}
+                ? '<div style="color:#16a34a;font-size:11px">&#10003; None on record</div>'
+                : `<div style="color:#dc2626;font-size:11px">${empWarns.length} warning${empWarns.length > 1 ? 's' : ''}</div><div style="color:#666;font-size:10px;margin-top:2px">${warnTypeSummary}</div>`}
+            </div>
+            <div style="background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:8px 10px">
+              <div style="font-weight:700;color:#333;margin-bottom:4px;font-size:11px">&#9200; Punctuality</div>
+              ${gradeInfo.totalSessions === 0
+                ? '<div style="color:#888;font-size:11px">No data</div>'
+                : `<div style="color:${gradeInfo.attendanceDeduction > 0 ? '#dc2626' : '#16a34a'};font-size:11px">${gradeInfo.lateCount}/${gradeInfo.totalSessions} late (${Math.round(gradeInfo.lateRate * 100)}%)</div>${gradeInfo.attendanceDeduction > 0 ? `<div style="color:#dc2626;font-size:10px;margin-top:2px">−${gradeInfo.attendanceDeduction.toFixed(2)} pts deducted</div>` : ''}`}
             </div>
           </div>
-          ${empWarns.length > 0 ? `<div style="padding:6px 12px 10px;font-size:10px;color:#555;background:#fffbeb;border-top:1px solid #fde68a">&#9432; Warnings affect your employee grade. Please discuss any concerns with your manager.</div>` : ''}
+          ${(empWarns.length > 0 || gradeInfo.attendanceDeduction > 0) ? `<div style="padding:6px 12px 10px;font-size:10px;color:#555;background:#fffbeb;border-top:1px solid #fde68a">&#9432; ${gradeInfo.attendanceDeduction > 0 ? 'Frequent late arrivals are impacting your grade. ' : ''}${empWarns.length > 0 ? 'Warnings on file are affecting your grade. ' : ''}Please discuss any concerns with your manager.</div>` : ''}
         </div>`;
       })()}
       ${brandFooter()}
