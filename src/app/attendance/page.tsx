@@ -556,15 +556,14 @@ export default function AttendancePage() {
     // Payslip advance deductions: include advances from THIS month regardless of repayment_status
     // (saveWagePayment marks them 'paid' when wages are saved, so 'outstanding' filter would miss them)
     // Also catches any still-outstanding advances from prior months that carry over.
-    const [psYear, psMonth] = payrollMonth.split('-').map(Number);
-    const psMonthEnd = `${payrollMonth}-${String(new Date(psYear, psMonth, 0).getDate()).padStart(2, '0')}`;
-    const psAdvances = advances.filter(a =>
-      a.employee_id === emp.id &&
-      a.deduct_from_wages &&
-      (a.repayment_status === 'outstanding' || (a.advance_date >= payrollMonth + '-01' && a.advance_date <= psMonthEnd))
-    );
-    const psAdvTotal = psAdvances.reduce((s, a) => s + Number(a.amount), 0);
-    const psNetPay = summary.totalPay - summary.uifEmployee - psAdvTotal - summary.savingsDeduction;
+    // If wages have already been marked as paid for this period, use the STORED figures from
+    // wage_payments so the payslip exactly matches what was actually paid. Live recalculation
+    // can differ from the wages page (e.g. night hours rounding) causing employee confusion.
+    const paidRecord = wagePayments.find(p => p.employee_id === emp.id);
+    const psGross = paidRecord?.gross_pay ?? summary.totalPay;
+    const psUif = paidRecord?.uif_employee ?? summary.uifEmployee;
+    const psAdvTotal = paidRecord?.advances_deducted ?? summary.outstandingAdvances;
+    const psNetPay = paidRecord?.net_pay ?? summary.netPay;
     // Count late sessions from attendance records for this employee in this period
     const lateCount = days.filter(d => d.isLate).length;
     const totalSessions = days.filter(d => d.hours > 0).length;
@@ -614,8 +613,8 @@ export default function AttendancePage() {
       <table><thead><tr><th>Description</th><th style="text-align:center">Hours</th><th style="text-align:center">Rate</th><th style="text-align:right">Amount</th></tr></thead>
       <tbody>${lineItems}</tbody></table>
       <div class="totals">
-        <div class="row"><span>Gross Pay</span><b>R${summary.totalPay.toFixed(2)}</b></div>
-        <div class="row" style="color:#c2410c"><span>Less: UIF (${payrollSettings.uif_employee_rate}%)</span><b>-R${summary.uifEmployee.toFixed(2)}</b></div>
+        <div class="row"><span>Gross Pay</span><b>R${psGross.toFixed(2)}</b></div>
+        <div class="row" style="color:#c2410c"><span>Less: UIF (${payrollSettings.uif_employee_rate}%)</span><b>-R${psUif.toFixed(2)}</b></div>
         ${psAdvTotal > 0 ? `<div class="row" style="color:#c2410c"><span>Less: Advance Deduction</span><b>-R${psAdvTotal.toFixed(2)}</b></div>` : ''}
         ${summary.savingsDeduction > 0 ? `<div class="row" style="color:#0891b2"><span>Less: Savings Deduction</span><b>-R${summary.savingsDeduction.toFixed(2)}</b></div>` : ''}
         <div class="row net"><span>Net Pay</span><span>R${psNetPay.toFixed(2)}</span></div>
