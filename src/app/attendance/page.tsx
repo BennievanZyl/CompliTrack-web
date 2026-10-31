@@ -283,12 +283,19 @@ export default function AttendancePage() {
       : advances.filter(a => a.employee_id === employeeId && a.deduct_from_wages && a.repayment_status === 'outstanding' && a.advance_date <= periodEnd).reduce((s, a) => s + Number(a.amount), 0);
     const empSaving = savings.find(s => s.employee_id === employeeId);
     const savingsDeduction = empSaving?.deduction_per_payroll || 0;
+    // When the employee has already been paid (wage_payments record exists), use the STORED
+    // totals so that cards AND payslip both reflect exactly what was paid — not a live
+    // recalculation that may differ due to night-hour rounding or other algorithm differences.
+    const storedGross  = paidRecord?.gross_pay     ?? totalPay;
+    const storedUifEmp = paidRecord?.uif_employee  ?? uifEmployee;
+    const storedUifEmr = paidRecord?.uif_employer  ?? uifEmployer;
+    const storedNet    = paidRecord?.net_pay        ?? (totalPay - outstandingAdvances - uifEmployee - savingsDeduction);
     return {
-      totalHours, totalPay, netPay: totalPay - outstandingAdvances - uifEmployee - savingsDeduction, outstandingAdvances, savingsDeduction, empSaving,
+      totalHours, totalPay: storedGross, netPay: storedNet, outstandingAdvances, savingsDeduction, empSaving,
       normalHours, normalPay, otHours, otPay,
       sundayHours, sundayPay, holidayHours, holidayPay,
       sundayHolidayHours, sundayHolidayPay,
-      nightHours, nightPay, leaveHours, leavePay, uifEmployee, uifEmployer,
+      nightHours, nightPay, leaveHours, leavePay, uifEmployee: storedUifEmp, uifEmployer: storedUifEmr,
     };
   }
   async function saveHourlyRate(employeeId: string) {
