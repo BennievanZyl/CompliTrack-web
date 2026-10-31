@@ -203,6 +203,26 @@ export default function WagesPage() {
     await supabase.from('payroll_periods').update({ status: 'paid', paid_at: new Date().toISOString() }).eq('id', selectedPeriod.id)
     await supabase.from('payroll_runs').update({ status: 'paid' }).eq('payroll_period_id', selectedPeriod.id)
 
+    // Step 1b: write each employee's payment to wage_payments so the attendance-page payslip
+    // always reflects the exact figures the wages page calculated (same gross/UIF/net).
+    const paidPeriodMonth = selectedPeriod.period_start.substring(0, 7) // YYYY-MM
+    const todayStr = new Date().toISOString().split('T')[0]
+    const runsToRecord = runs.filter(r => r.payroll_period_id === selectedPeriod.id)
+    for (const run of runsToRecord) {
+      await supabase.from('wage_payments').upsert({
+        store_id: STORE_ID,
+        employee_id: run.employee_id,
+        period: paidPeriodMonth,
+        paid_date: todayStr,
+        gross_pay: run.gross_pay,
+        uif_employee: run.uif_employee,
+        uif_employer: run.uif_employer,
+        advances_deducted: run.advances_deducted,
+        net_pay: run.net_pay,
+        payment_method: 'wages_page',
+      }, { onConflict: 'employee_id,period' })
+    }
+
     // Step 2: NOW mark deducted advances as paid (only on actual payment, not on calculate)
     const runsForPeriod = runs.filter(r => r.payroll_period_id === selectedPeriod.id && r.advances_deducted > 0)
     for (const run of runsForPeriod) {
