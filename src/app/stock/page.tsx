@@ -1534,7 +1534,7 @@ export default function StockPage() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
               <div>
                 <div style={{ fontSize: '18px', fontWeight: 800, color: '#111' }}>Assign Count Sections</div>
-                <div style={{ fontSize: '13px', color: '#9ca3af', marginTop: '2px' }}>Tap a section button next to any item to toggle it on/off — saves instantly. Items with no section show in all counts.</div>
+                <div style={{ fontSize: '13px', color: '#9ca3af', marginTop: '2px' }}>Tap section buttons next to each item — an item can be in multiple sections. Saves instantly. Items with no section appear in all counts.</div>
               </div>
               {sections.length === 0 && (
                 <div style={{ background: 'white', borderRadius: '20px', border: '1.5px solid #e5e7eb', padding: '32px', textAlign: 'center' }}>
@@ -1556,8 +1556,6 @@ export default function StockPage() {
                   if (catA !== catB) return catA.localeCompare(catB)
                   return (a.description || a.name || '').localeCompare(b.description || b.name || '')
                 })
-                const unassigned = allItems.filter(i => !(itemSections[i.id]?.length))
-                const assigned = allItems.filter(i => (itemSections[i.id]?.length || 0) > 0)
                 async function toggleSection(itemId: string, sectionId: string) {
                   const current = itemSections[itemId] || []
                   const hasIt = current.includes(sectionId)
@@ -1569,32 +1567,20 @@ export default function StockPage() {
                     setItemSections((prev: Record<string, string[]>) => ({ ...prev, [itemId]: [...(prev[itemId] || []), sectionId] }))
                   }
                 }
-                function ItemRow({ item, idx }: { item: StockItem; idx: number }) {
-                  const cat = categories.find((c: StockCategory) => c.id === item.category)
-                  const assignedSids = itemSections[item.id] || []
-                  return (
-                    <div style={{ display: 'flex', alignItems: 'center', padding: '10px 20px', borderTop: idx === 0 ? 'none' : '1px solid #f3f4f6', gap: '12px', flexWrap: 'wrap' as const }}>
-                      <div style={{ flex: 1, minWidth: '140px' }}>
-                        <div style={{ fontWeight: 600, fontSize: '14px', color: '#111' }}>{item.description || item.name}</div>
-                        {cat && <span style={{ fontSize: '11px', fontWeight: 600, padding: '2px 7px', borderRadius: '20px', background: `${cat.color}20`, color: cat.color, display: 'inline-block', marginTop: '2px' }}>{cat.name}</span>}
-                      </div>
-                      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' as const }}>
-                        {sections.map((sec: StockSection) => {
-                          const active = assignedSids.includes(sec.id)
-                          return (
-                            <button key={sec.id} onClick={() => toggleSection(item.id, sec.id)}
-                              style={{ padding: '5px 12px', borderRadius: '20px', border: `2px solid ${sec.color}`, cursor: 'pointer', fontWeight: 700, fontSize: '12px',
-                                background: active ? sec.color : 'white', color: active ? 'white' : sec.color, whiteSpace: 'nowrap' as const }}>
-                              {active ? '✓ ' : ''}{sec.icon} {sec.name}
-                            </button>
-                          )
-                        })}
-                      </div>
-                    </div>
-                  )
+                // Group by category for visual clarity, but ALL items always stay in view
+                const grouped: { label: string; color: string; items: StockItem[] }[] = []
+                const seen = new Set<string>()
+                // Category groups (in category order)
+                for (const cat of categories) {
+                  const catItems = allItems.filter(i => i.category === cat.id)
+                  if (catItems.length) { grouped.push({ label: cat.name, color: cat.color, items: catItems }); catItems.forEach(i => seen.add(i.id)) }
                 }
+                // Uncategorised items at the end
+                const rest = allItems.filter(i => !seen.has(i.id))
+                if (rest.length) grouped.push({ label: 'Uncategorised', color: '#9ca3af', items: rest })
                 return (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                    {/* Section legend with counts */}
                     <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' as const }}>
                       {sections.map((sec: StockSection) => (
                         <div key={sec.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 14px', borderRadius: '20px', background: `${sec.color}15`, border: `1.5px solid ${sec.color}40` }}>
@@ -1604,25 +1590,40 @@ export default function StockPage() {
                         </div>
                       ))}
                     </div>
-                    {unassigned.length > 0 && (
-                      <div style={{ background: 'white', borderRadius: '20px', border: '2px solid #fbbf24', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
-                        <div style={{ padding: '12px 20px', background: '#fffbeb', borderBottom: '1px solid #fde68a', display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' as const }}>
-                          <div style={{ fontWeight: 700, fontSize: '14px', color: '#92400e' }}>⚠️ No section assigned</div>
-                          <span style={{ fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '100px', background: '#fef3c7', color: '#92400e' }}>{unassigned.length} items</span>
-                          <span style={{ fontSize: '11px', color: '#92400e', marginLeft: 'auto' }}>These will show in ALL count sections</span>
+                    {/* One stable card per category — items never move */}
+                    {grouped.map(group => (
+                      <div key={group.label} style={{ background: 'white', borderRadius: '20px', border: `1.5px solid ${group.color}40`, overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
+                        <div style={{ padding: '10px 20px', background: `${group.color}10`, borderBottom: `1px solid ${group.color}30`, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <div style={{ width: '9px', height: '9px', borderRadius: '50%', background: group.color, flexShrink: 0 }} />
+                          <span style={{ fontWeight: 700, fontSize: '13px', color: '#111' }}>{group.label}</span>
+                          <span style={{ fontSize: '11px', fontWeight: 600, padding: '1px 7px', borderRadius: '100px', background: `${group.color}20`, color: group.color }}>{group.items.length}</span>
                         </div>
-                        {unassigned.map((item, idx) => <ItemRow key={item.id} item={item} idx={idx} />)}
+                        {group.items.map((item, idx) => {
+                          const assignedSids = itemSections[item.id] || []
+                          const hasAny = assignedSids.length > 0
+                          return (
+                            <div key={item.id} style={{ display: 'flex', alignItems: 'center', padding: '10px 20px', borderTop: idx === 0 ? 'none' : '1px solid #f3f4f6', gap: '12px', flexWrap: 'wrap' as const, background: hasAny ? 'white' : '#fffbeb' }}>
+                              <div style={{ flex: 1, minWidth: '140px' }}>
+                                <div style={{ fontWeight: 600, fontSize: '14px', color: '#111' }}>{item.description || item.name}</div>
+                                {!hasAny && <span style={{ fontSize: '11px', color: '#92400e', fontWeight: 600 }}>⚠️ shows in all sections</span>}
+                              </div>
+                              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' as const }}>
+                                {sections.map((sec: StockSection) => {
+                                  const active = assignedSids.includes(sec.id)
+                                  return (
+                                    <button key={sec.id} onClick={() => toggleSection(item.id, sec.id)}
+                                      style={{ padding: '5px 12px', borderRadius: '20px', border: `2px solid ${sec.color}`, cursor: 'pointer', fontWeight: 700, fontSize: '12px',
+                                        background: active ? sec.color : 'white', color: active ? 'white' : sec.color, whiteSpace: 'nowrap' as const }}>
+                                      {active ? '✓ ' : ''}{sec.icon} {sec.name}
+                                    </button>
+                                  )
+                                })}
+                              </div>
+                            </div>
+                          )
+                        })}
                       </div>
-                    )}
-                    {assigned.length > 0 && (
-                      <div style={{ background: 'white', borderRadius: '20px', border: '1.5px solid #e5e7eb', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
-                        <div style={{ padding: '12px 20px', background: '#f9fafb', borderBottom: '1px solid #e5e7eb', display: 'flex', alignItems: 'center', gap: '10px' }}>
-                          <div style={{ fontWeight: 700, fontSize: '14px', color: '#111' }}>✅ Assigned items</div>
-                          <span style={{ fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '100px', background: '#f0fdf4', color: '#16a34a' }}>{assigned.length} items</span>
-                        </div>
-                        {assigned.map((item, idx) => <ItemRow key={item.id} item={item} idx={idx} />)}
-                      </div>
-                    )}
+                    ))}
                   </div>
                 )
               })()}
