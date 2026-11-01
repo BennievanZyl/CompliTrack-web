@@ -877,42 +877,81 @@ export default function StockPage() {
                     <div style={{ padding: '10px 24px', background: '#f9fafb', borderTop: '1px solid #e5e7eb', fontWeight: 700, fontSize: '13px', color: '#1a5c38', display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#1a5c38' }} />{supplier} ({supplierLines.length} items)
                     </div>
-                    {supplierLines.map(line => {
-                      const item = items.find(i => i.id === line.stock_item_id)
-                      if (!item) return null
-                      const variance = (line.actual_qty || 0) - (line.expected_qty || 0)
-                      return (
-                        <div key={line.id} style={{ display: 'flex', alignItems: 'center', gap: '16px', padding: '12px 24px', borderTop: '1px solid #f3f4f6' }}>
-                          <div style={{ flex: 1 }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                              <span style={{ fontWeight: 600, fontSize: '14px', color: item.is_food_cost === false ? '#9ca3af' : '#111' }}>{item.description || item.name}</span>
-                              {item.is_food_cost === false && <span style={{ fontSize: '10px', fontWeight: 700, background: '#fee2e2', color: '#dc2626', padding: '2px 6px', borderRadius: '100px', whiteSpace: 'nowrap' }}>🚫 excl. food cost</span>}
-                              {!activeSection && line.section_id && (() => { const sec = sections.find(s => s.id === line.section_id); return sec ? <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '100px', background: sec.color + '20', color: sec.color, whiteSpace: 'nowrap' }}>{sec.icon} {sec.name}</span> : null })()}
+                    {(() => {
+                      // In "All" view: deduplicate by item and show combined totals
+                      if (!activeSection) {
+                        const seen = new Set<string>()
+                        const uniqueItems = supplierLines.filter(l => { if (seen.has(l.stock_item_id)) return false; seen.add(l.stock_item_id); return true })
+                        return uniqueItems.map(line => {
+                          const item = items.find(i => i.id === line.stock_item_id)
+                          if (!item) return null
+                          const allItemLines = countLines.filter(l => l.stock_item_id === line.stock_item_id)
+                          const totalActual = allItemLines.reduce((s, l) => s + (Number(l.actual_qty) || 0), 0)
+                          const isMultiSection = allItemLines.length > 1
+                          const variance = totalActual - (line.expected_qty || 0)
+                          return (
+                            <div key={line.stock_item_id} style={{ display: 'flex', alignItems: 'center', gap: '16px', padding: '12px 24px', borderTop: '1px solid #f3f4f6' }}>
+                              <div style={{ flex: 1 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                                  <span style={{ fontWeight: 600, fontSize: '14px', color: item.is_food_cost === false ? '#9ca3af' : '#111' }}>{item.description || item.name}</span>
+                                  {item.is_food_cost === false && <span style={{ fontSize: '10px', fontWeight: 700, background: '#fee2e2', color: '#dc2626', padding: '2px 6px', borderRadius: '100px', whiteSpace: 'nowrap' }}>🚫 excl. food cost</span>}
+                                </div>
+                                {isMultiSection ? (
+                                  <div style={{ display: 'flex', gap: '4px', marginTop: '3px', flexWrap: 'wrap' }}>
+                                    {allItemLines.map(l => { const sec = sections.find(s => s.id === l.section_id); const qty = Number(l.actual_qty) || 0; return sec ? <span key={l.id} style={{ fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '100px', background: sec.color + '20', color: sec.color }}>{sec.icon} {sec.name}: {qty}</span> : null })}
+                                  </div>
+                                ) : (
+                                  <div style={{ fontSize: '12px', color: '#9ca3af' }}>{item.unit}</div>
+                                )}
+                              </div>
+                              <div style={{ fontSize: '12px', color: '#9ca3af', minWidth: '80px', textAlign: 'right' }}>Expected: <strong>{line.expected_qty || 0}</strong></div>
+                              {isMultiSection ? (
+                                <div style={{ width: '90px', padding: '8px 10px', borderRadius: '10px', fontSize: '16px', textAlign: 'center', fontWeight: 700, background: '#f0fdf4', color: '#1a5c38', border: '1.5px solid #d1fae5' }}>{totalActual}</div>
+                              ) : (
+                                <input type="number" min="0" step="0.1"
+                                  value={viewMode ? (line.actual_qty ?? 0) : (countInputs[line.id] ?? '')}
+                                  readOnly={viewMode}
+                                  onChange={viewMode ? undefined : e => { const val = e.target.value; setCountInputs(prev => ({ ...prev, [line.id]: val })); updateCountLine(line.id, val === '' ? 0 : (parseFloat(val) || 0)) }}
+                                  placeholder="0"
+                                  style={{ width: '90px', padding: '8px 10px', border: `1.5px solid ${viewMode ? '#e5e7eb' : item.is_food_cost === false ? '#fca5a5' : '#e5e7eb'}`, borderRadius: '10px', fontSize: '16px', textAlign: 'center', outline: 'none', background: viewMode ? '#f3f4f6' : item.is_food_cost === false ? '#fff7f7' : 'white' }} />
+                              )}
+                              <div style={{ minWidth: '70px', textAlign: 'right', fontSize: '13px', fontWeight: 700, color: variance < 0 ? '#dc2626' : variance > 0 ? '#16a34a' : '#9ca3af' }}>
+                                {variance > 0 ? '+' : ''}{variance.toFixed(1)}
+                              </div>
+                              {!viewMode && <button onClick={() => toggleFoodCost(item.id, item.is_food_cost !== false)} title={item.is_food_cost === false ? 'Excluded from food cost' : 'Included in food cost'} style={{ fontSize: '11px', fontWeight: 700, padding: '5px 8px', borderRadius: '8px', border: 'none', cursor: 'pointer', flexShrink: 0, background: item.is_food_cost === false ? '#fee2e2' : '#f0fdf4', color: item.is_food_cost === false ? '#dc2626' : '#16a34a' }}>{item.is_food_cost === false ? '🚫 FC' : '🍽️ FC'}</button>}
                             </div>
-                            <div style={{ fontSize: '12px', color: '#9ca3af' }}>{item.unit}</div>
+                          )
+                        })
+                      }
+                      // Section view: show individual lines for that section only
+                      return supplierLines.map(line => {
+                        const item = items.find(i => i.id === line.stock_item_id)
+                        if (!item) return null
+                        const variance = (Number(countInputs[line.id]) || line.actual_qty || 0) - (line.expected_qty || 0)
+                        return (
+                          <div key={line.id} style={{ display: 'flex', alignItems: 'center', gap: '16px', padding: '12px 24px', borderTop: '1px solid #f3f4f6' }}>
+                            <div style={{ flex: 1 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                                <span style={{ fontWeight: 600, fontSize: '14px', color: item.is_food_cost === false ? '#9ca3af' : '#111' }}>{item.description || item.name}</span>
+                                {item.is_food_cost === false && <span style={{ fontSize: '10px', fontWeight: 700, background: '#fee2e2', color: '#dc2626', padding: '2px 6px', borderRadius: '100px', whiteSpace: 'nowrap' }}>🚫 excl. food cost</span>}
+                              </div>
+                              <div style={{ fontSize: '12px', color: '#9ca3af' }}>{item.unit}</div>
+                            </div>
+                            <div style={{ fontSize: '12px', color: '#9ca3af', minWidth: '80px', textAlign: 'right' }}>Expected: <strong>{line.expected_qty || 0}</strong></div>
+                            <input type="number" min="0" step="0.1"
+                              value={viewMode ? (line.actual_qty ?? 0) : (countInputs[line.id] ?? '')}
+                              readOnly={viewMode}
+                              onChange={viewMode ? undefined : e => { const val = e.target.value; setCountInputs(prev => ({ ...prev, [line.id]: val })); updateCountLine(line.id, val === '' ? 0 : (parseFloat(val) || 0)) }}
+                              placeholder="0"
+                              style={{ width: '90px', padding: '8px 10px', border: `1.5px solid ${viewMode ? '#e5e7eb' : item.is_food_cost === false ? '#fca5a5' : '#e5e7eb'}`, borderRadius: '10px', fontSize: '16px', textAlign: 'center', outline: 'none', background: viewMode ? '#f3f4f6' : item.is_food_cost === false ? '#fff7f7' : 'white', cursor: viewMode ? 'default' : 'auto' }} />
+                            <div style={{ minWidth: '70px', textAlign: 'right', fontSize: '13px', fontWeight: 700, color: variance < 0 ? '#dc2626' : variance > 0 ? '#16a34a' : '#9ca3af' }}>
+                              {variance > 0 ? '+' : ''}{variance.toFixed(1)}
+                            </div>
+                            {!viewMode && <button onClick={() => toggleFoodCost(item.id, item.is_food_cost !== false)} title={item.is_food_cost === false ? 'Excluded from food cost — tap to include' : 'Included in food cost — tap to exclude'} style={{ fontSize: '11px', fontWeight: 700, padding: '5px 8px', borderRadius: '8px', border: 'none', cursor: 'pointer', flexShrink: 0, background: item.is_food_cost === false ? '#fee2e2' : '#f0fdf4', color: item.is_food_cost === false ? '#dc2626' : '#16a34a' }}>{item.is_food_cost === false ? '🚫 FC' : '🍽️ FC'}</button>}
                           </div>
-                          <div style={{ fontSize: '12px', color: '#9ca3af', minWidth: '80px', textAlign: 'right' }}>Expected: <strong>{line.expected_qty || 0}</strong></div>
-                          <input type="number" min="0" step="0.1"
-                            value={viewMode ? (line.actual_qty ?? 0) : (countInputs[line.id] ?? '')}
-                            readOnly={viewMode}
-                            onChange={viewMode ? undefined : e => {
-                              const val = e.target.value
-                              setCountInputs(prev => ({ ...prev, [line.id]: val }))
-                              updateCountLine(line.id, val === '' ? 0 : (parseFloat(val) || 0))
-                            }}
-                            placeholder="0"
-                            style={{ width: '90px', padding: '8px 10px', border: `1.5px solid ${viewMode ? '#e5e7eb' : item.is_food_cost === false ? '#fca5a5' : '#e5e7eb'}`, borderRadius: '10px', fontSize: '16px', textAlign: 'center', outline: 'none', background: viewMode ? '#f3f4f6' : item.is_food_cost === false ? '#fff7f7' : 'white', cursor: viewMode ? 'default' : 'auto' }} />
-                          <div style={{ minWidth: '70px', textAlign: 'right', fontSize: '13px', fontWeight: 700, color: variance < 0 ? '#dc2626' : variance > 0 ? '#16a34a' : '#9ca3af' }}>
-                            {variance > 0 ? '+' : ''}{variance.toFixed(1)}
-                          </div>
-                          {!viewMode && <button onClick={() => toggleFoodCost(item.id, item.is_food_cost !== false)}
-                            title={item.is_food_cost === false ? 'Excluded from food cost — tap to include' : 'Included in food cost — tap to exclude'}
-                            style={{ fontSize: '11px', fontWeight: 700, padding: '5px 8px', borderRadius: '8px', border: 'none', cursor: 'pointer', flexShrink: 0, background: item.is_food_cost === false ? '#fee2e2' : '#f0fdf4', color: item.is_food_cost === false ? '#dc2626' : '#16a34a' }}>
-                            {item.is_food_cost === false ? '🚫 FC' : '🍽️ FC'}
-                          </button>}
-                        </div>
-                      )
-                    })}
+                        )
+                      })
+                    })()}
                   </div>
                     )
                   })}
