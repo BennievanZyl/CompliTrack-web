@@ -39,6 +39,7 @@ const TABS = [
   { key: 'orders', label: '📦 Orders' },
   { key: 'items', label: '⚙️ Stock Items' },
   { key: 'suppliers', label: '🚛 Suppliers' },
+  { key: 'categorise', label: '🏷️ Categorise' },
 ]
 
 const ISSUE_DESTINATIONS = ['Kitchen', 'Fryer Station', 'Prep', 'Front Counter', 'Bar', 'Catering Order', 'Other']
@@ -1525,6 +1526,101 @@ export default function StockPage() {
                 )
               })}
               {items.length === 0 && <div style={{ background: 'white', borderRadius: '20px', border: '1.5px solid #eef2ee', padding: '48px', textAlign: 'center', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}><div style={{ fontSize: '48px', marginBottom: '12px' }}>📦</div><div style={{ fontSize: '16px', fontWeight: 700, color: '#111', marginBottom: '6px' }}>No stock items yet</div><div style={{ fontSize: '13px', color: '#9ca3af', marginBottom: '20px' }}>Add items to build your stock sheet</div><button onClick={() => setShowAddItem(true)} style={{ padding: '12px 24px', background: '#1a5c38', color: 'white', border: 'none', borderRadius: '12px', fontSize: '14px', fontWeight: 800, cursor: 'pointer' }}>+ Add First Item</button></div>}
+            </div>
+          )}
+
+          {/* ── Bulk Categorise Tab ── */}
+          {tab === 'categorise' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              <div>
+                <div style={{ fontSize: '18px', fontWeight: 800, color: '#111' }}>Assign Categories</div>
+                <div style={{ fontSize: '13px', color: '#9ca3af', marginTop: '2px' }}>Tap the dropdown next to any item to change its category — saves instantly</div>
+              </div>
+              {categories.length === 0 && (
+                <div style={{ background: 'white', borderRadius: '20px', border: '1.5px solid #e5e7eb', padding: '32px', textAlign: 'center' }}>
+                  <div style={{ fontSize: '36px', marginBottom: '8px' }}>🏷️</div>
+                  <div style={{ fontWeight: 700, color: '#111', marginBottom: '4px' }}>No categories yet</div>
+                  <div style={{ fontSize: '13px', color: '#9ca3af' }}>Add categories from the Stock Items tab first</div>
+                </div>
+              )}
+              {categories.length > 0 && items.length === 0 && (
+                <div style={{ background: 'white', borderRadius: '20px', border: '1.5px solid #e5e7eb', padding: '32px', textAlign: 'center' }}>
+                  <div style={{ fontSize: '36px', marginBottom: '8px' }}>📦</div>
+                  <div style={{ fontWeight: 700, color: '#111' }}>No stock items yet</div>
+                </div>
+              )}
+              {categories.length > 0 && items.length > 0 && (() => {
+                const uncategorised = items.filter(i => !i.category || !categories.find(c => c.id === i.category))
+                const categorised = categories.map(cat => ({
+                  cat,
+                  catItems: items.filter(i => i.category === cat.id)
+                })).filter(g => g.catItems.length > 0)
+                return (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                    {uncategorised.length > 0 && (
+                      <div style={{ background: 'white', borderRadius: '20px', border: '2px solid #fbbf24', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
+                        <div style={{ padding: '12px 20px', background: '#fffbeb', borderBottom: '1px solid #fde68a', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#f59e0b' }} />
+                          <div style={{ fontWeight: 700, fontSize: '14px', color: '#92400e' }}>⚠️ Uncategorised</div>
+                          <span style={{ fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '100px', background: '#fef3c7', color: '#92400e' }}>{uncategorised.length}</span>
+                        </div>
+                        <div style={{ padding: '8px 0' }}>
+                          {uncategorised.map((item, idx) => (
+                            <div key={item.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 20px', borderTop: idx === 0 ? 'none' : '1px solid #f9fafb', gap: '12px' }}>
+                              <div style={{ fontWeight: 600, fontSize: '14px', color: '#111', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.description || item.name}</div>
+                              <select
+                                value=""
+                                onChange={async e => {
+                                  const newCat = e.target.value
+                                  if (!newCat) return
+                                  await supabase.from('stock_items').update({ category: newCat }).eq('id', item.id)
+                                  setItems(prev => prev.map(i => i.id === item.id ? { ...i, category: newCat } : i))
+                                }}
+                                style={{ padding: '7px 12px', border: '2px solid #fbbf24', borderRadius: '10px', fontSize: '13px', fontWeight: 700, cursor: 'pointer', background: '#fffbeb', color: '#92400e', outline: 'none', minWidth: '160px' }}
+                              >
+                                <option value="">— pick a category —</option>
+                                {categories.map(c => (
+                                  <option key={c.id} value={c.id}>{c.name}</option>
+                                ))}
+                              </select>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {categorised.map(({ cat, catItems }) => (
+                      <div key={cat.id} style={{ background: 'white', borderRadius: '20px', border: `1.5px solid ${cat.color}40`, overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
+                        <div style={{ padding: '12px 20px', background: `${cat.color}12`, borderBottom: `1px solid ${cat.color}30`, display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: cat.color }} />
+                          <div style={{ fontWeight: 700, fontSize: '14px', color: '#111' }}>{getCategoryIcon(cat.name)} {cat.name}</div>
+                          <span style={{ fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '100px', background: `${cat.color}20`, color: cat.color }}>{catItems.length}</span>
+                        </div>
+                        <div style={{ padding: '8px 0' }}>
+                          {catItems.map((item, idx) => (
+                            <div key={item.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 20px', borderTop: idx === 0 ? 'none' : '1px solid #f9fafb', gap: '12px' }}>
+                              <div style={{ fontWeight: 600, fontSize: '14px', color: '#111', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.description || item.name}</div>
+                              <select
+                                value={item.category || ''}
+                                onChange={async e => {
+                                  const newCat = e.target.value
+                                  await supabase.from('stock_items').update({ category: newCat || null }).eq('id', item.id)
+                                  setItems(prev => prev.map(i => i.id === item.id ? { ...i, category: newCat || null } : i))
+                                }}
+                                style={{ padding: '7px 12px', border: `1.5px solid ${cat.color}60`, borderRadius: '10px', fontSize: '13px', fontWeight: 600, cursor: 'pointer', background: `${cat.color}08`, color: '#374151', outline: 'none', minWidth: '160px' }}
+                              >
+                                <option value="">— uncategorised —</option>
+                                {categories.map(c => (
+                                  <option key={c.id} value={c.id}>{c.name}</option>
+                                ))}
+                              </select>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )
+              })()}
             </div>
           )}
         </>)}
