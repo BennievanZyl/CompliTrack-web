@@ -12,7 +12,7 @@ function fmt(n:number){return 'R\u00a0'+(n||0).toLocaleString('en-ZA',{minimumFr
 function fmtK(n:number){return n>=1000?'R'+(n/1000).toFixed(1)+'k':'R'+n.toFixed(0)}
 function thisMonth(){return new Date().toISOString().slice(0,7)}
 function lastMonth(){const d=new Date();d.setMonth(d.getMonth()-1);return d.toISOString().slice(0,7)}
-function monthRange(ym:string):[string,string]{const[y,m]=ym.split('-').map(Number);return[`${ym}-01`,new Date(y,m,0).toISOString().slice(0,10)]}
+function monthRange(ym:string):[string,string]{const[y,m]=ym.split('-').map(Number);const lastDay=new Date(y,m,0).getDate();return[`${ym}-01`,`${ym}-${String(lastDay).padStart(2,'0')}`]}
 function getMonday(){const d=new Date(),day=(d.getDay()+6)%7;d.setDate(d.getDate()-day);return d.toISOString().slice(0,10)}
 function pctColor(p:number){return p>=90?'#16a34a':p>=70?'#f59e0b':'#ef4444'}
 
