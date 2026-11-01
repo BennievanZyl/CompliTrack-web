@@ -20,7 +20,7 @@ type Store = {
 }
 
 type ExpenseCategory = {
-  id: string; name: string; key: string; colour: string; sort_order: number; is_active: boolean
+  id: string; name: string; key: string; colour: string; sort_order: number; is_active: boolean; is_non_vat?: boolean
 }
 
 type ChecklistTemplate = {
@@ -71,7 +71,7 @@ export default function SettingsPage() {
   const [categories, setCategories] = useState<ExpenseCategory[]>([])
   const [showCatForm, setShowCatForm] = useState(false)
   const [editCat, setEditCat] = useState<ExpenseCategory | null>(null)
-  const [catForm, setCatForm] = useState({ name: '', colour: '#10b981' })
+  const [catForm, setCatForm] = useState({ name: '', colour: '#10b981', is_non_vat: false })
 
   const [stockSettings, setStockSettings] = useState({ allow_negative_stock: false, require_pin_on_issue: false })
   const [savingStockSettings, setSavingStockSettings] = useState(false)
@@ -190,12 +190,12 @@ export default function SettingsPage() {
     const key = slugify(catForm.name)
     const maxOrder = categories.length
     if (editCat) {
-      await supabase.from('expense_categories').update({ name: catForm.name, colour: catForm.colour }).eq('id', editCat.id)
+      await supabase.from('expense_categories').update({ name: catForm.name, colour: catForm.colour, is_non_vat: catForm.is_non_vat }).eq('id', editCat.id)
       setEditCat(null)
     } else {
-      await supabase.from('expense_categories').insert({ organisation_id: ORG_ID, name: catForm.name, key, colour: catForm.colour, is_active: true, sort_order: maxOrder + 1 })
+      await supabase.from('expense_categories').insert({ organisation_id: ORG_ID, name: catForm.name, key, colour: catForm.colour, is_non_vat: catForm.is_non_vat, is_active: true, sort_order: maxOrder + 1 })
     }
-    setCatForm({ name: '', colour: '#10b981' })
+    setCatForm({ name: '', colour: '#10b981', is_non_vat: false })
     setShowCatForm(false)
     await loadAll()
     setSaving(false)
@@ -524,47 +524,12 @@ export default function SettingsPage() {
                   <h2 style={{ fontSize: '20px', fontWeight: '800', color: '#111', margin: '0 0 4px' }}>Expense Categories</h2>
                   <p style={{ fontSize: '13px', color: '#6b7280', margin: 0 }}>Manage categories used for supplier bills and quick expenses. Changes apply immediately across all financial entries.</p>
                 </div>
-                <button onClick={() => { setEditCat(null); setCatForm({ name: '', colour: '#10b981' }); setShowCatForm(true) }}
+                <button onClick={() => { setEditCat(null); setCatForm({ name: '', colour: '#10b981', is_non_vat: false }); setShowCatForm(true) }}
                   style={{ background: '#1a5c38', color: '#fff', border: 'none', borderRadius: '10px', padding: '10px 18px', cursor: 'pointer', fontSize: '14px', fontWeight: '700' }}>
                   + Add Category
                 </button>
               </div>
 
-              {showCatForm && (
-                <div style={{ background: '#f9fafb', border: '2px solid #1a5c38', borderRadius: '12px', padding: '20px', marginBottom: '20px' }}>
-                  <h3 style={{ margin: '0 0 16px', fontSize: '15px', fontWeight: '700' }}>{editCat ? 'Edit Category' : 'New Category'}</h3>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr auto auto', gap: '12px', alignItems: 'end' }}>
-                    <div>
-                      <label style={LABEL}>Category Name *</label>
-                      <input type="text" placeholder="e.g. Royalties, Cleaning, Gas" value={catForm.name}
-                        onChange={e => setCatForm(f => ({ ...f, name: e.target.value }))} style={INPUT} />
-                    </div>
-                    <div>
-                      <label style={LABEL}>Colour</label>
-                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                        <input type="color" value={catForm.colour} onChange={e => setCatForm(f => ({ ...f, colour: e.target.value }))}
-                          style={{ width: '44px', height: '44px', border: '1.5px solid #e5e7eb', borderRadius: '8px', cursor: 'pointer', padding: '2px' }} />
-                        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', maxWidth: '200px' }}>
-                          {['#10b981','#ef4444','#3b82f6','#f59e0b','#8b5cf6','#06b6d4','#f97316','#ec4899','#84cc16','#6b7280'].map(c => (
-                            <div key={c} onClick={() => setCatForm(f => ({ ...f, colour: c }))}
-                              style={{ width: '20px', height: '20px', borderRadius: '4px', background: c, cursor: 'pointer', border: catForm.colour === c ? '2px solid #111' : '2px solid transparent' }} />
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                    <div style={{ display: 'flex', gap: '8px' }}>
-                      <button onClick={saveCat} disabled={saving || !catForm.name}
-                        style={{ background: catForm.name ? '#1a5c38' : '#d1d5db', color: '#fff', border: 'none', borderRadius: '10px', padding: '10px 16px', cursor: catForm.name ? 'pointer' : 'not-allowed', fontSize: '14px', fontWeight: '700' }}>
-                        {saving ? 'Saving…' : 'Save'}
-                      </button>
-                      <button onClick={() => { setShowCatForm(false); setEditCat(null) }}
-                        style={{ background: '#f3f4f6', color: '#374151', border: 'none', borderRadius: '10px', padding: '10px 16px', cursor: 'pointer', fontSize: '14px', fontWeight: '700' }}>
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
 
               {categories.length === 0 ? (
                 <div style={{ textAlign: 'center', padding: '48px', color: '#6b7280' }}>
@@ -578,13 +543,14 @@ export default function SettingsPage() {
                       <div style={{ width: '18px', height: '18px', borderRadius: '4px', background: cat.colour, flexShrink: 0 }} />
                       <span style={{ fontWeight: '600', fontSize: '14px', flex: 1 }}>{cat.name}</span>
                       <span style={{ fontSize: '11px', color: '#9ca3af', fontFamily: 'monospace' }}>{cat.key}</span>
+                      {cat.is_non_vat && <span style={{ background: '#fef2f2', color: '#dc2626', fontSize: '10px', fontWeight: '700', padding: '2px 7px', borderRadius: '20px', border: '1px solid #fecaca' }}>NO VAT</span>}
                       {!cat.is_active && <span style={{ background: '#f3f4f6', color: '#6b7280', fontSize: '11px', fontWeight: '700', padding: '2px 8px', borderRadius: '20px' }}>Inactive</span>}
                       <div style={{ display: 'flex', gap: '6px' }}>
                         <button onClick={() => moveCat(cat.id, 'up')} disabled={idx === 0}
                           style={{ background: '#f3f4f6', border: 'none', borderRadius: '6px', padding: '4px 8px', cursor: idx === 0 ? 'not-allowed' : 'pointer', opacity: idx === 0 ? 0.4 : 1, fontSize: '12px' }}>▲</button>
                         <button onClick={() => moveCat(cat.id, 'down')} disabled={idx === categories.length - 1}
                           style={{ background: '#f3f4f6', border: 'none', borderRadius: '6px', padding: '4px 8px', cursor: idx === categories.length - 1 ? 'not-allowed' : 'pointer', opacity: idx === categories.length - 1 ? 0.4 : 1, fontSize: '12px' }}>▼</button>
-                        <button onClick={() => { setEditCat(cat); setCatForm({ name: cat.name, colour: cat.colour }); setShowCatForm(true) }}
+                        <button onClick={() => { setEditCat(cat); setCatForm({ name: cat.name, colour: cat.colour, is_non_vat: cat.is_non_vat || false }); setShowCatForm(true) }}
                           style={{ background: '#eff6ff', color: '#2563eb', border: 'none', borderRadius: '6px', padding: '4px 10px', cursor: 'pointer', fontSize: '12px', fontWeight: '600' }}>Edit</button>
                         <button onClick={() => toggleCat(cat.id, cat.is_active)}
                           style={{ background: cat.is_active ? '#fffbeb' : '#f0fdf4', color: cat.is_active ? '#d97706' : '#16a34a', border: 'none', borderRadius: '6px', padding: '4px 10px', cursor: 'pointer', fontSize: '12px', fontWeight: '600' }}>
@@ -800,6 +766,56 @@ export default function SettingsPage() {
               </div>
             </div>
           )}
+
+      {/* Add / Edit Category Modal */}
+      {showCatForm && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: '16px' }}>
+          <div style={{ background: 'white', borderRadius: '24px', width: '100%', maxWidth: '480px', boxShadow: '0 24px 60px rgba(0,0,0,0.2)' }}>
+            <div style={{ padding: '24px 28px 16px', borderBottom: '1px solid #f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <h2 style={{ fontSize: '18px', fontWeight: '800', color: '#111', margin: 0 }}>{editCat ? 'Edit Category' : 'New Category'}</h2>
+              <button onClick={() => { setShowCatForm(false); setEditCat(null); setCatForm({ name: '', colour: '#10b981', is_non_vat: false }) }} style={{ background: '#f3f4f6', border: 'none', borderRadius: '8px', width: '32px', height: '32px', cursor: 'pointer', fontSize: '16px' }}>✕</button>
+            </div>
+            <div style={{ padding: '20px 28px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div>
+                <label style={LABEL}>Category Name *</label>
+                <input type="text" placeholder="e.g. Royalties, Cleaning, Gas" value={catForm.name}
+                  onChange={e => setCatForm(f => ({ ...f, name: e.target.value }))} style={INPUT} autoFocus />
+              </div>
+              <div>
+                <label style={LABEL}>Colour</label>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  <input type="color" value={catForm.colour} onChange={e => setCatForm(f => ({ ...f, colour: e.target.value }))}
+                    style={{ width: '44px', height: '44px', border: '1.5px solid #e5e7eb', borderRadius: '8px', cursor: 'pointer', padding: '2px' }} />
+                  <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                    {['#10b981','#ef4444','#3b82f6','#f59e0b','#8b5cf6','#06b6d4','#f97316','#ec4899','#84cc16','#6b7280'].map(c => (
+                      <div key={c} onClick={() => setCatForm(f => ({ ...f, colour: c }))}
+                        style={{ width: '22px', height: '22px', borderRadius: '4px', background: c, cursor: 'pointer', border: catForm.colour === c ? '2px solid #111' : '2px solid transparent' }} />
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, padding: '14px 16px', background: catForm.is_non_vat ? '#fef2f2' : '#f9fafb', borderRadius: 10, border: `1.5px solid ${catForm.is_non_vat ? '#fecaca' : '#e5e7eb'}`, cursor: 'pointer' }}
+                onClick={() => setCatForm(f => ({ ...f, is_non_vat: !f.is_non_vat }))}>
+                <input type="checkbox" checked={catForm.is_non_vat} readOnly style={{ marginTop: 2, width: 16, height: 16, accentColor: '#dc2626', cursor: 'pointer' }} />
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 14, color: catForm.is_non_vat ? '#dc2626' : '#111', marginBottom: 3 }}>⊘ Always Non-VAT</div>
+                  <div style={{ fontSize: 12, color: '#6b7280', lineHeight: 1.4 }}>
+                    {catForm.is_non_vat ? 'VAT will auto-zero on invoice lines using this category (e.g. fuel, bank charges).' : 'Tick this if expenses in this category never attract VAT.'}
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div style={{ padding: '16px 28px 24px', display: 'flex', gap: '12px' }}>
+              <button onClick={() => { setShowCatForm(false); setEditCat(null); setCatForm({ name: '', colour: '#10b981', is_non_vat: false }) }}
+                style={{ flex: 1, border: '1.5px solid #e5e7eb', color: '#374151', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: '700', cursor: 'pointer', background: 'white' }}>Cancel</button>
+              <button onClick={saveCat} disabled={saving || !catForm.name}
+                style={{ flex: 1, background: catForm.name ? '#1a5c38' : '#d1d5db', color: 'white', border: 'none', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: '800', cursor: catForm.name ? 'pointer' : 'not-allowed' }}>
+                {saving ? 'Saving…' : editCat ? 'Save Changes' : 'Add Category'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   )
