@@ -123,6 +123,7 @@ export default function StockPage() {
   const [showSectionManager, setShowSectionManager] = useState(false)
   const [sectionForm, setSectionForm] = useState({ name: '', color: '#1a5c38', icon: '📦' })
   const [editSection, setEditSection] = useState<StockSection | null>(null)
+  const [editTotalItems, setEditTotalItems] = useState<Set<string>>(new Set())
   const [countTypeFilter, setCountTypeFilter] = useState('daily')
   const [showMonthPicker, setShowMonthPicker] = useState(false)
   // Default to previous month so September is pre-selected when opening in October
@@ -988,7 +989,26 @@ export default function StockPage() {
                               </div>
                               <div style={{ fontSize: '12px', color: '#9ca3af', minWidth: '80px', textAlign: 'right' }}>Expected: <strong>{line.expected_qty || 0}</strong></div>
                               {isMultiSection ? (
-                                <div style={{ width: '90px', padding: '8px 10px', borderRadius: '10px', fontSize: '16px', textAlign: 'center', fontWeight: 700, background: '#f0fdf4', color: '#1a5c38', border: '1.5px solid #d1fae5' }}>{totalActual}</div>
+                                !viewMode && editTotalItems.has(item.id) ? (
+                                  <input type="number" min="0" step="0.1" autoFocus
+                                    defaultValue={totalActual || ''}
+                                    placeholder="0"
+                                    onBlur={async e => {
+                                      const val = parseFloat(e.target.value) || 0
+                                      // Save total to first section line, zero the rest
+                                      const [first, ...rest] = allItemLines
+                                      await updateCountLine(first.id, val)
+                                      for (const r of rest) await updateCountLine(r.id, 0)
+                                      setEditTotalItems(prev => { const n = new Set(prev); n.delete(item.id); return n })
+                                    }}
+                                    onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+                                    style={{ width: '90px', padding: '8px 10px', border: '1.5px solid #1a5c38', borderRadius: '10px', fontSize: '16px', textAlign: 'center', outline: 'none', background: 'white' }} />
+                                ) : (
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                    <div style={{ width: '70px', padding: '8px 6px', borderRadius: '10px', fontSize: '16px', textAlign: 'center', fontWeight: 700, background: '#f0fdf4', color: '#1a5c38', border: '1.5px solid #d1fae5' }}>{totalActual}</div>
+                                    {!viewMode && <button onClick={() => setEditTotalItems(prev => { const n = new Set(prev); n.add(item.id); return n })} title="Edit total directly" style={{ padding: '6px 8px', borderRadius: '8px', border: '1.5px solid #d1fae5', background: '#f0fdf4', color: '#1a5c38', cursor: 'pointer', fontSize: '13px', fontWeight: 700 }}>✏️</button>}
+                                  </div>
+                                )
                               ) : (
                                 <input type="number" min="0" step="0.1"
                                   value={viewMode ? (line.actual_qty ?? 0) : (countInputs[line.id] ?? '')}
