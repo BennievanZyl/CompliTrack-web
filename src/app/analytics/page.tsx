@@ -86,6 +86,35 @@ function ComplianceTrend({sessions}:{sessions:{date:string;pct:number}[]}){
   </svg>
 }
 
+// ── Employee grade helpers (mirrors people/page.tsx logic) ──────────────────
+function empAttendDeduction(sessions:{is_late:boolean}[]){
+  if(!sessions.length)return{deduction:0,lateRate:0,lateCount:0}
+  const lateCount=sessions.filter(s=>s.is_late).length
+  const lateRate=lateCount/sessions.length
+  let deduction=0
+  if(lateRate>=0.5)deduction=1.0
+  else if(lateRate>=0.25)deduction=0.5
+  else if(lateRate>=0.1)deduction=0.25
+  return{deduction,lateRate,lateCount}
+}
+function computeGrade(evals:any[],warns:any[],sessions:{is_late:boolean}[]){
+  const baseScore=evals.length>0?evals[0].overall_score:3.5
+  const warnDeduct=warns.reduce((s:number,w:any)=>{
+    if(w.warning_type==='Final Written Warning')return s+1
+    if(w.warning_type==='Written Warning')return s+0.5
+    if(w.warning_type==='Verbal Warning')return s+0.25
+    return s
+  },0)
+  const{deduction:attDeduct,lateRate,lateCount}=empAttendDeduction(sessions)
+  const score=Math.max(1,baseScore-warnDeduct-attDeduct)
+  const evalDue=evals.length===0||(Date.now()-new Date(evals[0].eval_date).getTime())>90*24*60*60*1000
+  if(score>=4.5)return{score,grade:'A',label:'Excellent',color:'#16a34a',evalDue,lateRate,lateCount}
+  if(score>=3.5)return{score,grade:'B',label:'Good',color:'#2563eb',evalDue,lateRate,lateCount}
+  if(score>=2.5)return{score,grade:'C',label:'Satisfactory',color:'#d97706',evalDue,lateRate,lateCount}
+  if(score>=1.5)return{score,grade:'D',label:'Below Standard',color:'#dc2626',evalDue,lateRate,lateCount}
+  return{score,grade:'F',label:'Unsatisfactory',color:'#7f1d1d',evalDue,lateRate,lateCount}
+}
+
 export default function AnalyticsPage(){
   const { storeId: STORE_ID, ready: ctxReady } = useStoreContext()
   const router=useRouter()
@@ -96,6 +125,9 @@ export default function AnalyticsPage(){
   const [data,setData]=useState<any>(null)
   const [compareData,setCompareData]=useState<any>(null)
   const [breakevenMode,setBreakevenMode]=useState<'estimate'|'actual'>('estimate')
+  const [empData,setEmpData]=useState<any[]>([])
+  const [empFilter,setEmpFilter]=useState<'all'|'concerns'|'evaldue'>('all')
+  const [expandedEmp,setExpandedEmp]=useState<string|null>(null)
 
   async function fetchAnalytics(start:string,end:string){
     if(!STORE_ID) return null
@@ -286,12 +318,76 @@ export default function AnalyticsPage(){
     }
   }
 
-  const load=useCallback(async()=>{
+  async function fetchEmployeeAnalytics(){
+    if(!STORE_ID)return[]
+    // Step 1: get employees
+    const{data:emps}=await supabase.from('employees').select('id,full_name,position').eq('store_id',STORE_ID).eq('is_active',true).order('full_name')
+    if(!emps||!emps.length)return[]
+    const ids=emps.map((e:any)=>e.id)
+
+    // Step 2: parallel fetch of all employee data
+    const[evalsRes,warnsRes,wageRes,attendRes]=await Promise.all([
+      supabase.from('employee_evaluations').select('*').eq('store_id',STORE_ID).in('employee_id',ids).order('eval_date',{ascending:false}),
+      supabase.from('employee_warnings').select('*').eq('store_id',STORE_ID).in('employee_id',ids).order('incident_date',{ascending:false}),
+      // Last 6 months of wage_payments for avg pay
+      supabase.from('wage_payments').select('employee_id,net_pay,gross_pay,period').eq('store_id',STORE_ID).in('employee_id',ids).gte('period',(() => { const d=new Date(); d.setMonth(d.getMonth()-6); return d.toISOString().slice(0,7) })()),
+      // Attendance this month (selected period)
+      supabase.from('attendance').select('employee_id,is_late,work_date').in('employee_id',ids).gte('work_date',monthRange(month)[0]).lte('work_date',monthRange(month)[1]),
+    ])
+    const allEvals=evalsRes.data||[]
+    const allWarns=warnsRes.data||[]
+    const allWage=wageRes.data||[]
+    const allAttend=attendRes.data||[]
+
+    return emps.map((emp:any)=>{
+      const evals=allEvals.filter((e:any)=>e.employee_id===emp.id)
+      const warns=allWarns.filter((w:any)=>w.employee_id===emp.id)
+      const wages=allWage.filter((w:any)=>w.employee_id===emp.id)
+      const attend=allAttend.filter((a:any)=>a.employee_id===emp.id)
+      const gradeInfo=computeGrade(evals,warns,attend)
+      // Average net pay over recorded months
+      const avgNetPay=wages.length>0?wages.reduce((s:number,w:any)=>s+Number(w.net_pay||0),0)/wages.length:0
+      // Pay for selected month
+      const[ym]=monthRange(month)
+      const selectedPeriod=month
+      const thisPay=wages.find((w:any)=>w.period===selectedPeriod)
+      // Positive remarks: eval notes where overall_score >= 4
+      const positiveRemarks=evals.filter((e:any)=>e.overall_score>=4&&e.notes).map((e:any)=>({date:e.eval_date,note:e.notes,score:e.overall_score}))
+      // Concerns: active warnings + low score indicators
+      const concerns:string[]=[]
+      if(warns.filter((w:any)=>w.warning_type==='Final Written Warning').length>0)concerns.push('Has active Final Written Warning')
+      if(warns.filter((w:any)=>w.warning_type==='Written Warning').length>=2)concerns.push(`${warns.filter((w:any)=>w.warning_type==='Written Warning').length} Written Warnings`)
+      if(gradeInfo.lateRate>=0.25)concerns.push(`Late ${Math.round(gradeInfo.lateRate*100)}% of shifts (${gradeInfo.lateCount} sessions this month)`)
+      if(gradeInfo.score<2.5)concerns.push(`Low performance score (${gradeInfo.score.toFixed(2)}/5)`)
+      if(gradeInfo.evalDue)concerns.push('Performance evaluation overdue')
+      // Low scoring eval dimensions
+      if(evals.length>0){
+        const e=evals[0]
+        if(e.punctuality<=2)concerns.push('Poor punctuality score in last evaluation')
+        if(e.attitude<=2)concerns.push('Attitude flagged in last evaluation')
+      }
+      return{
+        id:emp.id,name:emp.full_name,position:emp.position||null,
+        ...gradeInfo,
+        evalCount:evals.length,
+        latestEval:evals.length>0?evals[0]:null,
+        warns,
+        avgNetPay,
+        thisPay:thisPay?.net_pay??null,
+        attend,
+        positiveRemarks,
+        concerns,
+      }
+    }).sort((a:any,b:any)=>b.score-a.score)
+  }
+
+    const load=useCallback(async()=>{
     if(!STORE_ID) return
     setLoading(true)
     const[s,e]=monthRange(month)
-    const d=await fetchAnalytics(s,e)
+    const[d,empD]=await Promise.all([fetchAnalytics(s,e),fetchEmployeeAnalytics()])
     setData(d)
+    setEmpData(empD)
     if(view==='compare'){const[cs,ce]=monthRange(compareMonth);setCompareData(await fetchAnalytics(cs,ce))}
     setLoading(false)
   },[month,view,compareMonth,STORE_ID])
@@ -538,6 +634,189 @@ export default function AnalyticsPage(){
         {/* UIF */}
         {data.uifEmployer>0&&<div style={{...card,background:'#fffbeb',border:'1px solid #fde68a'}}>
           <div style={{fontSize:13,fontWeight:700,color:'#92400e'}}>⚠️ UIF Employer Contribution — R{data.uifEmployer.toFixed(2)} (not included in P&L above, payable to SARS)</div>
+        </div>}
+
+        {/* ── EMPLOYEE PERFORMANCE ── */}
+        {empData.length>0&&<div style={{marginTop:24}}>
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14}}>
+            <div>
+              <div style={{fontSize:18,fontWeight:800,color:'#111'}}>👥 Employee Performance</div>
+              <div style={{fontSize:12,color:'#9ca3af',marginTop:2}}>Ranked by performance score · evaluations, warnings & attendance</div>
+            </div>
+            <div style={{display:'flex',gap:8}}>
+              {(['all','concerns','evaldue'] as const).map(f=>(
+                <button key={f} onClick={()=>setEmpFilter(f)} style={{padding:'6px 14px',borderRadius:20,border:'1.5px solid',borderColor:empFilter===f?PRIMARY:'#e5e7eb',background:empFilter===f?PRIMARY:'#fff',color:empFilter===f?'#fff':'#374151',fontWeight:600,fontSize:12,cursor:'pointer'}}>
+                  {f==='all'?'All Staff':f==='concerns'?'⚠️ Concerns':'📋 Eval Due'}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Summary KPIs */}
+          <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:12,marginBottom:16}}>
+            <div style={{...card,textAlign:'center'}}>
+              <div style={{fontSize:11,fontWeight:700,color:'#9ca3af',textTransform:'uppercase',letterSpacing:0.5,marginBottom:6}}>Team Size</div>
+              <div style={{fontSize:28,fontWeight:800,color:'#111'}}>{empData.length}</div>
+              <div style={{fontSize:12,color:'#9ca3af',marginTop:4}}>active employees</div>
+            </div>
+            <div style={{...card,textAlign:'center'}}>
+              <div style={{fontSize:11,fontWeight:700,color:'#9ca3af',textTransform:'uppercase',letterSpacing:0.5,marginBottom:6}}>Avg Score</div>
+              <div style={{fontSize:28,fontWeight:800,color:empData.length?computeGrade([{overall_score:empData.reduce((s:number,e:any)=>s+e.score,0)/empData.length}],[],[]).color:'#111'}}>
+                {empData.length?(empData.reduce((s:number,e:any)=>s+e.score,0)/empData.length).toFixed(2):'-'}</div>
+              <div style={{fontSize:12,color:'#9ca3af',marginTop:4}}>team average / 5.00</div>
+            </div>
+            <div style={{...card,textAlign:'center'}}>
+              <div style={{fontSize:11,fontWeight:700,color:'#9ca3af',textTransform:'uppercase',letterSpacing:0.5,marginBottom:6}}>Active Warnings</div>
+              <div style={{fontSize:28,fontWeight:800,color:empData.reduce((s:number,e:any)=>s+e.warns.length,0)>0?'#dc2626':'#16a34a'}}>
+                {empData.reduce((s:number,e:any)=>s+e.warns.length,0)}</div>
+              <div style={{fontSize:12,color:'#9ca3af',marginTop:4}}>across all staff</div>
+            </div>
+            <div style={{...card,textAlign:'center'}}>
+              <div style={{fontSize:11,fontWeight:700,color:'#9ca3af',textTransform:'uppercase',letterSpacing:0.5,marginBottom:6}}>Evals Due</div>
+              <div style={{fontSize:28,fontWeight:800,color:empData.filter((e:any)=>e.evalDue).length>0?'#d97706':'#16a34a'}}>
+                {empData.filter((e:any)=>e.evalDue).length}</div>
+              <div style={{fontSize:12,color:'#9ca3af',marginTop:4}}>need evaluation</div>
+            </div>
+          </div>
+
+          {/* Employee ranking cards */}
+          <div style={{display:'flex',flexDirection:'column',gap:10}}>
+            {empData
+              .filter((e:any)=>empFilter==='all'?true:empFilter==='concerns'?e.concerns.length>0:e.evalDue)
+              .map((emp:any,idx:number)=>{
+                const rank=empData.indexOf(emp)+1
+                const medal=rank===1?'🥇':rank===2?'🥈':rank===3?'🥉':null
+                const isOpen=expandedEmp===emp.id
+                return<div key={emp.id} style={{...card,padding:0,overflow:'hidden',border:`1px solid ${emp.concerns.length>0?'#fecaca':'#eef2ee'}`}}>
+                  {/* Card header — click to expand */}
+                  <div onClick={()=>setExpandedEmp(isOpen?null:emp.id)} style={{display:'flex',alignItems:'center',gap:14,padding:'14px 18px',cursor:'pointer',background:emp.concerns.length>0?'#fff5f5':'#fff'}}>
+                    {/* Rank */}
+                    <div style={{width:36,textAlign:'center',flexShrink:0}}>
+                      {medal?<span style={{fontSize:22}}>{medal}</span>
+                        :<span style={{fontSize:14,fontWeight:800,color:'#9ca3af'}}>#{rank}</span>}
+                    </div>
+                    {/* Avatar circle */}
+                    <div style={{width:40,height:40,borderRadius:'50%',background:emp.color,display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',fontWeight:800,fontSize:16,flexShrink:0}}>
+                      {emp.name.charAt(0).toUpperCase()}
+                    </div>
+                    {/* Name + position */}
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontWeight:700,fontSize:14,color:'#111',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{emp.name}</div>
+                      {emp.position&&<div style={{fontSize:11,color:'#9ca3af'}}>{emp.position}</div>}
+                    </div>
+                    {/* Grade badge */}
+                    <div style={{textAlign:'center',flexShrink:0}}>
+                      <div style={{background:emp.color,color:'#fff',fontWeight:900,fontSize:18,width:38,height:38,borderRadius:10,display:'flex',alignItems:'center',justifyContent:'center'}}>{emp.grade}</div>
+                      <div style={{fontSize:10,color:emp.color,fontWeight:700,marginTop:2}}>{emp.label}</div>
+                    </div>
+                    {/* Score bar */}
+                    <div style={{width:100,flexShrink:0}}>
+                      <div style={{fontSize:11,color:'#9ca3af',marginBottom:3,textAlign:'right'}}>{emp.score.toFixed(2)}/5.00</div>
+                      <div style={{height:6,background:'#f3f4f6',borderRadius:3}}>
+                        <div style={{height:'100%',width:`${(emp.score/5)*100}%`,background:emp.color,borderRadius:3}}/>
+                      </div>
+                    </div>
+                    {/* Avg pay */}
+                    <div style={{textAlign:'right',flexShrink:0,minWidth:90}}>
+                      <div style={{fontSize:13,fontWeight:700,color:'#111'}}>{emp.avgNetPay>0?fmt(emp.avgNetPay):'—'}</div>
+                      <div style={{fontSize:10,color:'#9ca3af'}}>avg net pay</div>
+                    </div>
+                    {/* Warning badge */}
+                    {emp.warns.length>0&&<div style={{background:'#fee2e2',color:'#dc2626',borderRadius:8,padding:'2px 8px',fontSize:11,fontWeight:700,flexShrink:0}}>
+                      ⚠️ {emp.warns.length} warning{emp.warns.length>1?'s':''}
+                    </div>}
+                    {/* Expand chevron */}
+                    <div style={{fontSize:12,color:'#9ca3af',flexShrink:0}}>{isOpen?'▲':'▼'}</div>
+                  </div>
+
+                  {/* Expanded detail */}
+                  {isOpen&&<div style={{borderTop:'1px solid #f3f4f6',padding:'16px 18px',background:'#fafafa'}}>
+                    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:16}}>
+
+                      {/* Evaluation breakdown */}
+                      <div>
+                        <div style={{fontSize:12,fontWeight:700,color:'#374151',marginBottom:8}}>📋 Evaluation Breakdown</div>
+                        {emp.latestEval?<>
+                          {[['Punctuality','punctuality'],['Attitude','attitude'],['Performance','performance'],['Appearance','appearance'],['Teamwork','teamwork']].map(([label,key])=>(
+                            <div key={key} style={{display:'flex',alignItems:'center',gap:8,marginBottom:5}}>
+                              <span style={{fontSize:11,color:'#6b7280',width:80,flexShrink:0}}>{label}</span>
+                              <div style={{flex:1,height:5,background:'#e5e7eb',borderRadius:3}}>
+                                <div style={{height:'100%',width:`${((emp.latestEval[key]||0)/5)*100}%`,background:PRIMARY,borderRadius:3}}/>
+                              </div>
+                              <span style={{fontSize:11,fontWeight:700,color:'#111',width:24,textAlign:'right'}}>{emp.latestEval[key]||0}</span>
+                            </div>
+                          ))}
+                          <div style={{fontSize:10,color:'#9ca3af',marginTop:6}}>Last eval: {new Date(emp.latestEval.eval_date).toLocaleDateString('en-ZA',{day:'numeric',month:'short',year:'numeric'})}</div>
+                        </>:<div style={{fontSize:12,color:'#9ca3af',fontStyle:'italic'}}>No evaluations recorded</div>}
+                      </div>
+
+                      {/* Positive remarks */}
+                      <div>
+                        <div style={{fontSize:12,fontWeight:700,color:'#374151',marginBottom:8}}>✅ Positive Remarks</div>
+                        {emp.positiveRemarks.length>0
+                          ?emp.positiveRemarks.slice(0,3).map((r:any,i:number)=>(
+                              <div key={i} style={{background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:8,padding:'6px 10px',marginBottom:6}}>
+                                <div style={{fontSize:11,color:'#166534',fontStyle:'italic'}}>"{r.note}"</div>
+                                <div style={{fontSize:10,color:'#9ca3af',marginTop:3}}>{new Date(r.date).toLocaleDateString('en-ZA',{day:'numeric',month:'short',year:'numeric'})} · Score {r.score.toFixed(1)}/5</div>
+                              </div>
+                            ))
+                          :<div style={{fontSize:12,color:'#9ca3af',fontStyle:'italic'}}>No positive remarks yet — add notes in the evaluation to record commendations</div>}
+                      </div>
+
+                      {/* Concerns + warnings */}
+                      <div>
+                        <div style={{fontSize:12,fontWeight:700,color:'#374151',marginBottom:8}}>⚠️ Concerns & Warnings</div>
+                        {emp.concerns.length>0
+                          ?emp.concerns.map((c:string,i:number)=>(
+                              <div key={i} style={{background:'#fff5f5',border:'1px solid #fecaca',borderRadius:8,padding:'6px 10px',marginBottom:6}}>
+                                <div style={{fontSize:11,color:'#991b1b'}}>{c}</div>
+                              </div>
+                            ))
+                          :<div style={{fontSize:12,color:'#16a34a',fontWeight:600}}>✓ No concerns</div>}
+                        {emp.warns.length>0&&<>
+                          <div style={{fontSize:11,fontWeight:700,color:'#374151',marginTop:10,marginBottom:4}}>Warning history</div>
+                          {emp.warns.map((w:any,i:number)=>(
+                            <div key={i} style={{fontSize:11,color:'#6b7280',padding:'3px 0',borderBottom:'1px solid #f3f4f6'}}>
+                              <span style={{fontWeight:700,color:'#dc2626'}}>{w.warning_type}</span> — {w.reason} <span style={{color:'#9ca3af'}}>({new Date(w.incident_date).toLocaleDateString('en-ZA',{day:'numeric',month:'short',year:'numeric'})})</span>
+                            </div>
+                          ))}
+                        </>}
+                      </div>
+                    </div>
+
+                    {/* Pay stats */}
+                    <div style={{display:'flex',gap:16,marginTop:14,paddingTop:14,borderTop:'1px solid #e5e7eb'}}>
+                      <div style={{textAlign:'center'}}>
+                        <div style={{fontSize:11,color:'#9ca3af'}}>Avg Net Pay (6 mo)</div>
+                        <div style={{fontSize:14,fontWeight:700,color:'#111'}}>{emp.avgNetPay>0?fmt(emp.avgNetPay):'—'}</div>
+                      </div>
+                      <div style={{textAlign:'center'}}>
+                        <div style={{fontSize:11,color:'#9ca3af'}}>This Month Paid</div>
+                        <div style={{fontSize:14,fontWeight:700,color:'#111'}}>{emp.thisPay!=null?fmt(emp.thisPay):'Not paid'}</div>
+                      </div>
+                      <div style={{textAlign:'center'}}>
+                        <div style={{fontSize:11,color:'#9ca3af'}}>Shifts This Month</div>
+                        <div style={{fontSize:14,fontWeight:700,color:'#111'}}>{emp.attend.length}</div>
+                      </div>
+                      <div style={{textAlign:'center'}}>
+                        <div style={{fontSize:11,color:'#9ca3af'}}>Late Arrivals</div>
+                        <div style={{fontSize:14,fontWeight:700,color:emp.lateCount>0?'#d97706':'#16a34a'}}>{emp.lateCount} ({Math.round(emp.lateRate*100)}%)</div>
+                      </div>
+                      <div style={{textAlign:'center'}}>
+                        <div style={{fontSize:11,color:'#9ca3af'}}>Evaluations</div>
+                        <div style={{fontSize:14,fontWeight:700,color:'#111'}}>{emp.evalCount}</div>
+                      </div>
+                    </div>
+                  </div>}
+                </div>
+              })
+            }
+            {empData.filter((e:any)=>empFilter==='all'?true:empFilter==='concerns'?e.concerns.length>0:e.evalDue).length===0&&
+              <div style={{...card,textAlign:'center',color:'#9ca3af',padding:32}}>
+                {empFilter==='concerns'?'No concerns — great team performance! 🎉':empFilter==='evaldue'?'All evaluations are up to date ✓':'No employee data yet'}
+              </div>
+            }
+          </div>
         </div>}
       </>}
     </div>
