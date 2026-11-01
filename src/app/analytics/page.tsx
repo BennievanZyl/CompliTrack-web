@@ -322,7 +322,7 @@ export default function AnalyticsPage(){
     if(!storeId){console.log('[empAnalytics] no storeId, aborting');return[]}
     // Step 1: get employees
     console.log('[empAnalytics] fetching employees, storeId=',storeId,'month=',currentMonth)
-    const{data:emps,error:empErr}=await supabase.from('employees').select('id,full_name,position').eq('store_id',storeId).eq('is_active',true).order('full_name')
+    const{data:emps,error:empErr}=await supabase.from('employees').select('id,full_name,role').eq('store_id',storeId).eq('is_active',true).order('full_name')
     if(empErr)console.error('[empAnalytics] employees error',empErr)
     if(!emps||!emps.length){console.log('[empAnalytics] no employees found');return[]}
     console.log('[empAnalytics] found',emps.length,'employees')
@@ -372,7 +372,7 @@ export default function AnalyticsPage(){
         if(e.attitude<=2)concerns.push('Attitude flagged in last evaluation')
       }
       return{
-        id:emp.id,name:emp.full_name,position:emp.position||null,
+        id:emp.id,name:emp.full_name,position:emp.role||null,
         ...gradeInfo,
         evalCount:evals.length,
         latestEval:evals.length>0?evals[0]:null,
