@@ -318,22 +318,28 @@ export default function AnalyticsPage(){
     }
   }
 
-  async function fetchEmployeeAnalytics(){
-    if(!STORE_ID)return[]
+  async function fetchEmployeeAnalytics(storeId:string,currentMonth:string){
+    if(!storeId){console.log('[empAnalytics] no storeId, aborting');return[]}
     // Step 1: get employees
-    const{data:emps}=await supabase.from('employees').select('id,full_name,position').eq('store_id',STORE_ID).eq('is_active',true).order('full_name')
-    if(!emps||!emps.length)return[]
+    console.log('[empAnalytics] fetching employees, storeId=',storeId,'month=',currentMonth)
+    const{data:emps,error:empErr}=await supabase.from('employees').select('id,full_name,position').eq('store_id',storeId).eq('is_active',true).order('full_name')
+    if(empErr)console.error('[empAnalytics] employees error',empErr)
+    if(!emps||!emps.length){console.log('[empAnalytics] no employees found');return[]}
+    console.log('[empAnalytics] found',emps.length,'employees')
     const ids=emps.map((e:any)=>e.id)
 
     // Step 2: parallel fetch of all employee data
+    const[s,e]=monthRange(currentMonth)
+    const sixMonthsAgo=(()=>{const d=new Date();d.setMonth(d.getMonth()-6);return d.toISOString().slice(0,7)})()
     const[evalsRes,warnsRes,wageRes,attendRes]=await Promise.all([
-      supabase.from('employee_evaluations').select('*').eq('store_id',STORE_ID).in('employee_id',ids).order('eval_date',{ascending:false}),
-      supabase.from('employee_warnings').select('*').eq('store_id',STORE_ID).in('employee_id',ids).order('incident_date',{ascending:false}),
+      supabase.from('employee_evaluations').select('*').eq('store_id',storeId).in('employee_id',ids).order('eval_date',{ascending:false}),
+      supabase.from('employee_warnings').select('*').eq('store_id',storeId).in('employee_id',ids).order('incident_date',{ascending:false}),
       // Last 6 months of wage_payments for avg pay
-      supabase.from('wage_payments').select('employee_id,net_pay,gross_pay,period').eq('store_id',STORE_ID).in('employee_id',ids).gte('period',(() => { const d=new Date(); d.setMonth(d.getMonth()-6); return d.toISOString().slice(0,7) })()),
+      supabase.from('wage_payments').select('employee_id,net_pay,gross_pay,period').eq('store_id',storeId).in('employee_id',ids).gte('period',sixMonthsAgo),
       // Attendance this month (selected period)
-      supabase.from('attendance').select('employee_id,is_late,work_date').in('employee_id',ids).gte('work_date',monthRange(month)[0]).lte('work_date',monthRange(month)[1]),
+      supabase.from('attendance').select('employee_id,is_late,work_date').in('employee_id',ids).gte('work_date',s).lte('work_date',e),
     ])
+    console.log('[empAnalytics] evals:',evalsRes.data?.length,'warns:',warnsRes.data?.length,'wages:',wageRes.data?.length,'attend:',attendRes.data?.length)
     const allEvals=evalsRes.data||[]
     const allWarns=warnsRes.data||[]
     const allWage=wageRes.data||[]
@@ -348,8 +354,7 @@ export default function AnalyticsPage(){
       // Average net pay over recorded months
       const avgNetPay=wages.length>0?wages.reduce((s:number,w:any)=>s+Number(w.net_pay||0),0)/wages.length:0
       // Pay for selected month
-      const[ym]=monthRange(month)
-      const selectedPeriod=month
+      const selectedPeriod=currentMonth
       const thisPay=wages.find((w:any)=>w.period===selectedPeriod)
       // Positive remarks: eval notes where overall_score >= 4
       const positiveRemarks=evals.filter((e:any)=>e.overall_score>=4&&e.notes).map((e:any)=>({date:e.eval_date,note:e.notes,score:e.overall_score}))
@@ -390,7 +395,7 @@ export default function AnalyticsPage(){
     if(view==='compare'){const[cs,ce]=monthRange(compareMonth);setCompareData(await fetchAnalytics(cs,ce))}
     setLoading(false)
     // Employee analytics runs after — never blocks the main P&L load
-    try{const empD=await fetchEmployeeAnalytics();setEmpData(empD||[])}catch(e){console.error('empAnalytics error',e)}
+    try{const empD=await fetchEmployeeAnalytics(STORE_ID,month);setEmpData(empD||[])}catch(e){console.error('empAnalytics error',e)}
   },[month,view,compareMonth,STORE_ID])
 
   useEffect(()=>{load()},[load])
