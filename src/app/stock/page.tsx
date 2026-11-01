@@ -331,6 +331,31 @@ export default function StockPage() {
     await supabase.from('stock_count_lines').update({ actual_qty: qty }).eq('id', lineId)
   }
 
+  async function syncCountSections() {
+    if (!activeCount) return
+    setSaving(true)
+    // Find lines with no section_id where the item now has sections assigned
+    const unsectionedLines = countLines.filter(l => !l.section_id)
+    const toExpand = unsectionedLines.filter(l => (itemSections[l.stock_item_id] || []).length > 0)
+    if (toExpand.length === 0) { setSaving(false); return }
+    // Delete those bare lines and recreate with per-section lines
+    const deleteIds = toExpand.map(l => l.id)
+    await supabase.from('stock_count_lines').delete().in('id', deleteIds)
+    const newLines: { stock_count_id: string; stock_item_id: string; expected_qty: number; actual_qty: number; unit_cost: number; section_id: string }[] = []
+    for (const l of toExpand) {
+      const sids = itemSections[l.stock_item_id] || []
+      for (const sid of sids) {
+        newLines.push({ stock_count_id: activeCount.id, stock_item_id: l.stock_item_id, expected_qty: l.expected_qty, actual_qty: 0, unit_cost: l.unit_cost, section_id: sid })
+      }
+    }
+    await supabase.from('stock_count_lines').insert(newLines)
+    // Reload lines
+    const { data: lines } = await supabase.from('stock_count_lines').select('*').eq('stock_count_id', activeCount.id)
+    setCountLines(lines || [])
+    setCountInputs({})
+    setSaving(false)
+  }
+
   async function completeCount() {
     if (!activeCount) return
     await supabase.from('stock_counts').update({ status: 'completed' }).eq('id', activeCount.id)
@@ -796,6 +821,9 @@ export default function StockPage() {
                     </div>
                     <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
                       {!viewMode && <button onClick={() => setShowAIImport(true)} style={{ padding: '8px 16px', background: '#7c3aed', color: 'white', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>🤖 AI Import</button>}
+                      {!viewMode && sections.length > 0 && countLines.some(l => !l.section_id && (itemSections[l.stock_item_id] || []).length > 0) && (
+                        <button onClick={syncCountSections} disabled={saving} style={{ padding: '8px 16px', background: '#0ea5e9', color: 'white', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>🔄 Sync Sections</button>
+                      )}
                       <button onClick={printStockSheet} style={{ padding: '8px 16px', background: '#f0f4f0', color: '#1a5c38', border: '1.5px solid #d1fae5', borderRadius: '10px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>🖨 Print Sheet</button>
                       <button onClick={() => { setActiveCount(null); setCountLines([]); setViewMode(false); setActiveSection(null); if (!viewMode) loadAll() }} style={{ padding: '8px 16px', background: viewMode ? '#6b7280' : '#f59e0b', color: 'white', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>{viewMode ? '✕ Close' : '💾 Save & Close'}</button>
                       {!viewMode && <button onClick={completeCount} style={{ padding: '8px 16px', background: '#1a5c38', color: 'white', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>✅ Finalise</button>}
