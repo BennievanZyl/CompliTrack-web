@@ -385,11 +385,12 @@ export default function AnalyticsPage(){
     if(!STORE_ID) return
     setLoading(true)
     const[s,e]=monthRange(month)
-    const[d,empD]=await Promise.all([fetchAnalytics(s,e),fetchEmployeeAnalytics()])
+    const d=await fetchAnalytics(s,e)
     setData(d)
-    setEmpData(empD)
     if(view==='compare'){const[cs,ce]=monthRange(compareMonth);setCompareData(await fetchAnalytics(cs,ce))}
     setLoading(false)
+    // Employee analytics runs after — never blocks the main P&L load
+    try{const empD=await fetchEmployeeAnalytics();setEmpData(empD||[])}catch(e){console.error('empAnalytics error',e)}
   },[month,view,compareMonth,STORE_ID])
 
   useEffect(()=>{load()},[load])
@@ -637,7 +638,7 @@ export default function AnalyticsPage(){
         </div>}
 
         {/* ── EMPLOYEE PERFORMANCE ── */}
-        {empData.length>0&&<div style={{marginTop:24}}>
+        {<div style={{marginTop:24}}>
           <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14}}>
             <div>
               <div style={{fontSize:18,fontWeight:800,color:'#111'}}>👥 Employee Performance</div>
