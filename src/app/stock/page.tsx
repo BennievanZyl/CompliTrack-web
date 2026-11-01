@@ -10,7 +10,7 @@ type StockCategory = { id: string; name: string; color: string; sort_order: numb
 type StockItem = { id: string; category: string | null; name: string; description: string; unit: string; cost_price: number; price: number; par_level: number; current_qty: number; is_active: boolean; sort_order: number; supplier: string | null; on_daily_sheet: boolean; is_catch_weight: boolean; kg_price: number; avg_weight_kg: number; parent_item_id: string | null; portion_size: number | null; is_food_cost: boolean }
 type StockAdjustment = { id: string; store_id: string; stock_item_id: string; item_name: string; qty_before: number; qty_after: number; adjustment: number; unit: string; reason: string; notes: string; created_at: string }
 type InvoiceColumn = { name: string; maps_to: string | null }
-type StockSupplier = { id: string; name: string; contact_name: string | null; phone: string | null; email: string | null; order_day: string | null; notes: string | null; payment_terms_days: number | null; is_active: boolean; sort_order: number; invoice_columns: InvoiceColumn[] | null; invoice_vat_included: boolean | null; delivers_stock: boolean }
+type StockSupplier = { id: string; name: string; contact_name: string | null; phone: string | null; email: string | null; order_day: string | null; notes: string | null; payment_terms_days: number | null; is_active: boolean; sort_order: number; invoice_columns: InvoiceColumn[] | null; invoice_vat_included: boolean | null; delivers_stock: boolean; is_non_vat: boolean }
 const MAPS_TO_OPTIONS = [
   { value: '', label: '— ignore this column —' },
   { value: 'description', label: 'Item Description' },
@@ -108,7 +108,7 @@ export default function StockPage() {
   const [suppliers, setSuppliers] = useState<StockSupplier[]>([])
   const [showSupplierForm, setShowSupplierForm] = useState(false)
   const [editSupplier, setEditSupplier] = useState<StockSupplier | null>(null)
-  const [supplierForm, setSupplierForm] = useState({ name: '', contact_name: '', phone: '', email: '', order_day: '', notes: '', payment_terms_days: '7', delivers_stock: true })
+  const [supplierForm, setSupplierForm] = useState({ name: '', contact_name: '', phone: '', email: '', order_day: '', notes: '', payment_terms_days: '7', delivers_stock: true, is_non_vat: false })
   const [invoiceColumns, setInvoiceColumns] = useState<InvoiceColumn[]>([])
   const [invoiceVatIncluded, setInvoiceVatIncluded] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -234,7 +234,7 @@ export default function StockPage() {
       await supabase.from('stock_suppliers').insert(payload)
     }
     setShowSupplierForm(false); setEditSupplier(null)
-    setSupplierForm({ name: '', contact_name: '', phone: '', email: '', order_day: '', notes: '', payment_terms_days: '7', delivers_stock: true }); setInvoiceColumns([]); setInvoiceVatIncluded(true)
+    setSupplierForm({ name: '', contact_name: '', phone: '', email: '', order_day: '', notes: '', payment_terms_days: '7', delivers_stock: true, is_non_vat: false }); setInvoiceColumns([]); setInvoiceVatIncluded(true)
     setSaving(false); await loadAll()
   }
 
@@ -1459,7 +1459,7 @@ export default function StockPage() {
                   <div style={{ fontSize: '18px', fontWeight: 800, color: '#111' }}>Suppliers</div>
                   <div style={{ fontSize: '13px', color: '#9ca3af' }}>Manage your suppliers — used across stock items, orders and counts</div>
                 </div>
-                <button onClick={() => { setEditSupplier(null); setSupplierForm({ name: '', contact_name: '', phone: '', email: '', order_day: '', notes: '', payment_terms_days: '7', delivers_stock: true }); setInvoiceColumns([]); setInvoiceVatIncluded(true); setShowSupplierForm(true) }}
+                <button onClick={() => { setEditSupplier(null); setSupplierForm({ name: '', contact_name: '', phone: '', email: '', order_day: '', notes: '', payment_terms_days: '7', delivers_stock: true, is_non_vat: false }); setInvoiceColumns([]); setInvoiceVatIncluded(true); setShowSupplierForm(true) }}
                   style={{ padding: '10px 18px', background: '#1a5c38', color: 'white', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: 800, cursor: 'pointer' }}>+ Add Supplier</button>
               </div>
               {suppliers.length === 0 ? (
@@ -1485,7 +1485,7 @@ export default function StockPage() {
                       </div>
                       <div style={{ fontSize: '12px', color: '#9ca3af' }}>{items.filter(i => i.supplier === s.name).length} items</div>
                       <div style={{ display: 'flex', gap: '8px' }}>
-                        <button onClick={() => { setEditSupplier(s); setSupplierForm({ name: s.name, contact_name: s.contact_name||'', phone: s.phone||'', email: s.email||'', order_day: s.order_day||'', notes: s.notes||'', payment_terms_days: String(s.payment_terms_days ?? 7) }); setInvoiceColumns(s.invoice_columns || []); setInvoiceVatIncluded(s.invoice_vat_included !== false); setSupplierForm(f => ({ ...f, delivers_stock: s.delivers_stock !== false })); setShowSupplierForm(true) }}
+                        <button onClick={() => { setEditSupplier(s); setSupplierForm({ name: s.name, contact_name: s.contact_name||'', phone: s.phone||'', email: s.email||'', order_day: s.order_day||'', notes: s.notes||'', payment_terms_days: String(s.payment_terms_days ?? 7), delivers_stock: s.delivers_stock !== false, is_non_vat: s.is_non_vat || false }); setInvoiceColumns(s.invoice_columns || []); setInvoiceVatIncluded(s.invoice_vat_included !== false); setShowSupplierForm(true) }}
                           style={{ background: '#eff6ff', color: '#2563eb', border: 'none', borderRadius: '8px', padding: '6px 12px', cursor: 'pointer', fontSize: '12px', fontWeight: 600 }}>Edit</button>
                         <button onClick={() => deleteSupplier(s.id)}
                           style={{ background: '#fef2f2', color: '#dc2626', border: 'none', borderRadius: '8px', padding: '6px 12px', cursor: 'pointer', fontSize: '12px', fontWeight: 600 }}>Remove</button>
@@ -2107,6 +2107,18 @@ export default function StockPage() {
                 {supplierForm.delivers_stock
                   ? 'Submitting a bill from this supplier will open the Receive Goods screen to update your stock quantities and prices.'
                   : 'Bills from this supplier will be submitted without a GRV — no stock is received. Use this for rent, software, insurance, bank charges, etc.'}
+              </div>
+            </label>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, padding: '14px 16px', background: supplierForm.is_non_vat ? '#fef2f2' : '#f9fafb', borderRadius: 10, border: `1.5px solid ${supplierForm.is_non_vat ? '#fecaca' : '#e5e7eb'}` }}>
+            <input type="checkbox" id="is_non_vat" checked={supplierForm.is_non_vat} onChange={e => setSupplierForm(f => ({ ...f, is_non_vat: e.target.checked }))} style={{ marginTop: 3, width: 16, height: 16, cursor: 'pointer', accentColor: '#dc2626' }} />
+            <label htmlFor="is_non_vat" style={{ cursor: 'pointer', flex: 1 }}>
+              <div style={{ fontWeight: 700, fontSize: 14, color: supplierForm.is_non_vat ? '#dc2626' : '#111', marginBottom: 3 }}>⊘ Non-VAT supplier</div>
+              <div style={{ fontSize: 12, color: '#6b7280', lineHeight: 1.4 }}>
+                {supplierForm.is_non_vat
+                  ? 'VAT will auto-zero on all invoice lines from this supplier (e.g. vegetable market, informal traders).'
+                  : 'Tick this if this supplier never charges VAT — all their invoice lines will default to zero VAT.'}
               </div>
             </label>
           </div>

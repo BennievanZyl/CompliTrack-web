@@ -113,8 +113,8 @@ export default function FinancesPage() {
   const [fcOverrideForm, setFcOverrideForm] = useState({ value: '', reason: '' })
   const [fcOverrideCountThisQuarter, setFcOverrideCountThisQuarter] = useState(0)
 
-  const [categories, setCategories] = useState<{id:string;name:string;key:string;colour:string}[]>([])
-  const [suppliers, setSuppliers] = useState<{id:string;name:string;payment_terms_days:number|null;invoice_columns:{name:string;maps_to:string|null}[]|null;invoice_vat_included:boolean|null;delivers_stock:boolean}[]>([])
+  const [categories, setCategories] = useState<{id:string;name:string;key:string;colour:string;is_non_vat?:boolean}[]>([])
+  const [suppliers, setSuppliers] = useState<{id:string;name:string;payment_terms_days:number|null;invoice_columns:{name:string;maps_to:string|null}[]|null;invoice_vat_included:boolean|null;delivers_stock:boolean;is_non_vat?:boolean}[]>([])
   const [cashUps, setCashUps] = useState<CashUp[]>([])
   const [invoices, setInvoices] = useState<Invoice[]>([])
   const [quickExp, setQuickExp] = useState<QuickExpense[]>([])
@@ -139,10 +139,10 @@ export default function FinancesPage() {
 
   // Category manager state
   const [showQuickCat, setShowQuickCat] = useState(false)
-  const [quickCatForm, setQuickCatForm] = useState({ name: '', colour: '#10b981' })
+  const [quickCatForm, setQuickCatForm] = useState({ name: '', colour: '#10b981', is_non_vat: false })
   const [showCatManager, setShowCatManager] = useState(false)
   const [editingCat, setEditingCat] = useState<any>(null)
-  const [catEditForm, setCatEditForm] = useState({ name: '', colour: '#10b981' })
+  const [catEditForm, setCatEditForm] = useState({ name: '', colour: '#10b981', is_non_vat: false })
   const [savingCat, setSavingCat] = useState(false)
 
   // Invoice form state
@@ -195,11 +195,25 @@ export default function FinancesPage() {
     const key = quickCatForm.name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')
     await supabase.from('expense_categories').insert({
       organisation_id: ORG_ID, name: quickCatForm.name, key,
-      colour: quickCatForm.colour, is_active: true, sort_order: categories.length + 1
+      colour: quickCatForm.colour, is_active: true, sort_order: categories.length + 1,
+      is_non_vat: quickCatForm.is_non_vat
     })
-    setQuickCatForm({ name: '', colour: '#10b981' })
+    setQuickCatForm({ name: '', colour: '#10b981', is_non_vat: false })
     setShowQuickCat(false)
     setSavingCat(false)
+    await load()
+  }
+
+  async function updateCategoryInDB(cat: any) {
+    setSavingCat(true)
+    await supabase.from('expense_categories').update({ name: catEditForm.name, colour: catEditForm.colour, is_non_vat: catEditForm.is_non_vat }).eq('id', cat.id)
+    setEditingCat(null)
+    setSavingCat(false)
+    await load()
+  }
+
+  async function archiveCategoryInDB(id: string) {
+    await supabase.from('expense_categories').update({ is_active: false }).eq('id', id)
     await load()
   }
 
@@ -224,8 +238,8 @@ export default function FinancesPage() {
         .eq('store_id', STORE_ID)
         .gte('invoice_date', monthStart).lte('invoice_date', monthEnd)
         .order('invoice_date', { ascending: false }),
-      supabase.from('expense_categories').select('id, name, key, colour, sort_order').eq('organisation_id', ORG_ID).eq('is_active', true).order('sort_order'),
-      supabase.from('stock_suppliers').select('id, name, payment_terms_days, invoice_columns, invoice_vat_included, delivers_stock').eq('store_id', STORE_ID).eq('is_active', true).order('sort_order'),
+      supabase.from('expense_categories').select('id, name, key, colour, sort_order, is_non_vat').eq('organisation_id', ORG_ID).eq('is_active', true).order('sort_order'),
+      supabase.from('stock_suppliers').select('id, name, payment_terms_days, invoice_columns, invoice_vat_included, delivers_stock, is_non_vat').eq('store_id', STORE_ID).eq('is_active', true).order('sort_order'),
       supabase.from('expenses')
         .select('*').eq('store_id', STORE_ID)
         .gte('expense_date', monthStart).lte('expense_date', monthEnd)
@@ -1359,6 +1373,10 @@ export default function FinancesPage() {
                         const name = e.target.value === '_other' ? '' : e.target.value
                         const sup = suppliers.find(s => s.name === name)
                         setInvForm(f => ({ ...f, supplier: name, due_date: sup && f.invoice_date ? addDays(f.invoice_date, sup.payment_terms_days ?? 7) : f.due_date }))
+                        // Auto-apply zero VAT to all lines when non-VAT supplier selected
+                        if (sup?.is_non_vat) {
+                          setInvLines(ls => ls.map(l => ({ ...l, zero_vat: true, vat_amount: 0 })))
+                        }
                       }} value={suppliers.some(s => s.name === invForm.supplier) ? invForm.supplier : (invForm.supplier ? '_other' : '')} style={inp}>
                         <option value="">{'— Select Supplier —'}</option>
                         {suppliers.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
@@ -1441,7 +1459,15 @@ export default function FinancesPage() {
                                 <div style={{ marginBottom: 8 }}>
                                 <div style={{ display: 'grid', gridTemplateColumns: gridCols, gap: 8, alignItems: 'center' }}>
                                   <div>
-                                    <select value={line.category_key} onChange={e => updateLine(i, 'category_key', e.target.value)} style={{ ...inp, padding: '8px 10px' }}>
+                                    <select value={line.category_key} onChange={e => {
+                                      const catKey = e.target.value
+                                      updateLine(i, 'category_key', catKey)
+                                      // Auto-apply zero VAT when non-VAT category selected
+                                      const cat = categories.find(c => c.key === catKey)
+                                      if (cat?.is_non_vat && !line.zero_vat) {
+                                        setTimeout(() => updateLine(i, 'zero_vat' as any, true), 0)
+                                      }
+                                    }} style={{ ...inp, padding: '8px 10px' }}>
                                       {sortedCategories.map(c => <option key={c.key} value={c.key}>{c.name}</option>)}
                                     </select>
                                     {i === 0 && <button type="button" onClick={() => setShowQuickCat(true)} style={{ fontSize: '11px', color: '#1a5c38', background: 'none', border: 'none', cursor: 'pointer', padding: '2px 0', fontWeight: '600' }}>+ New Category</button>}
@@ -1819,6 +1845,10 @@ export default function FinancesPage() {
                                 style={{ ...inp, flex: 1, fontSize: 13 }} />
                               <input type="color" value={catEditForm.colour} onChange={e => setCatEditForm(f => ({ ...f, colour: e.target.value }))}
                                 style={{ width: 36, height: 32, borderRadius: 6, border: 'none', cursor: 'pointer', padding: 2 }} />
+                              <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, whiteSpace: 'nowrap', cursor: 'pointer' }}>
+                                <input type="checkbox" checked={catEditForm.is_non_vat} onChange={e => setCatEditForm(f => ({ ...f, is_non_vat: e.target.checked }))} style={{ width: 14, height: 14, accentColor: '#dc2626' }} />
+                                <span style={{ color: '#dc2626', fontWeight: 600 }}>No VAT</span>
+                              </label>
                               <button style={btn(undefined, true)} onClick={() => updateCategoryInDB(cat)}>Save</button>
                               <button style={btn('#6b7280', true)} onClick={() => setEditingCat(null)}>Cancel</button>
                             </>
@@ -1826,8 +1856,9 @@ export default function FinancesPage() {
                             <>
                               <span style={{ width: 12, height: 12, borderRadius: '50%', background: cat.colour, display: 'inline-block', flexShrink: 0 }} />
                               <span style={{ flex: 1, fontWeight: 600, fontSize: 14 }}>{cat.name}</span>
+                              {cat.is_non_vat && <span style={{ fontSize: 10, fontWeight: 700, color: '#dc2626', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 4, padding: '1px 5px' }}>NO VAT</span>}
                               <span style={{ fontSize: 11, color: '#9ca3af', fontFamily: 'monospace' }}>{cat.key}</span>
-                              <button style={btn('#1a5c38', true)} onClick={() => { setEditingCat(cat); setCatEditForm({ name: cat.name, colour: cat.colour }) }}>Edit</button>
+                              <button style={btn('#1a5c38', true)} onClick={() => { setEditingCat(cat); setCatEditForm({ name: cat.name, colour: cat.colour, is_non_vat: cat.is_non_vat || false }) }}>Edit</button>
                               <button style={btn('#dc2626', true)} onClick={() => { if (confirm('Archive this category?')) archiveCategoryInDB(cat.id) }}>Archive</button>
                             </>
                           )}
@@ -1860,9 +1891,12 @@ export default function FinancesPage() {
                       <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Supplier (optional)</label>
                       <select value={qForm.supplier} onChange={e => setQForm((f: any) => ({ ...f, supplier: e.target.value }))} style={inp}>
                         <option value="">n/a Select supplier n/a</option>
-                        {suppliers.map((s: any) => <option key={s.id} value={s.name}>{s.name}</option>)}
+                        {suppliers.map((s: any) => <option key={s.id} value={s.name}>{s.is_non_vat ? '⊘ ' : ''}{s.name}</option>)}
                         <option value="other">Other</option>
                       </select>
+                      {suppliers.find((s: any) => s.name === qForm.supplier)?.is_non_vat && (
+                        <div style={{ fontSize: 12, color: '#dc2626', fontWeight: 600, marginTop: 4 }}>⊘ Non-VAT supplier — no VAT applicable</div>
+                      )}
                     </div>
                   </div>
 
@@ -1878,8 +1912,11 @@ export default function FinancesPage() {
                         <select value={line.category_key} onChange={e => setQForm((f: any) => {
                           const lines = [...f.lines]; lines[idx] = { ...lines[idx], category_key: e.target.value }; return { ...f, lines }
                         })} style={{ ...inp, fontSize: 13 }}>
-                          {sortedCategories.map((c: any) => <option key={c.key} value={c.key}>{c.name}</option>)}
+                          {sortedCategories.map((c: any) => <option key={c.key} value={c.key}>{c.is_non_vat ? '⊘ ' : ''}{c.name}</option>)}
                         </select>
+                        {categories.find(c => c.key === line.category_key)?.is_non_vat && (
+                          <div style={{ fontSize: 11, color: '#dc2626', fontWeight: 600, marginTop: 2 }}>⊘ Non-VAT</div>
+                        )}
                         <input type="text" placeholder="Description" value={line.description} onChange={e => setQForm((f: any) => {
                           const lines = [...f.lines]; lines[idx] = { ...lines[idx], description: e.target.value }; return { ...f, lines }
                         })} style={{ ...inp, fontSize: 13 }} />
@@ -2309,6 +2346,16 @@ export default function FinancesPage() {
                     <div key={c} onClick={() => setQuickCatForm(f => ({ ...f, colour: c }))}
                       style={{ width: '22px', height: '22px', borderRadius: '4px', background: c, cursor: 'pointer', border: quickCatForm.colour === c ? '2px solid #111' : '2px solid transparent' }} />
                   ))}
+                </div>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', background: quickCatForm.is_non_vat ? '#fef2f2' : '#f9fafb', borderRadius: 10, border: `1.5px solid ${quickCatForm.is_non_vat ? '#fecaca' : '#e5e7eb'}`, marginBottom: 20, cursor: 'pointer' }}
+                onClick={() => setQuickCatForm(f => ({ ...f, is_non_vat: !f.is_non_vat }))}>
+                <input type="checkbox" checked={quickCatForm.is_non_vat} readOnly style={{ width: 16, height: 16, accentColor: '#dc2626', cursor: 'pointer' }} />
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 14, color: quickCatForm.is_non_vat ? '#dc2626' : '#111' }}>⊘ Always Non-VAT</div>
+                  <div style={{ fontSize: 12, color: '#6b7280', lineHeight: 1.4, marginTop: 2 }}>
+                    {quickCatForm.is_non_vat ? 'VAT will auto-zero on invoice lines using this category (e.g. fuel, bank charges).' : 'Tick this if expenses in this category never attract VAT.'}
+                  </div>
                 </div>
               </div>
               <div style={{ display: 'flex', gap: '10px' }}>
