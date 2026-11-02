@@ -3,10 +3,18 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 
+const ALL_CARDS = [
+  { key: 'people',  href: '/people',  emoji: '👥', title: 'People & Attendance', desc: 'Staff profiles, clock-in records, leave & warnings', color: '#1a5c38' },
+  { key: 'payroll', href: '/wages',   emoji: '💰', title: 'Payroll & Wages',      desc: 'Hours worked, pay runs, advances & deductions',   color: '#2563eb' },
+  { key: 'reports', href: '/reports', emoji: '📋', title: 'HR Reports',           desc: 'Attendance, labour & payroll exports',             color: '#7c3aed' },
+  { key: 'devices', href: '/devices', emoji: '📱', title: 'Linked Devices',       desc: 'Link kiosk tablets for face clock-in/out',         color: '#0891b2' },
+]
+
 export default function HRPortalPage() {
   const router = useRouter()
   const [name, setName] = useState('')
   const [store, setStore] = useState('')
+  const [modules, setModules] = useState<Record<string, boolean> | null>(null)
 
   useEffect(() => {
     async function load() {
@@ -17,8 +25,10 @@ export default function HRPortalPage() {
       if (!profile || profile.role !== 'hr_admin') { router.push('/dashboard'); return }
       setName(profile.full_name ?? 'HR Admin')
       if (profile.store_id) {
-        const { data: s } = await supabase.from('stores').select('name').eq('id', profile.store_id).single()
+        const { data: s } = await supabase.from('stores')
+          .select('name, modules_enabled').eq('id', profile.store_id).single()
         setStore(s?.name ?? '')
+        setModules(s?.modules_enabled ?? null)
       }
     }
     load()
@@ -27,12 +37,11 @@ export default function HRPortalPage() {
   const now = new Date()
   const greeting = now.getHours() < 12 ? 'Good morning' : now.getHours() < 17 ? 'Good afternoon' : 'Good evening'
 
-  const cards = [
-    { href: '/people', emoji: '👥', title: 'People & Attendance', desc: 'Staff profiles, clock-in records, leave & warnings', color: '#1a5c38' },
-    { href: '/wages', emoji: '💰', title: 'Payroll & Wages', desc: 'Hours worked, pay runs, advances & deductions', color: '#2563eb' },
-    { href: '/reports', emoji: '📋', title: 'HR Reports', desc: 'Attendance, labour & payroll exports', color: '#7c3aed' },
-    { href: '/devices', emoji: '📱', title: 'Linked Devices', desc: 'Link kiosk tablets for face clock-in/out', color: '#0891b2' },
-  ]
+  // People & Attendance is always shown; other cards respect modules_enabled
+  // If modules is null (column doesn't exist yet / not linked), show everything
+  const cards = ALL_CARDS.filter(card =>
+    card.key === 'people' || modules === null || modules[card.key] !== false
+  )
 
   async function signOut() {
     await supabase.auth.signOut()

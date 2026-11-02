@@ -28,10 +28,13 @@ export default function PlatformAdminPage() {
   const [showNewClient, setShowNewClient] = useState(false)
   const [editClient, setEditClient] = useState<any | null>(null)
   const [saving, setSaving] = useState(false)
+  const [stores, setStores] = useState<any[]>([])
   const [form, setForm] = useState({
     client_name: '', contact_name: '', contact_phone: '',
     contact_email: '', industry: 'restaurant', monthly_fee: '',
-    payment_status: 'active', next_payment_date: '', notes: ''
+    payment_status: 'active', next_payment_date: '', notes: '',
+    store_id: '',
+    modules_enabled: { payroll: true, reports: true, devices: true } as Record<string, boolean>,
   })
 
   useEffect(() => {
@@ -42,12 +45,14 @@ export default function PlatformAdminPage() {
         .select('platform_admin').eq('id', user.id).single()
       if (!profile?.platform_admin) { router.push('/dashboard'); return }
 
-      const [{ data: c }, { data: l }] = await Promise.all([
+      const [{ data: c }, { data: l }, { data: s }] = await Promise.all([
         supabase.from('platform_clients').select('*').order('created_at', { ascending: false }),
         supabase.from('leads').select('*').order('created_at', { ascending: false }),
+        supabase.from('stores').select('id, name').order('name'),
       ])
       setClients(c || [])
       setLeads(l || [])
+      setStores(s || [])
       setLoading(false)
     }
     load()
@@ -55,6 +60,8 @@ export default function PlatformAdminPage() {
 
   function openEdit(client: any) {
     setEditClient(client)
+    // Load the linked store's modules if available
+    const linkedStore = client.store_id ? stores.find((s: any) => s.id === client.store_id) : null
     setForm({
       client_name: client.client_name || '',
       contact_name: client.contact_name || '',
@@ -65,6 +72,8 @@ export default function PlatformAdminPage() {
       payment_status: client.payment_status || 'active',
       next_payment_date: client.next_payment_date || '',
       notes: client.notes || '',
+      store_id: client.store_id || '',
+      modules_enabled: linkedStore?.modules_enabled ?? { payroll: true, reports: true, devices: true },
     })
     setShowNewClient(true)
     setActiveTab('clients')
@@ -72,19 +81,25 @@ export default function PlatformAdminPage() {
 
   function openNew() {
     setEditClient(null)
-    setForm({ client_name: '', contact_name: '', contact_phone: '', contact_email: '', industry: 'restaurant', monthly_fee: '', payment_status: 'active', next_payment_date: '', notes: '' })
+    setForm({ client_name: '', contact_name: '', contact_phone: '', contact_email: '', industry: 'restaurant', monthly_fee: '', payment_status: 'active', next_payment_date: '', notes: '', store_id: '', modules_enabled: { payroll: true, reports: true, devices: true } })
     setShowNewClient(true)
   }
 
   async function saveClient() {
     setSaving(true)
-    const payload = { ...form, monthly_fee: parseFloat(form.monthly_fee) || 0 }
+    const { store_id, modules_enabled, ...rest } = form
+    const payload = { ...rest, monthly_fee: parseFloat(form.monthly_fee) || 0, store_id: store_id || null }
     if (editClient) {
       await supabase.from('platform_clients').update(payload).eq('id', editClient.id)
       setClients(c => c.map(x => x.id === editClient.id ? { ...x, ...payload } : x))
     } else {
       const { data } = await supabase.from('platform_clients').insert(payload).select().single()
       if (data) setClients(c => [data, ...c])
+    }
+    // Save module toggles to the linked store
+    if (store_id) {
+      await supabase.from('stores').update({ modules_enabled }).eq('id', store_id)
+      setStores(prev => prev.map(s => s.id === store_id ? { ...s, modules_enabled } : s))
     }
     setShowNewClient(false)
     setSaving(false)
@@ -266,6 +281,45 @@ export default function PlatformAdminPage() {
                 <label style={label}>Notes</label>
                 <textarea style={{ ...inp, height: 80, resize: 'vertical' }} value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} placeholder="Any notes about this client..." />
               </div>
+
+              {/* Linked store + module toggles */}
+              <div style={{ gridColumn: '1/-1' }}>
+                <label style={label}>Linked Store (for module control)</label>
+                <select style={inp} value={form.store_id} onChange={e => {
+                  const sid = e.target.value
+                  const s = stores.find((x: any) => x.id === sid)
+                  setForm(f => ({ ...f, store_id: sid, modules_enabled: s?.modules_enabled ?? { payroll: true, reports: true, devices: true } }))
+                }}>
+                  <option value="">— Not linked —</option>
+                  {stores.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+              </div>
+
+              {form.store_id && (
+                <div style={{ gridColumn: '1/-1', background: '#f8faf8', borderRadius: 12, padding: 16, border: '1.5px solid #e5e7eb' }}>
+                  <div style={{ fontWeight: 700, fontSize: 13, color: '#374151', marginBottom: 12 }}>🧩 HR Portal Modules</div>
+                  <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 12 }}>People &amp; Attendance is always on. Toggle the rest:</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    {[
+                      { key: 'payroll', emoji: '💰', label: 'Payroll & Wages', desc: 'Hours worked, pay runs, advances & deductions' },
+                      { key: 'reports', emoji: '📋', label: 'HR Reports', desc: 'Attendance, labour & payroll exports' },
+                      { key: 'devices', emoji: '📱', label: 'Linked Devices', desc: 'Kiosk tablets for face clock-in/out' },
+                    ].map(mod => (
+                      <div key={mod.key} onClick={() => setForm(f => ({ ...f, modules_enabled: { ...f.modules_enabled, [mod.key]: !f.modules_enabled[mod.key] } }))}
+                        style={{ display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer', padding: '8px 12px', borderRadius: 10, background: form.modules_enabled[mod.key] ? '#f0fdf4' : '#fff', border: `1.5px solid ${form.modules_enabled[mod.key] ? '#bbf7d0' : '#e5e7eb'}`, transition: 'all 0.15s' }}>
+                        <div style={{ width: 36, height: 36, borderRadius: 8, background: form.modules_enabled[mod.key] ? '#1a5c38' : '#e5e7eb', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0, transition: 'all 0.15s' }}>{mod.emoji}</div>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontWeight: 700, fontSize: 13, color: '#111' }}>{mod.label}</div>
+                          <div style={{ fontSize: 12, color: '#6b7280' }}>{mod.desc}</div>
+                        </div>
+                        <div style={{ width: 40, height: 22, borderRadius: 11, background: form.modules_enabled[mod.key] ? '#1a5c38' : '#d1d5db', position: 'relative', transition: 'background 0.2s', flexShrink: 0 }}>
+                          <div style={{ position: 'absolute', top: 3, left: form.modules_enabled[mod.key] ? 21 : 3, width: 16, height: 16, borderRadius: '50%', background: '#fff', transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.2)' }} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
               <button onClick={() => setShowNewClient(false)} style={{ background: '#f3f4f6', color: '#374151', border: 'none', borderRadius: 12, padding: '12px 24px', cursor: 'pointer', fontWeight: 700 }}>Cancel</button>
