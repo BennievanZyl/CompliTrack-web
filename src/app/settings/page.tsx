@@ -596,7 +596,6 @@ export default function SettingsPage() {
                   { key: 'documents', label: '📁 Documents' },
                   { key: 'equipment', label: '🔧 Equipment' },
                   { key: 'settings', label: '⚙️ Settings' },
-                  { key: 'performance', label: '🏆 Performance' },
                 ]
 
                 async function togglePerm(cardKey: string) {
