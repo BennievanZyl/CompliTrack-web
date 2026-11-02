@@ -28,6 +28,7 @@ export default function PlatformAdminPage() {
   const [showNewClient, setShowNewClient] = useState(false)
   const [editClient, setEditClient] = useState<any | null>(null)
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
   const [stores, setStores] = useState<any[]>([])
   const [form, setForm] = useState({
     client_name: '', contact_name: '', contact_phone: '',
@@ -87,22 +88,69 @@ export default function PlatformAdminPage() {
 
   async function saveClient() {
     setSaving(true)
+    setSaveError(null)
+
     const { store_id, modules_enabled, ...rest } = form
-    const payload = { ...rest, monthly_fee: parseFloat(form.monthly_fee) || 0, store_id: store_id || null }
-    if (editClient) {
-      await supabase.from('platform_clients').update(payload).eq('id', editClient.id)
-      setClients(c => c.map(x => x.id === editClient.id ? { ...x, ...payload } : x))
-    } else {
-      const { data } = await supabase.from('platform_clients').insert(payload).select().single()
-      if (data) setClients(c => [data, ...c])
+    const basePayload = { ...rest, monthly_fee: parseFloat(form.monthly_fee) || 0 }
+
+    // Try with store_id first (needs migration); fall back to without if column missing
+    const payloads: any[] = store_id
+      ? [{ ...basePayload, store_id }, basePayload]
+      : [basePayload]
+
+    let success = false
+    let storeIdSaved = false
+
+    for (const payload of payloads) {
+      const hasStoreId = 'store_id' in payload
+      let err: any = null
+      let row: any = null
+
+      if (editClient) {
+        const r = await supabase.from('platform_clients').update(payload).eq('id', editClient.id)
+        err = r.error
+      } else {
+        const r = await supabase.from('platform_clients').insert(payload).select().single()
+        err = r.error; row = r.data
+      }
+
+      if (!err) {
+        success = true
+        storeIdSaved = hasStoreId
+        if (editClient) setClients(c => c.map(x => x.id === editClient.id ? { ...x, ...payload } : x))
+        else if (row) setClients(c => [row, ...c])
+        break
+      }
+
+      // If error is not about the store_id column, it's a real error — show and stop
+      if (!err.message?.toLowerCase().includes('store_id')) {
+        setSaveError('Error: ' + err.message)
+        setSaving(false)
+        return
+      }
+      // Otherwise try again without store_id (next iteration)
     }
-    // Save module toggles to the linked store
+
+    if (!success) {
+      setSaveError('Could not save client. Please try again.')
+      setSaving(false)
+      return
+    }
+
+    // Save module toggles to the linked store regardless
     if (store_id) {
-      await supabase.from('stores').update({ modules_enabled }).eq('id', store_id)
-      setStores(prev => prev.map(s => s.id === store_id ? { ...s, modules_enabled } : s))
+      const { error: storeErr } = await supabase.from('stores').update({ modules_enabled }).eq('id', store_id)
+      if (!storeErr) setStores(prev => prev.map(s => s.id === store_id ? { ...s, modules_enabled } : s))
     }
-    setShowNewClient(false)
+
     setSaving(false)
+    if (!storeIdSaved && store_id) {
+      // Client saved but store_id column not migrated yet — show note and close after delay
+      setSaveError('✅ Client saved! Run the SQL migration below to also persist the store link.')
+      setTimeout(() => { setShowNewClient(false); setSaveError(null) }, 3500)
+    } else {
+      setShowNewClient(false)
+    }
   }
 
   async function updateStatus(id: string, status: string) {
@@ -321,8 +369,13 @@ export default function PlatformAdminPage() {
                 </div>
               )}
             </div>
+            {saveError && (
+              <div style={{ background: saveError.startsWith('✅') ? '#f0fdf4' : '#fef2f2', color: saveError.startsWith('✅') ? '#15803d' : '#dc2626', border: `1.5px solid ${saveError.startsWith('✅') ? '#bbf7d0' : '#fecaca'}`, borderRadius: 10, padding: '10px 14px', marginBottom: 16, fontSize: 13, fontWeight: 600 }}>
+                {saveError}
+              </div>
+            )}
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-              <button onClick={() => setShowNewClient(false)} style={{ background: '#f3f4f6', color: '#374151', border: 'none', borderRadius: 12, padding: '12px 24px', cursor: 'pointer', fontWeight: 700 }}>Cancel</button>
+              <button onClick={() => { setShowNewClient(false); setSaveError(null) }} style={{ background: '#f3f4f6', color: '#374151', border: 'none', borderRadius: 12, padding: '12px 24px', cursor: 'pointer', fontWeight: 700 }}>Cancel</button>
               <button onClick={saveClient} disabled={saving || !form.client_name}
                 style={{ background: PRIMARY, color: '#fff', border: 'none', borderRadius: 12, padding: '12px 24px', cursor: 'pointer', fontWeight: 700, opacity: saving || !form.client_name ? 0.6 : 1 }}>
                 {saving ? 'Saving…' : editClient ? 'Save Changes' : 'Add Client'}
