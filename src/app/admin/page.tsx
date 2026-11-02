@@ -91,7 +91,7 @@ export default function PlatformAdminPage() {
     setSaveError(null)
 
     const { store_id, modules_enabled, ...rest } = form
-    const basePayload = { ...rest, monthly_fee: parseFloat(form.monthly_fee) || 0 }
+    const basePayload = { ...rest, monthly_fee: parseFloat(form.monthly_fee) || 0, next_payment_date: rest.next_payment_date || null }
 
     // Try with store_id first (requires SQL migration); fall back to without if column missing
     const payloads: any[] = store_id
