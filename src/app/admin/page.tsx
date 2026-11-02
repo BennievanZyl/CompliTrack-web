@@ -93,7 +93,7 @@ export default function PlatformAdminPage() {
     const { store_id, modules_enabled, ...rest } = form
     const basePayload = { ...rest, monthly_fee: parseFloat(form.monthly_fee) || 0 }
 
-    // Try with store_id first (needs migration); fall back to without if column missing
+    // Try with store_id first (requires SQL migration); fall back to without if column missing
     const payloads: any[] = store_id
       ? [{ ...basePayload, store_id }, basePayload]
       : [basePayload]
@@ -122,13 +122,13 @@ export default function PlatformAdminPage() {
         break
       }
 
-      // If error is not about the store_id column, it's a real error — show and stop
+      // Only retry (without store_id) if the error is specifically about that column
       if (!err.message?.toLowerCase().includes('store_id')) {
         setSaveError('Error: ' + err.message)
         setSaving(false)
         return
       }
-      // Otherwise try again without store_id (next iteration)
+      // Loop continues → try without store_id
     }
 
     if (!success) {
@@ -137,7 +137,7 @@ export default function PlatformAdminPage() {
       return
     }
 
-    // Save module toggles to the linked store regardless
+    // Save module toggles to the linked store regardless of store_id column
     if (store_id) {
       const { error: storeErr } = await supabase.from('stores').update({ modules_enabled }).eq('id', store_id)
       if (!storeErr) setStores(prev => prev.map(s => s.id === store_id ? { ...s, modules_enabled } : s))
@@ -145,8 +145,8 @@ export default function PlatformAdminPage() {
 
     setSaving(false)
     if (!storeIdSaved && store_id) {
-      // Client saved but store_id column not migrated yet — show note and close after delay
-      setSaveError('✅ Client saved! Run the SQL migration below to also persist the store link.')
+      // Saved, but store link couldn't be stored on the client record yet (needs migration)
+      setSaveError('✅ Client saved! Run the SQL migration to also persist the store link.')
       setTimeout(() => { setShowNewClient(false); setSaveError(null) }, 3500)
     } else {
       setShowNewClient(false)
