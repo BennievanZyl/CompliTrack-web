@@ -1171,10 +1171,10 @@ export default function PeoplePage() {
                               onClick={async () => {
                                 if (!confirm('Delete this attendance record?')) return;
                                 const { error } = await supabase.from('attendance').delete().eq('id', a.id);
-                                if (error) { alert('Could not delete: ' + error.message); return; }
-                                if (selectedEmployee) await loadEmployeeProfile(selectedEmployee);
+                                if (error) { setSaveError('Could not delete record: ' + error.message); return; }
+                                setAttendance(prev => prev.filter(r => r.id !== a.id));
                               }}
-                              style={{ fontSize: 12, fontWeight: 700, color: '#6b7280', background: '#f3f4f6', border: '1px solid #e5e7eb', borderRadius: 8, padding: '4px 10px', cursor: 'pointer', marginLeft: 4 }}
+                              style={{ fontSize: 12, fontWeight: 700, color: '#dc2626', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '4px 10px', cursor: 'pointer', marginLeft: 4 }}
                             >🗑 Del</button>
                           </div>
                         </div>
