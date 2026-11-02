@@ -122,6 +122,7 @@ export default function PerformancePage() {
   const [weekTrend, setWeekTrend] = useState<{ day: string; pct: number | null }[]>([])
   const [punctualityPct, setPunctualityPct] = useState<number | null>(null)
   const [shiftsCount, setShiftsCount] = useState(0)
+  const [staffStats, setStaffStats] = useState<{ name: string; role: string; shifts: number; punctualityPct: number | null; lastScore: number | null }[]>([])
 
   const loadData = useCallback(async () => {
     if (!STORE_ID) return
@@ -195,6 +196,30 @@ export default function PerformancePage() {
       const lateCount = attRows.filter(a => a.is_late).length
       setPunctualityPct(Math.round(((attRows.length - lateCount) / attRows.length) * 100))
       setShiftsCount(attRows.length)
+    }
+
+    /* ── individual staff stats ── */
+    const [empsRes, allAttRes, evalsRes] = await Promise.all([
+      supabase.from('employees').select('id, full_name, role').eq('store_id', STORE_ID).eq('is_active', true).order('full_name'),
+      supabase.from('attendance').select('employee_id, is_late').eq('store_id', STORE_ID).gte('work_date', monthStart).lte('work_date', todayStr),
+      supabase.from('employee_evaluations').select('employee_id, overall_score').eq('store_id', STORE_ID).order('eval_date', { ascending: false }),
+    ])
+    if (empsRes.data && empsRes.data.length > 0) {
+      const attByEmp = new Map<string, { total: number; late: number }>()
+      for (const a of (allAttRes.data || [])) {
+        const cur = attByEmp.get(a.employee_id) || { total: 0, late: 0 }
+        attByEmp.set(a.employee_id, { total: cur.total + 1, late: cur.late + (a.is_late ? 1 : 0) })
+      }
+      // Latest eval per employee
+      const evalByEmp = new Map<string, number>()
+      for (const e of (evalsRes.data || [])) {
+        if (!evalByEmp.has(e.employee_id)) evalByEmp.set(e.employee_id, e.overall_score)
+      }
+      setStaffStats(empsRes.data.map(emp => {
+        const att = attByEmp.get(emp.id)
+        const pct = att && att.total > 0 ? Math.round(((att.total - att.late) / att.total) * 100) : null
+        return { name: emp.full_name, role: emp.role, shifts: att?.total || 0, punctualityPct: pct, lastScore: evalByEmp.get(emp.id) ?? null }
+      }))
     }
 
     setLoading(false)
@@ -325,20 +350,65 @@ export default function PerformancePage() {
           )}
         </div>
 
+        {/* ── Individual staff performance ── */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+          <span style={{ fontSize: 18 }}>👁️</span>
+          <h2 style={{ fontSize: 17, fontWeight: 800, color: '#111', margin: 0 }}>Individual Performance This Month</h2>
+        </div>
+
+        {staffStats.length === 0 ? (
+          <div style={{ background: '#fff', borderRadius: 14, padding: '20px 24px', border: '1.5px solid #e8f0e8', color: '#9ca3af', fontSize: 13, textAlign: 'center', marginBottom: 16 }}>
+            No staff records found for this store.
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 16 }}>
+            {staffStats.map((s, i) => {
+              const good = s.punctualityPct !== null && s.punctualityPct >= 80
+              const bad = s.punctualityPct !== null && s.punctualityPct < 80
+              const pctColor = good ? '#16a34a' : bad ? '#dc2626' : '#9ca3af'
+              const scoreColor = s.lastScore === null ? '#9ca3af' : s.lastScore >= 4 ? '#16a34a' : s.lastScore >= 3 ? '#d97706' : '#dc2626'
+              return (
+                <div key={i} style={{ background: '#fff', borderRadius: 14, padding: '16px 20px', border: '1.5px solid #e8f0e8', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 14, fontWeight: 800, color: '#111', marginBottom: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</div>
+                    <div style={{ fontSize: 12, color: '#9ca3af', textTransform: 'capitalize' }}>{s.role} · {s.shifts} shift{s.shifts !== 1 ? 's' : ''} this month</div>
+                    {/* punctuality bar */}
+                    {s.shifts > 0 && (
+                      <div style={{ marginTop: 8 }}>
+                        <div style={{ height: 5, background: '#f0f0f0', borderRadius: 100, overflow: 'hidden' }}>
+                          <div style={{ height: '100%', width: `${s.punctualityPct ?? 0}%`, background: good ? '#22c55e' : bad ? '#ef4444' : '#e5e7eb', borderRadius: 100 }} />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6, flexShrink: 0 }}>
+                    <div style={{ fontSize: 20, fontWeight: 900, color: pctColor }}>
+                      {s.punctualityPct === null ? '—' : `${s.punctualityPct}%`}
+                    </div>
+                    {s.lastScore !== null && (
+                      <div style={{ fontSize: 11, fontWeight: 700, color: scoreColor, background: `${scoreColor}18`, borderRadius: 6, padding: '2px 8px' }}>
+                        ★ {s.lastScore.toFixed(1)}/5
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+
+        {/* monitoring notice */}
         <div style={{
           background: 'linear-gradient(135deg, #0a1f12 0%, #1a5c38 100%)',
           borderRadius: 16,
-          padding: '20px 24px',
+          padding: '18px 22px',
           display: 'flex',
-          gap: 16,
+          gap: 14,
           alignItems: 'flex-start',
         }}>
-          <span style={{ fontSize: 28, flexShrink: 0 }}>👁️</span>
-          <div>
-            <div style={{ fontSize: 15, fontWeight: 800, color: '#fff', marginBottom: 6 }}>Individual Performance is Tracked</div>
-            <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.75)', lineHeight: 1.6 }}>
-              Each team member's attendance, punctuality and compliance are monitored individually. Your manager reviews these in the Time &amp; Attendance and People modules. Regular performance evaluations are conducted to help every team member grow.
-            </div>
+          <span style={{ fontSize: 22, flexShrink: 0 }}>👁️</span>
+          <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.75)', lineHeight: 1.6 }}>
+            <strong style={{ color: '#fff' }}>Performance is tracked individually.</strong> Attendance, punctuality and evaluation scores are visible to your manager in the Time &amp; Attendance and People modules. Regular evaluations are conducted to help every team member grow.
           </div>
         </div>
 
