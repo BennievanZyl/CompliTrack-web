@@ -262,6 +262,7 @@ function DashboardContent() {
       badgeBg: '#fdecea',
     },
     { icon: <span style={{ fontSize: '26px' }}>⚙️</span>, iconBg: '#f8fafc', title: 'Settings', subtitle: 'Company, stores and checklist', href: '/settings' },
+    { icon: <span style={{ fontSize: '26px' }}>🏆</span>, iconBg: '#fefce8', title: 'Performance', subtitle: 'Store and staff performance overview', href: '/performance' },
   ]
 
   return (
