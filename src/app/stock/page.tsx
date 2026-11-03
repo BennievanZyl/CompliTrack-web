@@ -120,6 +120,7 @@ export default function StockPage() {
   const [itemSections, setItemSections] = useState<Record<string, string[]>>({}) // itemId → sectionId[]
   const [activeSection, setActiveSection] = useState<StockSection | null>(null) // null = All
   const [countSearch, setCountSearch] = useState<string>('')
+  const [sectionsSearch, setSectionsSearch] = useState<string>('')
   const [itemFormSections, setItemFormSections] = useState<string[]>([])
   const [showSectionManager, setShowSectionManager] = useState(false)
   const [sectionForm, setSectionForm] = useState({ name: '', color: '#1a5c38', icon: '📦' })
@@ -1774,15 +1775,33 @@ export default function StockPage() {
                         </div>
                       ))}
                     </div>
+                    {/* Search bar */}
+                    <div style={{ marginBottom: '4px' }}>
+                      <input
+                        type="text"
+                        value={sectionsSearch}
+                        onChange={e => setSectionsSearch(e.target.value)}
+                        placeholder="🔍 Search products..."
+                        style={{ width: '100%', padding: '9px 14px', border: '1.5px solid #d1d5db', borderRadius: '10px', fontSize: '14px', outline: 'none', boxSizing: 'border-box' as const }}
+                      />
+                    </div>
                     {/* One stable card per category — items never move */}
-                    {grouped.map(group => (
+                    {grouped.filter(group => {
+                      if (!sectionsSearch.trim()) return true
+                      const q = sectionsSearch.toLowerCase()
+                      return group.items.some(i => (i.description || i.name || '').toLowerCase().includes(q))
+                    }).map(group => {
+                      const displayItems = sectionsSearch.trim()
+                        ? group.items.filter(i => (i.description || i.name || '').toLowerCase().includes(sectionsSearch.toLowerCase()))
+                        : group.items
+                      return (
                       <div key={group.label} style={{ background: 'white', borderRadius: '20px', border: `1.5px solid ${group.color}40`, overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
                         <div style={{ padding: '10px 20px', background: `${group.color}10`, borderBottom: `1px solid ${group.color}30`, display: 'flex', alignItems: 'center', gap: '8px' }}>
                           <div style={{ width: '9px', height: '9px', borderRadius: '50%', background: group.color, flexShrink: 0 }} />
                           <span style={{ fontWeight: 700, fontSize: '13px', color: '#111' }}>{group.label}</span>
-                          <span style={{ fontSize: '11px', fontWeight: 600, padding: '1px 7px', borderRadius: '100px', background: `${group.color}20`, color: group.color }}>{group.items.length}</span>
+                          <span style={{ fontSize: '11px', fontWeight: 600, padding: '1px 7px', borderRadius: '100px', background: `${group.color}20`, color: group.color }}>{displayItems.length}</span>
                         </div>
-                        {group.items.map((item, idx) => {
+                        {displayItems.map((item, idx) => {
                           const assignedSids = itemSections[item.id] || []
                           const hasAny = assignedSids.length > 0
                           return (
@@ -1807,7 +1826,7 @@ export default function StockPage() {
                           )
                         })}
                       </div>
-                    ))}
+                    })})
                   </div>
                 )
               })()}
