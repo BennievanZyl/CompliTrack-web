@@ -119,6 +119,7 @@ export default function StockPage() {
   const [sections, setSections] = useState<StockSection[]>([])
   const [itemSections, setItemSections] = useState<Record<string, string[]>>({}) // itemId → sectionId[]
   const [activeSection, setActiveSection] = useState<StockSection | null>(null) // null = All
+  const [countSearch, setCountSearch] = useState<string>('')
   const [itemFormSections, setItemFormSections] = useState<string[]>([])
   const [showSectionManager, setShowSectionManager] = useState(false)
   const [sectionForm, setSectionForm] = useState({ name: '', color: '#1a5c38', icon: '📦' })
@@ -908,7 +909,7 @@ export default function StockPage() {
                       {sections.some(s => countLines.some(l => l.section_id === s.id)) && (
                         <button onClick={() => printBySection()} style={{ padding: '8px 16px', background: '#f0f4f0', color: '#1a5c38', border: '1.5px solid #d1fae5', borderRadius: '10px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>🖨 Print by Section</button>
                       )}
-                      <button onClick={() => { setActiveCount(null); setCountLines([]); setViewMode(false); setActiveSection(null); if (!viewMode) loadAll() }} style={{ padding: '8px 16px', background: viewMode ? '#6b7280' : '#f59e0b', color: 'white', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>{viewMode ? '✕ Close' : '💾 Save & Close'}</button>
+                      <button onClick={() => { setActiveCount(null); setCountLines([]); setViewMode(false); setActiveSection(null); setCountSearch(''); if (!viewMode) loadAll() }} style={{ padding: '8px 16px', background: viewMode ? '#6b7280' : '#f59e0b', color: 'white', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>{viewMode ? '✕ Close' : '💾 Save & Close'}</button>
                       {!viewMode && <button onClick={completeCount} style={{ padding: '8px 16px', background: '#1a5c38', color: 'white', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>✅ Finalise</button>}
                     </div>
                   </div>
@@ -943,6 +944,16 @@ export default function StockPage() {
                       </div>
                     )
                   })()}
+                  {/* Search bar */}
+                  <div style={{ padding: '10px 24px', background: '#fff', borderTop: '1px solid #e5e7eb' }}>
+                    <input
+                      type="text"
+                      value={countSearch}
+                      onChange={e => setCountSearch(e.target.value)}
+                      placeholder="🔍 Search products..."
+                      style={{ width: '100%', padding: '9px 14px', border: '1.5px solid #d1d5db', borderRadius: '10px', fontSize: '14px', outline: 'none', boxSizing: 'border-box' as const }}
+                    />
+                  </div>
                   {/* Group by supplier in count screen */}
                   {suppliers.map(s => s.name).map(supplier => {
                     const supplierLines = countLines.filter(l => {
@@ -951,6 +962,10 @@ export default function StockPage() {
                       if (activeSection) {
                         if (activeSection.id === '__unassigned__' && l.section_id) return false
                         if (activeSection.id !== '__unassigned__' && l.section_id !== activeSection.id) return false
+                      }
+                      if (countSearch.trim()) {
+                        const q = countSearch.toLowerCase()
+                        if (!(item?.description || item?.name || '').toLowerCase().includes(q)) return false
                       }
                       return (item?.supplier || 'Other') === supplier
                     })
