@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 
 const ALL_CARDS = [
-  { key: 'people',  href: '/people',  emoji: '👥', title: 'People & Attendance', desc: 'Staff profiles, clock-in records, leave & warnings', color: '#1a5c38' },
+  { key: 'people',  href: '/attendance',  emoji: '👥', title: 'People & Attendance', desc: 'Staff profiles, clock-in records, leave & warnings', color: '#1a5c38' },
   { key: 'payroll', href: '/wages',   emoji: '💰', title: 'Payroll & Wages',      desc: 'Hours worked, pay runs, advances & deductions',   color: '#2563eb' },
   { key: 'reports', href: '/reports', emoji: '📋', title: 'HR Reports',           desc: 'Attendance, labour & payroll exports',             color: '#7c3aed' },
   { key: 'devices', href: '/devices', emoji: '📱', title: 'Linked Devices',       desc: 'Link kiosk tablets for face clock-in/out',         color: '#0891b2' },
