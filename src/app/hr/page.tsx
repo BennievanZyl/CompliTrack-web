@@ -4,10 +4,12 @@ import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 
 const ALL_CARDS = [
-  { key: 'people',  href: '/attendance',  emoji: '👥', title: 'People & Attendance', desc: 'Staff profiles, clock-in records, leave & warnings', color: '#1a5c38' },
-  { key: 'payroll', href: '/wages',   emoji: '💰', title: 'Payroll & Wages',      desc: 'Hours worked, pay runs, advances & deductions',   color: '#2563eb' },
-  { key: 'reports', href: '/reports', emoji: '📋', title: 'HR Reports',           desc: 'Attendance, labour & payroll exports',             color: '#7c3aed' },
-  { key: 'devices', href: '/devices', emoji: '📱', title: 'Linked Devices',       desc: 'Link kiosk tablets for face clock-in/out',         color: '#0891b2' },
+  { key: 'people',      href: '/attendance',  emoji: '👥', title: 'People & Attendance', desc: 'Staff profiles, clock-in records, leave & warnings', color: '#1a5c38' },
+  { key: 'payroll',     href: '/wages',        emoji: '💰', title: 'Payroll & Wages',      desc: 'Hours worked, pay runs, advances & deductions',   color: '#2563eb' },
+  { key: 'performance', href: '/performance',  emoji: '🏆', title: 'Performance',           desc: 'Staff evaluations, scores & performance history',  color: '#d97706' },
+  { key: 'reports',     href: '/reports',      emoji: '📋', title: 'HR Reports',            desc: 'Attendance, labour & payroll exports',             color: '#7c3aed' },
+  { key: 'settings',    href: '/settings',     emoji: '⚙️', title: 'Settings',              desc: 'Payroll rules, UIF rates & business details',      color: '#6b7280' },
+  { key: 'devices',     href: '/devices',      emoji: '📱', title: 'Linked Devices',        desc: 'Link kiosk tablets for face clock-in/out',         color: '#0891b2' },
 ]
 
 export default function HRPortalPage() {
@@ -39,8 +41,9 @@ export default function HRPortalPage() {
 
   // People & Attendance is always shown; other cards respect modules_enabled
   // If modules is null (column doesn't exist yet / not linked), show everything
+  const ALWAYS_SHOW = new Set(['people', 'settings']);
   const cards = ALL_CARDS.filter(card =>
-    card.key === 'people' || modules === null || modules[card.key] !== false
+    ALWAYS_SHOW.has(card.key) || modules === null || modules[card.key] !== false
   )
 
   async function signOut() {
