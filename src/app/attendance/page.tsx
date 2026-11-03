@@ -7,7 +7,7 @@ import { supabase } from '@/lib/supabase';
 
 const PRIMARY = '#1a5c38';
 const DARK = '#0a1f12';
-const EMPLOYER_NAME = 'Mochachos Hartswater (Pty) Ltd';
+// employer_name is now stored per-store in payroll_settings
 
 type Employee = { id: string; full_name: string; role: string; is_active: boolean; hourly_rate: number | null; pay_frequency: string | null; night_allowance_rate: number | null; phone: string | null; id_number: string | null };
 type AttendanceRecord = { id: string; employee_id: string; work_date: string; clock_in: string | null; clock_out: string | null; hours_worked: number | null; is_late: boolean; notes: string | null };
@@ -19,7 +19,7 @@ type EmployeeSavings = { id: string; employee_id: string; store_id: string; dedu
 type WagePayment = { id: string; employee_id: string; period: string; paid_date: string; gross_pay?: number; uif_employee?: number; uif_employer?: number; advances_deducted?: number; net_pay: number; payment_method: string | null; expense_id?: string | null };
 type EmployeeWarning = { id: string; employee_id: string; warning_type: string; incident_date: string };
 type EmployeeEvaluation = { id: string; employee_id: string; eval_date: string; overall_score: number };
-type PayrollSettings = { sunday_multiplier: number; holiday_multiplier: number; overtime_multiplier: number; weekly_ot_threshold: number; monthly_ot_threshold: number; night_allowance_start_hour: number; default_night_rate: number; uif_employee_rate: number; uif_employer_rate: number; uif_ceiling: number; uif_reference_number: string };
+type PayrollSettings = { employer_name: string; sunday_multiplier: number; holiday_multiplier: number; overtime_multiplier: number; weekly_ot_threshold: number; monthly_ot_threshold: number; night_allowance_start_hour: number; default_night_rate: number; uif_employee_rate: number; uif_employer_rate: number; uif_ceiling: number; uif_reference_number: string };
 
 const ROLE_COLORS: Record<string, { bg: string; color: string }> = {
   'Store Manager': { bg: '#e8f5e9', color: PRIMARY },
@@ -80,7 +80,8 @@ export default function AttendancePage() {
   const [showPayModal, setShowPayModal] = useState(false);
   const [payForm, setPayForm] = useState({ paid_date: new Date().toISOString().split('T')[0], payment_method: 'Cash' });
   const [paying, setPaying] = useState(false);
-  const [payrollSettings, setPayrollSettings] = useState<PayrollSettings>({ sunday_multiplier: 1.5, holiday_multiplier: 2, overtime_multiplier: 1.5, weekly_ot_threshold: 45, monthly_ot_threshold: 195, night_allowance_start_hour: 18, default_night_rate: 0.5, uif_employee_rate: 1, uif_employer_rate: 1, uif_ceiling: 17712, uif_reference_number: '' });
+  const [payrollSettings, setPayrollSettings] = useState<PayrollSettings>({ employer_name: '', sunday_multiplier: 1.5, holiday_multiplier: 2, overtime_multiplier: 1.5, weekly_ot_threshold: 45, monthly_ot_threshold: 195, night_allowance_start_hour: 18, default_night_rate: 0.5, uif_employee_rate: 1, uif_employer_rate: 1, uif_ceiling: 17712, uif_reference_number: '' });
+  const [storeName, setStoreName] = useState<string>('');
   const [payrollLoaded, setPayrollLoaded] = useState(false);
   const [selectedPayrollEmployee, setSelectedPayrollEmployee] = useState<Employee | null>(null);
   const [editingRate, setEditingRate] = useState<string | null>(null);
@@ -92,7 +93,7 @@ export default function AttendancePage() {
   const [showLeaveModal, setShowLeaveModal] = useState(false);
   const [leaveForm, setLeaveForm] = useState({ leave_type: 'Sick', start_date: '', end_date: '', days_taken: '1', status: 'approved', reason: '', paid_hours_per_day: '' });
   const [showSettingsModal, setShowSettingsModal] = useState(false);
-  const [settingsForm, setSettingsForm] = useState({ sunday_multiplier: '1.5', holiday_multiplier: '2', overtime_multiplier: '1.5', weekly_ot_threshold: '45', monthly_ot_threshold: '195', night_allowance_start_hour: '18', default_night_rate: '0.5', uif_employee_rate: '1', uif_employer_rate: '1', uif_ceiling: '17712', uif_reference_number: '' });
+  const [settingsForm, setSettingsForm] = useState({ employer_name: '', sunday_multiplier: '1.5', holiday_multiplier: '2', overtime_multiplier: '1.5', weekly_ot_threshold: '45', monthly_ot_threshold: '195', night_allowance_start_hour: '18', default_night_rate: '0.5', uif_employee_rate: '1', uif_employer_rate: '1', uif_ceiling: '17712', uif_reference_number: '' });
   const [allWarnings, setAllWarnings] = useState<EmployeeWarning[]>([]);
   const [allEvaluations, setAllEvaluations] = useState<EmployeeEvaluation[]>([]);
 
@@ -105,6 +106,10 @@ export default function AttendancePage() {
       .select('id, full_name, role, is_active, hourly_rate, night_allowance_rate, pay_frequency, phone, id_number')
       .eq('store_id', STORE_ID).eq('is_active', true).order('full_name');
     if (empRes.data) setEmployees(empRes.data);
+
+    // Fetch store name as fallback for employer display
+    const storeRes = await supabase.from('stores').select('name').eq('id', STORE_ID).maybeSingle();
+    if (storeRes.data?.name) setStoreName(storeRes.data.name);
 
     const [attRes, leaveRes, advRes, holRes, setRes, payRes, savRes, warnRes, evalRes] = await Promise.all([
       supabase.from('attendance').select('*').eq('store_id', STORE_ID)
@@ -130,6 +135,7 @@ export default function AttendancePage() {
     if (setRes.data) {
       const s = setRes.data;
       setPayrollSettings({
+        employer_name: s.employer_name ?? '',
         sunday_multiplier: s.sunday_multiplier ?? 1.5, holiday_multiplier: s.holiday_multiplier ?? 2,
         overtime_multiplier: s.overtime_multiplier ?? 1.5, weekly_ot_threshold: s.weekly_ot_threshold ?? 45,
         monthly_ot_threshold: s.monthly_ot_threshold ?? 195, night_allowance_start_hour: s.night_allowance_start_hour ?? 18,
@@ -138,6 +144,7 @@ export default function AttendancePage() {
         uif_reference_number: s.uif_reference_number ?? '',
       });
       setSettingsForm({
+        employer_name: s.employer_name || '',
         sunday_multiplier: String(s.sunday_multiplier ?? 1.5), holiday_multiplier: String(s.holiday_multiplier ?? 2),
         overtime_multiplier: String(s.overtime_multiplier ?? 1.5), weekly_ot_threshold: String(s.weekly_ot_threshold ?? 45),
         monthly_ot_threshold: String(s.monthly_ot_threshold ?? 195), night_allowance_start_hour: String(s.night_allowance_start_hour ?? 18),
@@ -328,6 +335,7 @@ export default function AttendancePage() {
   async function savePayrollSettings() {
     const payload = {
       store_id: STORE_ID,
+      employer_name: settingsForm.employer_name.trim(),
       sunday_multiplier: parseFloat(settingsForm.sunday_multiplier) || 1.5,
       holiday_multiplier: parseFloat(settingsForm.holiday_multiplier) || 2,
       overtime_multiplier: parseFloat(settingsForm.overtime_multiplier) || 1.5,
@@ -341,7 +349,7 @@ export default function AttendancePage() {
       uif_reference_number: settingsForm.uif_reference_number || '',
     };
     await supabase.from('payroll_settings').upsert(payload);
-    setPayrollSettings(payload);
+    setPayrollSettings({ ...payload, employer_name: payload.employer_name });
     setShowSettingsModal(false);
   }
 
@@ -607,7 +615,7 @@ export default function AttendancePage() {
       ${brandTopbar()}
       <div class="ct-doc">
       <div class="head">
-        <div><h1>${EMPLOYER_NAME}</h1><div class="sub">Payslip · ${monthLabel}${payrollSettings.uif_reference_number ? ` · UIF Ref: ${payrollSettings.uif_reference_number}` : ''}</div></div>
+        <div><h1>${payrollSettings.employer_name || storeName || 'Your Business'}</h1><div class="sub">Payslip · ${monthLabel}${payrollSettings.uif_reference_number ? ` · UIF Ref: ${payrollSettings.uif_reference_number}` : ''}</div></div>
         <div class="badge">PAYSLIP</div>
       </div>
       <div class="grid">
@@ -678,7 +686,7 @@ export default function AttendancePage() {
     const monthLabel = new Date(payrollMonth + '-01').toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' });
     const subject = encodeURIComponent(`Payslip — ${monthLabel}`);
     const body = encodeURIComponent(
-      `Hi ${emp.full_name},\n\nYour payslip for ${monthLabel}:\n\nGross Pay: R${summary.totalPay.toFixed(2)}\nUIF Deduction: -R${summary.uifEmployee.toFixed(2)}\n${summary.outstandingAdvances > 0 ? `Advance Deduction: -R${summary.outstandingAdvances.toFixed(2)}\n` : ''}Net Pay: R${summary.netPay.toFixed(2)}\n\nA printable copy is attached.\n\nRegards,\n${EMPLOYER_NAME}\n\n— Sent via CompliTrack (complitrack.co.za)`
+      `Hi ${emp.full_name},\n\nYour payslip for ${monthLabel}:\n\nGross Pay: R${summary.totalPay.toFixed(2)}\nUIF Deduction: -R${summary.uifEmployee.toFixed(2)}\n${summary.outstandingAdvances > 0 ? `Advance Deduction: -R${summary.outstandingAdvances.toFixed(2)}\n` : ''}Net Pay: R${summary.netPay.toFixed(2)}\n\nA printable copy is attached.\n\nRegards,\n${payrollSettings.employer_name || storeName || 'Your Business'}\n\n— Sent via CompliTrack (complitrack.co.za)`
     );
     window.open(`mailto:?subject=${subject}&body=${body}`, '_blank');
   }
@@ -687,7 +695,7 @@ export default function AttendancePage() {
     if (!emp.phone) { alert(`No phone number on file for ${emp.full_name}. Add one on the People page first.`); return; }
     const monthLabel = new Date(payrollMonth + '-01').toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' });
     const text = encodeURIComponent(
-      `Hi ${emp.full_name}, here's your payslip for ${monthLabel}:\n\nGross Pay: R${summary.totalPay.toFixed(2)}\nUIF Deduction: -R${summary.uifEmployee.toFixed(2)}\n${summary.outstandingAdvances > 0 ? `Advance Deduction: -R${summary.outstandingAdvances.toFixed(2)}\n` : ''}Net Pay: R${summary.netPay.toFixed(2)}\n\n- ${EMPLOYER_NAME}\n\n_Sent via CompliTrack_`
+      `Hi ${emp.full_name}, here's your payslip for ${monthLabel}:\n\nGross Pay: R${summary.totalPay.toFixed(2)}\nUIF Deduction: -R${summary.uifEmployee.toFixed(2)}\n${summary.outstandingAdvances > 0 ? `Advance Deduction: -R${summary.outstandingAdvances.toFixed(2)}\n` : ''}Net Pay: R${summary.netPay.toFixed(2)}\n\n- ${payrollSettings.employer_name || storeName || 'Your Business'}\n\n_Sent via CompliTrack_`
     );
     window.open(`https://wa.me/${formatZaPhone(emp.phone)}?text=${text}`, '_blank');
   }
@@ -696,7 +704,7 @@ export default function AttendancePage() {
     const monthLabel = payrollMonth;
     const rows: string[][] = [
       ['CompliTrack — Restaurant Compliance & Operations Platform (complitrack.co.za)'],
-      [`${EMPLOYER_NAME} — Payroll Summary — ${monthLabel}`],
+      [`${payrollSettings.employer_name || storeName || 'Your Business'} — Payroll Summary — ${monthLabel}`],
       [],
       ['Employee', 'ID Number', 'Role', 'Pay Frequency', 'Rate (R/hr)', 'Normal Hrs', 'Normal Pay', 'OT Hrs', 'OT Pay', 'Sunday/Holiday Hrs', 'Sunday/Holiday Pay', 'Night Hrs', 'Night Pay', 'Leave Hrs', 'Leave Pay', 'Gross Pay', 'UIF Employee', 'UIF Employer', 'Advances', 'Net Pay'],
     ];
@@ -761,7 +769,7 @@ export default function AttendancePage() {
       </style></head><body>
       ${brandTopbar()}
       <div class="ct-doc">
-      <h1>${EMPLOYER_NAME}</h1>
+      <h1>${payrollSettings.employer_name || storeName || 'Your Business'}</h1>
       <div class="sub">Payroll Summary · ${monthLabel}${payrollSettings.uif_reference_number ? ` · UIF Ref: ${payrollSettings.uif_reference_number}` : ''} · UIF: ${payrollSettings.uif_employee_rate}% employee / ${payrollSettings.uif_employer_rate}% employer, capped at R${payrollSettings.uif_ceiling.toLocaleString()}/month</div>
       <table><thead>
         <tr>
@@ -961,6 +969,8 @@ export default function AttendancePage() {
             <button onClick={() => setShowSettingsModal(false)} style={{ background: '#f0f4f0', border: 'none', borderRadius: 8, padding: '6px 14px', cursor: 'pointer' }}>Cancel</button>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: PRIMARY }}>Business Details</div>
+            <div><label style={lbl}>Business / Employer Name</label><input type="text" value={settingsForm.employer_name} onChange={e => setSettingsForm(p => ({ ...p, employer_name: e.target.value }))} placeholder="e.g. Tuscany Hill Manor (Pty) Ltd" style={inp} /><div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>Printed on payslips and payroll exports for this store.</div></div>
             <div style={{ fontSize: 13, fontWeight: 700, color: PRIMARY }}>Sunday & Holiday</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
               <div><label style={lbl}>Sunday Multiplier</label><input type="number" step="0.1" value={settingsForm.sunday_multiplier} onChange={e => setSettingsForm(p => ({ ...p, sunday_multiplier: e.target.value }))} style={inp} /><div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>BCEA default: 1.5x</div></div>
