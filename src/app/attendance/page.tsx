@@ -68,6 +68,9 @@ export default function AttendancePage() {
   const [shiftSaving, setShiftSaving] = useState(false);
   const [showManualModal, setShowManualModal] = useState(false);
   const [manualForm, setManualForm] = useState({ employee_id: '', clock_in: '', clock_out: '', is_late: false, notes: '' });
+  const [editingAttendance, setEditingAttendance] = useState<AttendanceRecord | null>(null);
+  const [editAttendForm, setEditAttendForm] = useState({ clock_in: '', clock_out: '', is_late: false, notes: '' });
+  const [editAttendSaving, setEditAttendSaving] = useState(false);
 
   // Payroll
   const [payrollMonth, setPayrollMonth] = useState(() => new Date().toISOString().slice(0, 7));
@@ -890,6 +893,31 @@ export default function AttendancePage() {
     setManualSaving(false);
   }
 
+  async function saveEditAttendance() {
+    if (!editingAttendance) return;
+    setEditAttendSaving(true);
+    const workDate = editingAttendance.work_date;
+    const toUTC = (date: string, time: string) => {
+      if (!time) return null;
+      const local = new Date(`${date}T${time}:00`);
+      return local.toISOString();
+    };
+    const clockIn = editAttendForm.clock_in ? toUTC(workDate, editAttendForm.clock_in) : null;
+    const clockOut = editAttendForm.clock_out ? toUTC(workDate, editAttendForm.clock_out) : null;
+    const hours = clockIn && clockOut ? (new Date(clockOut).getTime() - new Date(clockIn).getTime()) / 3600000 : null;
+    await supabase.from('attendance').update({
+      clock_in: clockIn,
+      clock_out: clockOut,
+      hours_worked: hours,
+      is_late: editAttendForm.is_late,
+      notes: editAttendForm.notes || null,
+    }).eq('id', editingAttendance.id);
+    setHistoryRecords(prev => prev.map(r => r.id === editingAttendance.id ? { ...r, clock_in: clockIn, clock_out: clockOut, hours_worked: hours, is_late: editAttendForm.is_late, notes: editAttendForm.notes || null } : r));
+    setTodayRecords(prev => prev.map(r => r.id === editingAttendance.id ? { ...r, clock_in: clockIn, clock_out: clockOut, hours_worked: hours, is_late: editAttendForm.is_late, notes: editAttendForm.notes || null } : r));
+    setEditingAttendance(null);
+    setEditAttendSaving(false);
+  }
+
   const inp = { width: '100%', padding: '10px 14px', borderRadius: 10, border: '1.5px solid #eef2ee', fontSize: 14, outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box' as const };
   const lbl = { display: 'block' as const, fontSize: 13, fontWeight: 600 as const, color: '#555', marginBottom: 6 };
   const onShiftNow = employees.filter(e => todayRecords.some(r => r.employee_id === e.id && r.clock_in && !r.clock_out)).length;
@@ -907,6 +935,43 @@ export default function AttendancePage() {
 
   return (
     <div style={{ minHeight: '100vh', background: '#f8faf8', fontFamily: 'system-ui, sans-serif' }}>
+      {!!editingAttendance && (
+          <div style={{ position: 'fixed' as const, inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 3000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }} onClick={() => setEditingAttendance(null)}>
+            <div style={{ background: '#fff', borderRadius: 20, padding: 28, width: '100%', maxWidth: 420, boxShadow: '0 20px 60px rgba(0,0,0,0.25)' }} onClick={e => e.stopPropagation()}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                <div style={{ fontWeight: 800, fontSize: 17, color: '#1a5c38' }}>
+                  {!editingAttendance.clock_out ? '⚠️ Fix — Missing Clock-Out' : '✏️ Edit Attendance'}
+                </div>
+                <button onClick={() => setEditingAttendance(null)} style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: '#888' }}>✕</button>
+              </div>
+              <div style={{ fontSize: 13, color: '#666', marginBottom: 16, background: '#f8faf8', borderRadius: 10, padding: '10px 14px' }}>
+                <strong>{getEmpName(editingAttendance.employee_id)}</strong> · {new Date(editingAttendance.work_date).toLocaleDateString('en-ZA', { weekday: 'long', day: 'numeric', month: 'long' })}
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
+                <div>
+                  <label style={{ fontSize: 12, fontWeight: 700, color: '#555', display: 'block', marginBottom: 6 }}>Clock In</label>
+                  <input type="time" value={editAttendForm.clock_in} onChange={e => setEditAttendForm(p => ({ ...p, clock_in: e.target.value }))} style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1.5px solid #d1d5db', fontSize: 14, outline: 'none', boxSizing: 'border-box' as const }} />
+                </div>
+                <div>
+                  <label style={{ fontSize: 12, fontWeight: 700, color: '#555', display: 'block', marginBottom: 6 }}>Clock Out</label>
+                  <input type="time" value={editAttendForm.clock_out} onChange={e => setEditAttendForm(p => ({ ...p, clock_out: e.target.value }))} style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1.5px solid #d1d5db', fontSize: 14, outline: 'none', boxSizing: 'border-box' as const }} />
+                </div>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+                <input type="checkbox" id="editLate" checked={editAttendForm.is_late} onChange={e => setEditAttendForm(p => ({ ...p, is_late: e.target.checked }))} style={{ width: 16, height: 16, cursor: 'pointer' }} />
+                <label htmlFor="editLate" style={{ fontSize: 13, color: '#555', cursor: 'pointer' }}>Marked as late arrival</label>
+              </div>
+              <div style={{ marginBottom: 20 }}>
+                <label style={{ fontSize: 12, fontWeight: 700, color: '#555', display: 'block', marginBottom: 6 }}>Notes</label>
+                <textarea value={editAttendForm.notes} onChange={e => setEditAttendForm(p => ({ ...p, notes: e.target.value }))} rows={2} style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1.5px solid #d1d5db', fontSize: 14, outline: 'none', resize: 'vertical' as const, boxSizing: 'border-box' as const }} />
+              </div>
+              <button onClick={saveEditAttendance} disabled={editAttendSaving || !editAttendForm.clock_in} style={{ width: '100%', padding: '13px', background: '#1a5c38', color: '#fff', border: 'none', borderRadius: 12, fontWeight: 700, cursor: 'pointer', fontSize: 15 }}>
+                {editAttendSaving ? 'Saving...' : 'Save Changes'}
+              </button>
+            </div>
+          </div>
+        )}
+
       {showShiftModal && (
         <ModalWrap onClose={() => { setShowShiftModal(false); setEditShift(null); }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
@@ -1293,6 +1358,14 @@ export default function AttendancePage() {
                             <div style={{ width: 36, height: 36, borderRadius: '50%', background: rc.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 800, color: rc.color, flexShrink: 0 }}>{initials(getEmpName(r.employee_id))}</div>
                             <div style={{ flex: 1 }}><div style={{ fontWeight: 600, color: '#333', fontSize: 14 }}>{getEmpName(r.employee_id)}</div><div style={{ fontSize: 12, color: '#888' }}>{r.clock_in ? new Date(r.clock_in).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : '—'} → {r.clock_out ? new Date(r.clock_out).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : 'On shift'}</div></div>
                             <div style={{ textAlign: 'right' as const }}>{r.hours_worked ? <div style={{ fontWeight: 700, color: PRIMARY }}>{formatHM(r.hours_worked)}</div> : null}{r.is_late && <div style={{ fontSize: 10, fontWeight: 700, color: '#f59e0b' }}>LATE</div>}</div>
+                            <button
+                              onClick={() => {
+                                const toTime = (dt: string | null) => dt ? new Date(dt).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit', hour12: false }) : '';
+                                setEditAttendForm({ clock_in: toTime(r.clock_in), clock_out: toTime(r.clock_out), is_late: r.is_late ?? false, notes: r.notes ?? '' });
+                                setEditingAttendance(r);
+                              }}
+                              style={{ fontSize: 11, fontWeight: 700, padding: '4px 10px', borderRadius: 8, border: `1px solid ${!r.clock_out ? '#fecaca' : '#d1fae5'}`, background: !r.clock_out ? '#fef2f2' : '#f0f9f4', color: !r.clock_out ? '#dc2626' : '#1a5c38', cursor: 'pointer', whiteSpace: 'nowrap' as const }}
+                            >{!r.clock_out ? '⚠ Fix' : '✏ Edit'}</button>
                           </div>
                         );
                       })}
