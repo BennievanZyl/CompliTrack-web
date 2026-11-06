@@ -84,12 +84,12 @@ const ROLE_COLORS: Record<string, { bg: string; color: string }> = {
 };
 const PROFILE_TABS: { key: ProfileTab; label: string; emoji: string }[] = [
   { key: 'overview', label: 'Overview', emoji: '👤' },
-  { key: 'documents', label: 'Docs', emoji: '📁' },
+  { key: 'documents', label: 'Documents', emoji: '📁' },
   { key: 'leave', label: 'Leave', emoji: '🏖️' },
   { key: 'warnings', label: 'Warnings', emoji: '⚠️' },
   { key: 'advances', label: 'Advances', emoji: '💵' },
   { key: 'attendance', label: 'Attendance', emoji: '⏰' },
-  { key: 'evaluations', label: 'Performance', emoji: '📋' },
+  { key: 'evaluations', label: 'Evaluations', emoji: '📋' },
 ];
 
 // ─── PURE FUNCTIONS ───────────────────────────────────────────────────────────
@@ -826,7 +826,7 @@ export default function PeoplePage() {
 
             <div style={{ display: 'flex', borderBottom: '1px solid #eef2ee', background: '#fff', flexShrink: 0, overflowX: 'auto' }}>
               {PROFILE_TABS.map(tab => (
-                <button key={tab.key} onClick={() => setProfileTab(tab.key)} style={{ padding: '10px 10px', border: 'none', borderBottom: `2px solid ${profileTab === tab.key ? PRIMARY : 'transparent'}`, background: 'transparent', color: profileTab === tab.key ? PRIMARY : '#888', fontWeight: profileTab === tab.key ? 700 : 400, cursor: 'pointer', fontSize: 11, whiteSpace: 'nowrap' as const }}>
+                <button key={tab.key} onClick={() => setProfileTab(tab.key)} style={{ padding: '12px 14px', border: 'none', borderBottom: `2px solid ${profileTab === tab.key ? PRIMARY : 'transparent'}`, background: 'transparent', color: profileTab === tab.key ? PRIMARY : '#888', fontWeight: profileTab === tab.key ? 700 : 400, cursor: 'pointer', fontSize: 12, whiteSpace: 'nowrap' as const }}>
                   {tab.emoji} {tab.label}
                 </button>
               ))}
