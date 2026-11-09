@@ -96,6 +96,8 @@ export default function FinancesPage() {
   const [historySearch, setHistorySearch] = useState('')
   const [historyStatus, setHistoryStatus] = useState('All')
   const [invSearch, setInvSearch] = useState('')
+  const [globalInvResults, setGlobalInvResults] = useState<Invoice[]>([])
+  const [globalSearching, setGlobalSearching] = useState(false)
   const [month, setMonth] = useState(thisMonth())
   const [fcMode, setFcMode] = useState<'month' | 'week'>('month')
   const [fcWeekStart, setFcWeekStart] = useState(() => {
@@ -278,6 +280,30 @@ export default function FinancesPage() {
   }, [month, STORE_ID, ORG_ID])
 
   useEffect(() => { load() }, [load])
+
+  // Global cross-month search for invoices
+  useEffect(() => {
+    if (!invSearch.trim() || !STORE_ID) {
+      setGlobalInvResults([])
+      setGlobalSearching(false)
+      return
+    }
+    setGlobalSearching(true)
+    const term = invSearch.trim()
+    const timer = setTimeout(async () => {
+      const { data } = await supabase
+        .from('invoices')
+        .select('*, invoice_lines(*)')
+        .eq('store_id', STORE_ID)
+        .or(`invoice_number.ilike.%${term}%,supplier.ilike.%${term}%,notes.ilike.%${term}%`)
+        .order('invoice_date', { ascending: false })
+        .limit(100)
+      setGlobalInvResults(data || [])
+      setGlobalSearching(false)
+    }, 350)
+    return () => clearTimeout(timer)
+  }, [invSearch, STORE_ID])
+
 
   function fcPeriodRange(): [string, string] {
     if (fcMode === 'week') {
@@ -1325,14 +1351,24 @@ export default function FinancesPage() {
 
               {/* Invoice search bar */}
               {!showInvForm && (
-                <div style={{ marginBottom: 16 }}>
-                  <input
-                    type="text"
-                    placeholder="🔍 Search by invoice #, supplier or notes…"
-                    value={invSearch}
-                    onChange={e => setInvSearch(e.target.value)}
-                    style={{ ...inp, width: '100%', maxWidth: 400, boxSizing: 'border-box' }}
-                  />
+                <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' as const }}>
+                  <div style={{ position: 'relative', flex: 1, maxWidth: 420 }}>
+                    <input
+                      type="text"
+                      placeholder="🔍 Search all invoices by invoice #, supplier or notes…"
+                      value={invSearch}
+                      onChange={e => setInvSearch(e.target.value)}
+                      style={{ ...inp, width: '100%', boxSizing: 'border-box' as const, paddingRight: invSearch ? 32 : undefined }}
+                    />
+                    {invSearch && (
+                      <button onClick={() => setInvSearch('')} style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#9ca3af', fontSize: 16, lineHeight: 1 }}>✕</button>
+                    )}
+                  </div>
+                  {invSearch.trim() && (
+                    <div style={{ fontSize: 12, color: globalSearching ? '#d97706' : '#1a5c38', fontWeight: 600, background: globalSearching ? '#fef3c7' : '#f0fdf4', padding: '4px 10px', borderRadius: 20, border: `1px solid ${globalSearching ? '#fde68a' : '#bbf7d0'}` }}>
+                      {globalSearching ? '⏳ Searching...' : `${globalInvResults.length} result${globalInvResults.length !== 1 ? 's' : ''} across all months`}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1622,25 +1658,20 @@ export default function FinancesPage() {
               )}
 
               {/* Invoice list */}
-              {invoices.length === 0 && !showInvForm
+              {!invSearch.trim() && invoices.length === 0 && !showInvForm
                 ? <div style={{ ...card, textAlign: 'center', padding: 48, color: '#6b7280' }}>
                   <div style={{ fontSize: 40, marginBottom: 8 }}>📄</div>
                   <p>No supplier invoices for {month}.</p>
                   <button style={{ ...btn(), marginTop: 12 }} onClick={openNewInvoice}>+ New Invoice</button>
                 </div>
-                : invSearch.trim() && invoices.filter(inv => `${inv.invoice_number} ${inv.supplier} ${inv.notes || ''}`.toLowerCase().includes(invSearch.trim().toLowerCase())).length === 0 && !showInvForm
+                : invSearch.trim() && !globalSearching && globalInvResults.length === 0 && !showInvForm
                 ? <div style={{ ...card, textAlign: 'center', padding: 48, color: '#6b7280' }}>
                   <div style={{ fontSize: 32, marginBottom: 8 }}>🔍</div>
-                  <p>No invoices match <strong>"{invSearch}"</strong></p>
+                  <p>No invoices match <strong>"{invSearch}"</strong> across any month</p>
                   <button style={{ ...smBtn('#f3f4f6', '#374151'), marginTop: 8 }} onClick={() => setInvSearch('')}>Clear search</button>
                 </div>
                 : (() => {
-                  const searchedInvoices = invSearch.trim()
-                    ? invoices.filter(inv => {
-                        const q = invSearch.trim().toLowerCase()
-                        return `${inv.invoice_number} ${inv.supplier} ${inv.notes || ''}`.toLowerCase().includes(q)
-                      })
-                    : invoices
+                  const searchedInvoices = invSearch.trim() ? globalInvResults : invoices
                   const drafts = searchedInvoices.filter(i => i.status === 'draft')
                   const submitted = searchedInvoices.filter(i => i.status !== 'draft')
                   const renderInvoiceCard = (inv: Invoice) => (
