@@ -9,7 +9,7 @@ type Employee = { id: string; full_name: string; role: string }
 type EmployeeWage = { id: string; employee_id: string; hourly_rate: number; uif_employee: number; uif_employer: number; tax_rate: number; pay_frequency: string; bank_name?: string; bank_account?: string; bank_branch?: string; id_number?: string }
 type PayrollPeriod = { id: string; period_start: string; period_end: string; pay_frequency: string; status: string }
 type PayrollRun = { id: string; payroll_period_id: string; employee_id: string; hours_worked: number; hourly_rate: number; gross_pay: number; uif_employee: number; uif_employer: number; paye_tax: number; advances_deducted: number; savings_deducted: number; net_pay: number; status: string; normal_hours?: number; sunday_hours?: number; holiday_hours?: number; night_hours?: number }
-type EmployeeAdvance = { id: string; employee_id: string; amount: number; reason?: string; advance_date: string; repayment_status: string; deduct_from_wages: boolean }
+type EmployeeAdvance = { id: string; employee_id: string; amount: number; reason?: string; advance_date: string; repayment_status: string; deduct_from_wages: boolean; is_payment?: boolean }
 type EmployeeSavings = { id: string; employee_id: string; store_id: string; deduction_per_payroll: number; balance: number }
 
 const TAB_STYLE = (active: boolean) => ({ padding: '10px 20px', borderRadius: '10px', fontSize: '13px', fontWeight: '700', cursor: 'pointer', border: 'none', background: active ? '#1a5c38' : 'transparent', color: active ? '#fff' : '#6b7280' })
@@ -22,7 +22,7 @@ function formatHours(val: number) { return `${Math.floor(val)}h ${Math.round((va
 export default function WagesPage() {
   const { storeId: STORE_ID, ready: ctxReady } = useStoreContext()
   const router = useRouter()
-  const [tab, setTab] = useState<'payroll' | 'advances' | 'savings' | 'settings'>('payroll')
+  const [tab, setTab] = useState<'payroll' | 'payments' | 'advances' | 'savings' | 'settings'>('payroll')
   const [employees, setEmployees] = useState<Employee[]>([])
   const [wages, setWages] = useState<EmployeeWage[]>([])
   const [periods, setPeriods] = useState<PayrollPeriod[]>([])
@@ -56,6 +56,10 @@ export default function WagesPage() {
   const [saving, setSaving] = useState(false)
   const [periodForm, setPeriodForm] = useState({ period_start: '', period_end: '', pay_frequency: 'monthly' })
   const [advanceForm, setAdvanceForm] = useState({ employee_id: '', amount: '', reason: '', advance_date: new Date().toISOString().split('T')[0] })
+  const [showPaymentModal, setShowPaymentModal] = useState(false)
+  const [paymentForm, setPaymentForm] = useState({ employee_id: '', amount: '', reason: '', payment_date: new Date().toISOString().split('T')[0], method: 'cash' })
+  const [paymentSaving, setPaymentSaving] = useState(false)
+  const [paymentMonth, setPaymentMonth] = useState(() => new Date().toISOString().slice(0, 7))
   const [wageForm, setWageForm] = useState({ employee_id: '', hourly_rate: '', night_allowance_rate: '', uif_employee: '0.01', uif_employer: '0.01', tax_rate: '0', pay_frequency: 'monthly', bank_name: '', bank_account: '', bank_branch: '', id_number: '' })
 
   useEffect(() => { if (ctxReady && STORE_ID) loadAll() }, [ctxReady, STORE_ID])
@@ -275,6 +279,26 @@ export default function WagesPage() {
     setSaving(false)
   }
 
+  async function saveDirectPayment() {
+    if (!paymentForm.employee_id || !paymentForm.amount) return
+    setPaymentSaving(true)
+    await supabase.from('employee_advances').insert({
+      store_id: STORE_ID,
+      employee_id: paymentForm.employee_id,
+      amount: parseFloat(paymentForm.amount),
+      reason: paymentForm.reason || (paymentForm.method === 'cash' ? 'Cash payment' : 'Bank transfer payment'),
+      advance_date: paymentForm.payment_date,
+      repayment_status: 'outstanding',
+      deduct_from_wages: true,
+      is_payment: true,
+    })
+    setShowPaymentModal(false)
+    setPaymentForm({ employee_id: '', amount: '', reason: '', payment_date: new Date().toISOString().split('T')[0], method: 'cash' })
+    setPaymentMonth(paymentForm.payment_date.slice(0, 7))
+    await loadAll()
+    setPaymentSaving(false)
+  }
+
   async function saveWage() {
     if (!wageForm.employee_id || !wageForm.hourly_rate) return
     setSaving(true)
@@ -353,7 +377,14 @@ export default function WagesPage() {
   const totalUIF = periodRuns.reduce((s, r) => s + r.uif_employee + r.uif_employer, 0)
   const totalAdvances = periodRuns.reduce((s, r) => s + (r.advances_deducted || 0), 0)
   const totalSavings = periodRuns.reduce((s, r) => s + (r.savings_deducted || 0), 0)
-  const unpaidAdvances = advances.filter(a => a.repayment_status === 'outstanding' && a.deduct_from_wages)
+  const directPaymentsThisPeriod = selectedPeriod ? advances.filter(a =>
+    a.is_payment === true &&
+    a.advance_date >= selectedPeriod.period_start &&
+    a.advance_date <= selectedPeriod.period_end
+  ) : []
+  const totalDirectPayments = directPaymentsThisPeriod.reduce((s, a) => s + a.amount, 0)
+  const totalWageCost = totalGross + totalDirectPayments
+  const unpaidAdvances = advances.filter(a => a.repayment_status === 'outstanding' && a.deduct_from_wages && !a.is_payment)
   const sc = (s: string) => s === 'paid' ? { bg: '#dcfce7', color: '#166534' } : s === 'approved' ? { bg: '#dbeafe', color: '#1e40af' } : { bg: '#f3f4f6', color: '#6b7280' }
 
   return (
@@ -382,9 +413,9 @@ export default function WagesPage() {
 
       <main style={{ maxWidth: '1200px', margin: '-60px auto 0', padding: '0 40px 60px', position: 'relative', zIndex: 1 }}>
         <div style={{ background: 'white', borderRadius: '16px', padding: '6px', display: 'inline-flex', gap: '4px', marginBottom: '24px', boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}>
-          {(['payroll', 'advances', 'savings', 'settings'] as const).map(t => (
+          {(['payroll', 'payments', 'advances', 'savings', 'settings'] as const).map(t => (
             <button key={t} onClick={() => setTab(t)} style={TAB_STYLE(tab === t)}>
-              {t === 'payroll' ? '📊 Payroll' : t === 'advances' ? '💵 Advances' : t === 'savings' ? '🐷 Savings' : '⚙️ Settings'}
+              {t === 'payroll' ? '📊 Payroll' : t === 'payments' ? '💸 Payments' : t === 'advances' ? '💵 Advances' : t === 'savings' ? '🐷 Savings' : '⚙️ Settings'}
             </button>
           ))}
         </div>
@@ -407,18 +438,35 @@ export default function WagesPage() {
               </div>
 
               {selectedPeriod && (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px' }}>
-                  {[
-                    { label: 'Total Gross Pay', value: formatCurrency(totalGross), color: '#111', border: '#eef2ee' },
-                    { label: 'Total UIF', value: formatCurrency(totalUIF), color: '#d97706', border: '#fde68a' },
-                    { label: 'Total Net Pay', value: formatCurrency(totalNet), color: '#1a5c38', border: '#bbf7d0' },
-                  ].map((k, i) => (
-                    <div key={i} style={{ background: 'white', borderRadius: '20px', border: `1.5px solid ${k.border}`, padding: '24px', textAlign: 'center', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
-                      <div style={{ fontSize: '24px', fontWeight: '800', color: k.color }}>{k.value}</div>
-                      <div style={{ fontSize: '13px', color: '#9ca3af', marginTop: '4px' }}>{k.label}</div>
+                <>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px' }}>
+                    {[
+                      { label: 'Total Gross Pay', value: formatCurrency(totalGross), color: '#111', border: '#eef2ee' },
+                      { label: 'Total UIF', value: formatCurrency(totalUIF), color: '#d97706', border: '#fde68a' },
+                      { label: 'Total Net Pay', value: formatCurrency(totalNet), color: '#1a5c38', border: '#bbf7d0' },
+                    ].map((k, i) => (
+                      <div key={i} style={{ background: 'white', borderRadius: '20px', border: `1.5px solid ${k.border}`, padding: '24px', textAlign: 'center', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
+                        <div style={{ fontSize: '24px', fontWeight: '800', color: k.color }}>{k.value}</div>
+                        <div style={{ fontSize: '13px', color: '#9ca3af', marginTop: '4px' }}>{k.label}</div>
+                      </div>
+                    ))}
+                  </div>
+                  {totalDirectPayments > 0 && (
+                    <div style={{ background: 'white', borderRadius: '16px', border: '1.5px solid #d1fae5', padding: '16px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                        <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: '#d1fae5', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px' }}>💸</div>
+                        <div>
+                          <div style={{ fontWeight: '700', fontSize: '14px', color: '#065f46' }}>Direct Payments This Period</div>
+                          <div style={{ fontSize: '12px', color: '#059669' }}>{directPaymentsThisPeriod.length} payment{directPaymentsThisPeriod.length !== 1 ? 's' : ''} already paid out — deducted from net pay at payroll</div>
+                        </div>
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{ fontSize: '20px', fontWeight: '900', color: '#065f46' }}>{formatCurrency(totalDirectPayments)}</div>
+                        <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '2px' }}>Total wage spend: <strong style={{ color: '#111' }}>{formatCurrency(totalWageCost)}</strong></div>
+                      </div>
                     </div>
-                  ))}
-                </div>
+                  )}
+                </>
               )}
 
               {selectedPeriod && selectedPeriod.status === 'open' && (
@@ -559,7 +607,7 @@ export default function WagesPage() {
               <div style={{ background: 'white', borderRadius: '20px', border: '1.5px solid #eef2ee', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                   <div style={{ fontWeight: 700, color: '#374151', fontSize: 14 }}>
-                    {advances.filter(a => a.advance_date?.replace(/\//g, '-').slice(0,7) === advanceMonth).length} advance(s) in {new Date(advanceMonth + '-01').toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' })}
+                    {advances.filter(a => !a.is_payment && a.advance_date?.replace(/\//g, '-').slice(0,7) === advanceMonth).length} advance(s) in {new Date(advanceMonth + '-01').toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' })}
                   </div>
                   <input type="month" value={advanceMonth} onChange={e => setAdvanceMonth(e.target.value)}
                     style={{ padding: '6px 12px', border: '1.5px solid #e5e7eb', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer', background: '#f9fafb' }} />
@@ -582,7 +630,7 @@ export default function WagesPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {advances.filter(adv => adv.advance_date?.replace(/\//g, '-').slice(0,7) === advanceMonth).map(adv => {
+                      {advances.filter(adv => !adv.is_payment && adv.advance_date?.replace(/\//g, '-').slice(0,7) === advanceMonth).map(adv => {
                         const emp = employees.find(e => e.id === adv.employee_id)
                         return (
                           <tr key={adv.id} style={{ borderTop: '1px solid #f3f4f6' }}>
@@ -617,6 +665,76 @@ export default function WagesPage() {
           )}
 
           {/* SLIPS TAB */}
+
+          {/* PAYMENTS TAB */}
+          {tab === 'payments' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap' as const, gap: '12px' }}>
+                <div>
+                  <div style={{ fontSize: '18px', fontWeight: '800', color: '#111' }}>Direct & Cash Payments</div>
+                  <div style={{ fontSize: '13px', color: '#6b7280', marginTop: '2px' }}>Record payments made directly to workers during the month — these count toward your monthly wage total and will be deducted from their next payroll run.</div>
+                </div>
+                <button onClick={() => setShowPaymentModal(true)} style={{ padding: '10px 20px', background: '#059669', color: 'white', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: '800', cursor: 'pointer', flexShrink: 0 }}>💸 Log Payment</button>
+              </div>
+
+              <div style={{ background: '#f0fdf4', border: '1.5px solid #bbf7d0', borderRadius: '14px', padding: '14px 20px', fontSize: '13px', color: '#065f46', fontWeight: '600' }}>
+                💡 <strong>How it works:</strong> When you pay a casual worker or any staff member directly (cash or bank transfer) during the month, log it here. The payment will be recorded as a wage expense and automatically deducted from their next payroll run so they don&apos;t get paid twice.
+              </div>
+
+              <div style={{ background: 'white', borderRadius: '20px', border: '1.5px solid #eef2ee', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
+                <div style={{ padding: '16px 24px', borderBottom: '1px solid #f3f4f6', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ fontWeight: '700', fontSize: '15px', color: '#111' }}>
+                    {advances.filter(a => a.is_payment && a.advance_date?.slice(0,7) === paymentMonth).length} payment(s) in {new Date(paymentMonth + '-01').toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' })}
+                    {advances.filter(a => a.is_payment && a.advance_date?.slice(0,7) === paymentMonth).length > 0 && (
+                      <span style={{ marginLeft: 12, fontSize: '14px', color: '#059669', fontWeight: '900' }}>
+                        Total: {formatCurrency(advances.filter(a => a.is_payment && a.advance_date?.slice(0,7) === paymentMonth).reduce((s,a)=>s+a.amount,0))}
+                      </span>
+                    )}
+                  </div>
+                  <input type="month" value={paymentMonth} onChange={e => setPaymentMonth(e.target.value)}
+                    style={{ padding: '6px 12px', border: '1.5px solid #e5e7eb', borderRadius: '8px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', background: '#f9fafb' }} />
+                </div>
+                {advances.filter(a => a.is_payment && a.advance_date?.slice(0,7) === paymentMonth).length === 0 ? (
+                  <div style={{ padding: '48px', textAlign: 'center', color: '#9ca3af' }}>
+                    <div style={{ fontSize: '32px', marginBottom: '12px' }}>💸</div>
+                    <div style={{ fontWeight: '700', marginBottom: '4px' }}>No payments logged for this month</div>
+                    <div style={{ fontSize: '12px' }}>Click &quot;Log Payment&quot; to record a cash or bank transfer payment made to a worker.</div>
+                  </div>
+                ) : (
+                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr style={{ background: '#f9fafb' }}>
+                        {['Employee', 'Amount', 'Date', 'Method / Reason', 'Status'].map(h => (
+                          <th key={h} style={{ padding: '12px 20px', textAlign: 'left', fontSize: '11px', fontWeight: '700', color: '#9ca3af', textTransform: 'uppercase' as const, letterSpacing: '0.5px' }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {advances.filter(a => a.is_payment && a.advance_date?.slice(0,7) === paymentMonth).map(pmt => {
+                        const emp = employees.find(e => e.id === pmt.employee_id)
+                        return (
+                          <tr key={pmt.id} style={{ borderTop: '1px solid #f3f4f6' }}>
+                            <td style={{ padding: '14px 20px' }}>
+                              <div style={{ fontWeight: '700', fontSize: '14px', color: '#111' }}>{emp?.full_name || '—'}</div>
+                              <div style={{ fontSize: '12px', color: '#9ca3af' }}>{emp?.role}</div>
+                            </td>
+                            <td style={{ padding: '14px 20px', fontWeight: '900', fontSize: '16px', color: '#059669' }}>{formatCurrency(pmt.amount)}</td>
+                            <td style={{ padding: '14px 20px', fontSize: '13px', color: '#6b7280' }}>{new Date(pmt.advance_date).toLocaleDateString('en-ZA')}</td>
+                            <td style={{ padding: '14px 20px', fontSize: '13px', color: '#374151' }}>{pmt.reason || '—'}</td>
+                            <td style={{ padding: '14px 20px' }}>
+                              <span style={{ fontSize: '11px', fontWeight: '700', padding: '3px 10px', borderRadius: '100px', background: pmt.repayment_status === 'paid' ? '#dcfce7' : '#fef3c7', color: pmt.repayment_status === 'paid' ? '#166534' : '#92400e' }}>
+                                {pmt.repayment_status === 'paid' ? '✓ Reconciled' : '⏳ Pending payroll'}
+                              </span>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* SAVINGS TAB */}
           {tab === 'savings' && (
@@ -763,6 +881,62 @@ export default function WagesPage() {
             <div style={{ padding: '16px 28px 24px', display: 'flex', gap: '12px' }}>
               <button onClick={() => setShowNewPeriod(false)} style={{ flex: 1, border: '1.5px solid #e5e7eb', color: '#374151', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: '700', cursor: 'pointer', background: 'white' }}>Cancel</button>
               <button onClick={createPeriod} disabled={saving} style={{ flex: 1, background: '#1a5c38', color: 'white', border: 'none', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: '800', cursor: 'pointer' }}>Create Period</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Direct Payment Modal */}
+      {showPaymentModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: '16px' }}>
+          <div style={{ background: 'white', borderRadius: '24px', width: '100%', maxWidth: '460px', boxShadow: '0 24px 60px rgba(0,0,0,0.2)' }}>
+            <div style={{ background: 'linear-gradient(135deg, #064e3b, #059669)', borderRadius: '24px 24px 0 0', padding: '24px 28px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div>
+                  <div style={{ fontSize: '20px', fontWeight: '900', color: 'white' }}>💸 Log Direct Payment</div>
+                  <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.7)', marginTop: '4px' }}>Record a payment already made to a worker</div>
+                </div>
+                <button onClick={() => setShowPaymentModal(false)} style={{ background: 'rgba(255,255,255,0.2)', border: 'none', borderRadius: '8px', width: '32px', height: '32px', cursor: 'pointer', fontSize: '16px', color: 'white' }}>✕</button>
+              </div>
+            </div>
+            <div style={{ padding: '20px 28px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div>
+                <label style={LABEL_STYLE}>Employee *</label>
+                <select value={paymentForm.employee_id} onChange={e => setPaymentForm(f => ({ ...f, employee_id: e.target.value }))} style={INPUT_STYLE}>
+                  <option value="">Select employee</option>
+                  {employees.map(e => <option key={e.id} value={e.id}>{e.full_name} ({e.role})</option>)}
+                </select>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                <div>
+                  <label style={LABEL_STYLE}>Amount (R) *</label>
+                  <input type="number" step="0.01" min="0" value={paymentForm.amount} onChange={e => setPaymentForm(f => ({ ...f, amount: e.target.value }))} placeholder="e.g. 200.00" style={INPUT_STYLE} />
+                </div>
+                <div>
+                  <label style={LABEL_STYLE}>Date Paid *</label>
+                  <input type="date" value={paymentForm.payment_date} onChange={e => setPaymentForm(f => ({ ...f, payment_date: e.target.value }))} style={INPUT_STYLE} />
+                </div>
+              </div>
+              <div>
+                <label style={LABEL_STYLE}>Payment Method</label>
+                <select value={paymentForm.method} onChange={e => setPaymentForm(f => ({ ...f, method: e.target.value }))} style={INPUT_STYLE}>
+                  <option value="cash">💵 Cash</option>
+                  <option value="bank">🏦 Bank Transfer / EFT</option>
+                </select>
+              </div>
+              <div>
+                <label style={LABEL_STYLE}>Reason / Notes</label>
+                <input type="text" value={paymentForm.reason} onChange={e => setPaymentForm(f => ({ ...f, reason: e.target.value }))} placeholder="e.g. Day's wages, cleaning job, maintenance work…" style={INPUT_STYLE} />
+              </div>
+              <div style={{ background: '#f0fdf4', borderRadius: '12px', padding: '14px', fontSize: '12px', color: '#065f46', fontWeight: '600', lineHeight: '1.5' }}>
+                ✅ This payment will be recorded as a wage expense for <strong>{new Date(paymentForm.payment_date || new Date().toISOString().split('T')[0]).toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' })}</strong> and automatically deducted from this employee&apos;s next payroll run.
+              </div>
+            </div>
+            <div style={{ padding: '16px 28px 24px', display: 'flex', gap: '12px' }}>
+              <button onClick={() => setShowPaymentModal(false)} style={{ flex: 1, border: '1.5px solid #e5e7eb', color: '#374151', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: '700', cursor: 'pointer', background: 'white' }}>Cancel</button>
+              <button onClick={saveDirectPayment} disabled={paymentSaving || !paymentForm.employee_id || !paymentForm.amount} style={{ flex: 1, background: !paymentForm.employee_id || !paymentForm.amount ? '#d1d5db' : '#059669', color: 'white', border: 'none', borderRadius: '12px', padding: '12px', fontSize: '14px', fontWeight: '800', cursor: !paymentForm.employee_id || !paymentForm.amount ? 'not-allowed' : 'pointer' }}>
+                {paymentSaving ? '⏳ Saving...' : '💸 Record Payment'}
+              </button>
             </div>
           </div>
         </div>
