@@ -2228,14 +2228,17 @@ export default function FinancesPage() {
                           {allocated ? (
                             <span style={{ fontWeight: 700, color: '#1a5c38' }}>{fmt(amt)}</span>
                           ) : (
-                            <input type="number" value={amt} min={0} step={0.01}
+                            <input type="text" inputMode="decimal" placeholder="0.00"
+                              value={amt === 0 ? '' : String(amt)}
                               onChange={async e => {
-                                const newAmt = parseFloat(e.target.value) || 0
+                                const raw = e.target.value.replace(',', '.')
+                                const newAmt = parseFloat(raw) || 0
                                 const updated = debitOrderMonths.map(m => m.debit_order_id === order.id ? { ...m, amount: newAmt } : m)
                                 setDebitOrderMonths(updated)
                               }}
                               onBlur={async e => {
-                                const newAmt = parseFloat(e.target.value) || 0
+                                const raw = e.target.value.replace(',', '.')
+                                const newAmt = parseFloat(raw) || 0
                                 const newDom = debitOrderMonths.find(m => m.debit_order_id === order.id)
                                 if (newDom) await saveDebitOrderMonth({ ...newDom, amount: newAmt })
                               }}
