@@ -181,6 +181,7 @@ export default function FinancesPage() {
   const [doAllocating, setDoAllocating] = useState(false)
   const [showDoForm, setShowDoForm] = useState(false)
   const [editDo, setEditDo] = useState<DebitOrder | null>(null)
+  const [rawAmounts, setRawAmounts] = useState<Record<string, string>>({})
   const [doForm, setDoForm] = useState({ name: '', category_key: 'other', default_amount: '', vat_inclusive: true })
   const defaultCatKey = categories.find(c => /stock|cogs/i.test(c.name))?.key || categories[0]?.key || 'cost_of_sales'
   // Stock/COGS is used daily (deliveries, packaging, cleaning) so it should always lead the dropdown,
@@ -2229,16 +2230,18 @@ export default function FinancesPage() {
                             <span style={{ fontWeight: 700, color: '#1a5c38' }}>{fmt(amt)}</span>
                           ) : (
                             <input type="text" inputMode="decimal" placeholder="0.00"
-                              value={amt === 0 ? '' : String(amt)}
-                              onChange={async e => {
-                                const raw = e.target.value.replace(',', '.')
-                                const newAmt = parseFloat(raw) || 0
-                                const updated = debitOrderMonths.map(m => m.debit_order_id === order.id ? { ...m, amount: newAmt } : m)
-                                setDebitOrderMonths(updated)
+                              value={rawAmounts[order.id] !== undefined ? rawAmounts[order.id] : (amt === 0 ? '' : String(amt))}
+                              onChange={e => {
+                                // Allow free typing (including trailing . or ,) — parse only on blur
+                                setRawAmounts(prev => ({ ...prev, [order.id]: e.target.value }))
                               }}
                               onBlur={async e => {
                                 const raw = e.target.value.replace(',', '.')
                                 const newAmt = parseFloat(raw) || 0
+                                // Clear raw string so formatted value shows again
+                                setRawAmounts(prev => { const next = { ...prev }; delete next[order.id]; return next })
+                                const updated = debitOrderMonths.map(m => m.debit_order_id === order.id ? { ...m, amount: newAmt } : m)
+                                setDebitOrderMonths(updated)
                                 const newDom = debitOrderMonths.find(m => m.debit_order_id === order.id)
                                 if (newDom) await saveDebitOrderMonth({ ...newDom, amount: newAmt })
                               }}
