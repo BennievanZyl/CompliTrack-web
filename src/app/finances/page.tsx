@@ -666,6 +666,7 @@ export default function FinancesPage() {
   const totalExpensesDisplay = totalInvoicesExcl + totalQuick + totalWages  // ex-VAT total for category % display
   const netProfit = totalSalesExcl - totalExpenses
   const totalVariance = cashUps.reduce((s, r) => s + Number(r.variance || 0), 0)
+  const avgDailySales = cashUps.length > 0 ? totalSales / cashUps.length : 0
   const totalCustomers = cashUps.reduce((s, r) => s + Number(r.customer_count || 0), 0)
 
   // Category breakdown across invoices + quick + wages — all on ex-VAT basis
@@ -1207,7 +1208,7 @@ export default function FinancesPage() {
           {/* ── SUMMARY ── */}
           {tab === 0 && (
             <div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6,1fr)', gap: 16, marginBottom: 24 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 16, marginBottom: 24 }}>
                 {[
                   { label: 'Total Sales', value: fmt(totalSales), color: '#16a34a', icon: '📈', sub: `${cashUps.length} cash-ups · ex-VAT ${fmt(totalSalesExcl)}` },
                   { label: 'Supplier Bills', value: fmt(totalInvoices), color: '#dc2626', icon: '🧾', sub: `${invoices.length} invoices` },
@@ -1215,6 +1216,7 @@ export default function FinancesPage() {
                   { label: 'Wages & UIF', value: fmt(totalWages), color: '#7c3aed', icon: '👷', sub: `${wages.length} employee${wages.length !== 1 ? 's' : ''}` },
                   { label: netProfit >= 0 ? 'Net Profit' : 'Net Loss', value: fmt(netProfit), color: netProfit >= 0 ? '#1a5c38' : '#ef4444', icon: netProfit >= 0 ? '✅' : '⚠️', sub: totalSalesExcl > 0 ? `${((netProfit / totalSalesExcl) * 100).toFixed(1)}% margin` : '' },
                   { label: 'Variance', value: fmt(totalVariance), color: Math.abs(totalVariance) > 500 ? '#dc2626' : '#6b7280', icon: '⚖️', sub: `${totalCustomers} customers` },
+                  { label: 'Avg Daily Sales', value: fmt(avgDailySales), color: '#0369a1', icon: '📊', sub: cashUps.length > 0 ? `÷ ${cashUps.length} cash-up${cashUps.length !== 1 ? 's' : ''}` : 'no cash-ups' },
                 ].map(k => (
                   <div key={k.label} style={{ ...card, marginBottom: 0, textAlign: 'center', padding: 18 }}>
                     <div style={{ fontSize: 24 }}>{k.icon}</div>
