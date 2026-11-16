@@ -169,12 +169,7 @@ export default function CompliancePage() {
   }, [STORE_ID])
 
   const loadSessionData = async (sessionId: string) => {
-    const [itemsRes, completionsRes, commentsRes, uniformsRes, tempsRes] = await Promise.all([
-      supabase.from('checklist_items')
-        .select('id, title, description, category, is_required, sort_order, section_id, section_title')
-        .eq('store_id', STORE_ID)
-        .eq('session_type', sessionType)
-        .order('sort_order'),
+    const [completionsRes, commentsRes, uniformsRes, tempsRes] = await Promise.all([
       supabase.from('checklist_completions')
         .select('*')
         .eq('session_id', sessionId),
@@ -191,8 +186,24 @@ export default function CompliancePage() {
         .eq('session_id', sessionId)
         .order('logged_at'),
     ])
-    setItems(itemsRes.data || [])
-    setCompletions(completionsRes.data || [])
+    const completionData = completionsRes.data || []
+    const itemIds = completionData.map((c: any) => c.checklist_item_id).filter(Boolean)
+    if (itemIds.length > 0) {
+      const { data: itemsData } = await supabase
+        .from('checklist_items')
+        .select('id, title, description, category, is_required, sort_order, section_id, section_title')
+        .in('id', itemIds)
+        .order('sort_order')
+      setItems(itemsData || [])
+    } else {
+      const { data: itemsData } = await supabase
+        .from('checklist_items')
+        .select('id, title, description, category, is_required, sort_order, section_id, section_title')
+        .eq('store_id', STORE_ID)
+        .order('sort_order')
+      setItems(itemsData || [])
+    }
+    setCompletions(completionData)
     setComments(commentsRes.data || [])
     setUniforms(uniformsRes.data || [])
     setTemperatures(tempsRes.data || [])
