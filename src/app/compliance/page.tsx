@@ -176,40 +176,71 @@ export default function CompliancePage() {
   }, [STORE_ID])
 
   const loadSessionData = async (sessionId: string) => {
+    // Step 1: parallel fetch of base tables (no joins — matches mobile app pattern)
     const [itemsRes, commentsRes, uniformsRes, tempsRes] = await Promise.all([
-      supabase
-        .from('checklist_items')
-        .select('id, session_id, template_id, completed, completed_at, completed_by, photo_url, notes, checklist_templates(name, section, sort_order, requires_photo)')
+      supabase.from('checklist_items')
+        .select('id, session_id, template_id, completed, completed_at, completed_by, photo_url, notes')
         .eq('session_id', sessionId),
-      supabase
-        .from('session_comments')
+      supabase.from('session_comments')
         .select('*')
         .eq('session_id', sessionId)
         .order('created_at'),
-      supabase
-        .from('uniform_sessions')
-        .select('id, session_id, store_id, schedule_id, photo_url, taken_at, taken_by, uniform_schedules(label)')
+      supabase.from('uniform_sessions')
+        .select('id, session_id, store_id, schedule_id, photo_url, taken_at, taken_by')
         .eq('session_id', sessionId)
         .order('taken_at'),
-      supabase
-        .from('temperature_logs')
-        .select('id, session_id, equipment_id, slot, temperature_c, is_compliant, temperature_equipment(equipment_name, name, equipment_type)')
+      supabase.from('temperature_logs')
+        .select('id, session_id, equipment_id, slot, temperature_c, is_compliant')
         .eq('session_id', sessionId)
         .order('slot'),
     ])
 
-    // Sort checklist items by template sort_order client-side
-    const rawItems = (itemsRes.data || []) as ChecklistItem[]
-    const sortedItems = rawItems.sort((a, b) => {
-      const aOrd = a.checklist_templates?.sort_order ?? 999
-      const bOrd = b.checklist_templates?.sort_order ?? 999
-      return aOrd - bOrd
-    })
+    const rawItems    = itemsRes.data    || []
+    const rawUniforms = uniformsRes.data || []
+    const rawTemps    = tempsRes.data    || []
 
-    setItems(sortedItems)
+    // Step 2: collect IDs for enrichment
+    const templateIds = [...new Set(rawItems.map((i: any) => i.template_id).filter(Boolean))]
+    const scheduleIds = [...new Set(rawUniforms.map((u: any) => u.schedule_id).filter(Boolean))]
+    const equipIds    = [...new Set(rawTemps.map((t: any) => t.equipment_id).filter(Boolean))]
+
+    const [templatesRes, schedulesRes, equipmentRes] = await Promise.all([
+      templateIds.length > 0
+        ? supabase.from('checklist_templates').select('id, name, section, sort_order, requires_photo').in('id', templateIds)
+        : Promise.resolve({ data: [] }),
+      scheduleIds.length > 0
+        ? supabase.from('uniform_schedules').select('id, label').in('id', scheduleIds)
+        : Promise.resolve({ data: [] }),
+      equipIds.length > 0
+        ? supabase.from('temperature_equipment').select('id, equipment_name, name, equipment_type').in('id', equipIds)
+        : Promise.resolve({ data: [] }),
+    ])
+
+    const templateMap  = new Map((templatesRes.data  || []).map((t: any) => [t.id, t]))
+    const scheduleMap  = new Map((schedulesRes.data  || []).map((s: any) => [s.id, s]))
+    const equipmentMap = new Map((equipmentRes.data  || []).map((e: any) => [e.id, e]))
+
+    // Step 3: merge and sort
+    const enrichedItems: ChecklistItem[] = rawItems
+      .map((item: any) => ({ ...item, checklist_templates: templateMap.get(item.template_id) || null }))
+      .sort((a: ChecklistItem, b: ChecklistItem) => {
+        const aOrd = a.checklist_templates?.sort_order ?? 999
+        const bOrd = b.checklist_templates?.sort_order ?? 999
+        return aOrd - bOrd
+      })
+
+    const enrichedUniforms: UniformPhoto[] = rawUniforms.map((u: any) => ({
+      ...u, uniform_schedules: scheduleMap.get(u.schedule_id) || null,
+    }))
+
+    const enrichedTemps: TempLog[] = rawTemps.map((t: any) => ({
+      ...t, temperature_equipment: equipmentMap.get(t.equipment_id) || null,
+    }))
+
+    setItems(enrichedItems)
     setComments(commentsRes.data || [])
-    setUniforms((uniformsRes.data || []) as UniformPhoto[])
-    setTemperatures((tempsRes.data || []) as TempLog[])
+    setUniforms(enrichedUniforms)
+    setTemperatures(enrichedTemps)
   }
 
   // Load on mount + when storeId ready
