@@ -35,6 +35,15 @@ type ChecklistItem = {
   completed_at: string | null
   photo_url: string | null
   notes: string | null
+  // Columns that may be stored directly on the row (denormalized schema):
+  name?: string | null
+  title?: string | null
+  section?: string | null
+  section_title?: string | null
+  category?: string | null
+  sort_order?: number | null
+  requires_photo?: boolean | null
+  // Fallback: enriched from checklist_templates join
   checklist_templates: {
     name: string
     section: string | null
@@ -179,7 +188,7 @@ export default function CompliancePage() {
     // Step 1: parallel fetch of base tables (no joins — matches mobile app pattern)
     const [itemsRes, commentsRes, uniformsRes, tempsRes] = await Promise.all([
       supabase.from('checklist_items')
-        .select('id, session_id, template_id, completed, completed_at, completed_by, photo_url, notes')
+        .select('*')
         .eq('session_id', sessionId),
       supabase.from('session_comments')
         .select('*')
@@ -223,9 +232,9 @@ export default function CompliancePage() {
     // Step 3: merge and sort
     const enrichedItems: ChecklistItem[] = rawItems
       .map((item: any) => ({ ...item, checklist_templates: templateMap.get(item.template_id) || null }))
-      .sort((a: ChecklistItem, b: ChecklistItem) => {
-        const aOrd = a.checklist_templates?.sort_order ?? 999
-        const bOrd = b.checklist_templates?.sort_order ?? 999
+      .sort((a: any, b: any) => {
+        const aOrd = a.sort_order ?? a.checklist_templates?.sort_order ?? 999
+        const bOrd = b.sort_order ?? b.checklist_templates?.sort_order ?? 999
         return aOrd - bOrd
       })
 
@@ -327,7 +336,20 @@ export default function CompliancePage() {
     setPostingComment(false)
   }
 
-  const sections = [...new Set(items.map(i => i.checklist_templates?.section || 'General'))]
+  // ─── Item helpers (direct columns take priority over template join) ─────────
+  const getItemName = (item: ChecklistItem) =>
+    item.name || item.title || item.checklist_templates?.name || 'Checklist Item'
+  const getItemSection = (item: ChecklistItem) =>
+    item.section || item.section_title || item.category || item.checklist_templates?.section || 'General'
+  const getItemRequiresPhoto = (item: ChecklistItem) =>
+    item.requires_photo ?? item.checklist_templates?.requires_photo ?? false
+  const formatCompletedBy = (id: string | null) => {
+    if (!id) return '—'
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) return 'Staff member'
+    return id
+  }
+
+  const sections = [...new Set(items.map(i => getItemSection(i)))]
 
   // ─── Render ────────────────────────────────────────────────────────────────
   if (!ctxReady) {
@@ -463,7 +485,7 @@ export default function CompliancePage() {
                       <div style={{ display: 'grid', gridTemplateColumns: selectedItem ? '1fr 340px' : '1fr', gap: 16 }}>
                         <div>
                           {sections.map(section => {
-                            const sectionItems = items.filter(i => (i.checklist_templates?.section || 'General') === section)
+                            const sectionItems = items.filter(i => getItemSection(i) === section)
                             return (
                               <div key={section} style={{ marginBottom: 20 }}>
                                 <div style={{ fontSize: 12, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 8 }}>{section}</div>
@@ -478,8 +500,8 @@ export default function CompliancePage() {
                                         <div style={{ width: 28, height: 28, borderRadius: '50%', background: statusColor, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 700, flexShrink: 0 }}>{statusIcon}</div>
                                         <div style={{ flex: 1, minWidth: 0 }}>
                                           <div style={{ fontSize: 13, fontWeight: 600, color: '#111', display: 'flex', alignItems: 'center', gap: 6 }}>
-                                            {item.checklist_templates?.name || 'Checklist Item'}
-                                            {item.checklist_templates?.requires_photo && <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 4, background: '#ede9fe', color: '#7c3aed' }}>📷</span>}
+                                            {getItemName(item)}
+                                            {getItemRequiresPhoto(item) && <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 4, background: '#ede9fe', color: '#7c3aed' }}>📷</span>}
                                           </div>
                                         </div>
                                         <div style={{ fontSize: 11, fontWeight: 700, color: statusColor, flexShrink: 0 }}>
@@ -497,13 +519,13 @@ export default function CompliancePage() {
                         {selectedItem && (
                           <div style={{ background: '#f9fafb', borderRadius: 14, padding: 20, border: '1.5px solid #e5e7eb', alignSelf: 'start', position: 'sticky', top: 100 }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 }}>
-                              <div style={{ fontSize: 14, fontWeight: 700, color: '#111', flex: 1, paddingRight: 8 }}>{selectedItem.checklist_templates?.name || 'Item'}</div>
+                              <div style={{ fontSize: 14, fontWeight: 700, color: '#111', flex: 1, paddingRight: 8 }}>{getItemName(selectedItem)}</div>
                               <button onClick={() => setSelectedItem(null)} style={{ background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', color: '#9ca3af', lineHeight: 1 }}>×</button>
                             </div>
                             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 14 }}>
                               {[
-                                { label: 'Section', value: selectedItem.checklist_templates?.section || '—' },
-                                { label: 'Requires Photo', value: selectedItem.checklist_templates?.requires_photo ? 'Yes' : 'No' },
+                                { label: 'Section', value: getItemSection(selectedItem) },
+                                { label: 'Requires Photo', value: getItemRequiresPhoto(selectedItem) ? 'Yes' : 'No' },
                                 { label: 'Status', value: selectedItem.completed === true ? 'Done' : 'Pending' },
                                 { label: 'Completed', value: selectedItem.completed_at ? new Date(selectedItem.completed_at).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : '—' },
                               ].map(row => (
@@ -516,7 +538,7 @@ export default function CompliancePage() {
                             {selectedItem.completed_by && (
                               <div style={{ background: '#fff', borderRadius: 8, padding: '8px 10px', marginBottom: 8 }}>
                                 <div style={{ fontSize: 10, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Completed by</div>
-                                <div style={{ fontSize: 12, fontWeight: 600, color: '#111', marginTop: 2 }}>{selectedItem.completed_by}</div>
+                                <div style={{ fontSize: 12, fontWeight: 600, color: '#111', marginTop: 2 }}>{formatCompletedBy(selectedItem.completed_by)}</div>
                               </div>
                             )}
                             {selectedItem.notes && (
