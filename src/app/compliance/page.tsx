@@ -45,7 +45,7 @@ type ChecklistItem = {
   requires_photo?: boolean | null
   // Fallback: enriched from checklist_templates join
   checklist_templates: {
-    name: string
+    task_name: string
     section: string | null
     sort_order: number | null
     requires_photo: boolean | null
@@ -215,7 +215,7 @@ export default function CompliancePage() {
 
     const [templatesRes, schedulesRes, equipmentRes] = await Promise.all([
       templateIds.length > 0
-        ? supabase.from('checklist_templates').select('id, name, section, sort_order, requires_photo').in('id', templateIds)
+        ? supabase.from('checklist_templates').select('id, task_name, section, sort_order, requires_photo').in('id', templateIds)
         : Promise.resolve({ data: [] }),
       scheduleIds.length > 0
         ? supabase.from('uniform_schedules').select('id, label').in('id', scheduleIds)
@@ -338,7 +338,7 @@ export default function CompliancePage() {
 
   // ─── Item helpers (direct columns take priority over template join) ─────────
   const getItemName = (item: ChecklistItem) =>
-    item.name || item.title || item.checklist_templates?.name || 'Checklist Item'
+    item.name || item.title || item.checklist_templates?.task_name || 'Checklist Item'
   const getItemSection = (item: ChecklistItem) =>
     item.section || item.section_title || item.category || item.checklist_templates?.section || 'General'
   const getItemRequiresPhoto = (item: ChecklistItem) =>
