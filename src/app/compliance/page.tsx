@@ -69,6 +69,7 @@ type Session = {
   signed_off_at: string | null
   pdf_report_url: string | null
   duration_seconds: number | null
+  shift_id: string | null
 }
 
 type UniformPhoto = {
@@ -94,6 +95,37 @@ type TempLog = {
     name: string | null
     equipment_type: string | null
   } | null
+}
+
+type ComplianceIssue = {
+  id: string
+  session_id: string
+  checklist_item_id: string | null
+  employee_id: string | null
+  description: string
+  photo_url: string | null
+  is_uniform_violation: boolean | null
+  status: string
+  created_at: string
+  resolved_at: string | null
+  resolution_note: string | null
+  resolution_photo_url: string | null
+  employee_name?: string | null
+  checklist_item_name?: string | null
+}
+
+type RosterMember = {
+  employee_id: string
+  full_name: string
+  role: string | null
+  avatar_url: string | null
+}
+
+type ShiftInfo = {
+  id: string
+  shift_name: string
+  start_time: string
+  end_time: string | null
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -130,10 +162,13 @@ export default function CompliancePage() {
   const [comments, setComments] = useState<Comment[]>([])
   const [uniforms, setUniforms] = useState<UniformPhoto[]>([])
   const [temperatures, setTemperatures] = useState<TempLog[]>([])
+  const [issues, setIssues] = useState<ComplianceIssue[]>([])
+  const [roster, setRoster] = useState<RosterMember[]>([])
+  const [shiftInfo, setShiftInfo] = useState<ShiftInfo | null>(null)
 
   // UI state
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState<'checklist' | 'uniforms' | 'temperatures' | 'comments'>('checklist')
+  const [activeTab, setActiveTab] = useState<'checklist' | 'uniforms' | 'temperatures' | 'issues' | 'comments'>('checklist')
   const [selectedItem, setSelectedItem] = useState<ChecklistItem | null>(null)
   const [newComment, setNewComment] = useState('')
   const [postingComment, setPostingComment] = useState(false)
@@ -170,6 +205,13 @@ export default function CompliancePage() {
     setSession(sessionData)
     setCurrentSessionId(sessionData?.id ?? null)
     if (sessionData) await loadSessionData(sessionData.id)
+    // Load shift info
+    if (sessionData?.shift_id) {
+      const { data: shiftData } = await supabase.from('store_shifts').select('id, shift_name, start_time, end_time').eq('id', sessionData.shift_id).single()
+      setShiftInfo(shiftData || null)
+    } else {
+      setShiftInfo(null)
+    }
 
     // Load history
     const { data: historyData } = await supabase
@@ -250,6 +292,56 @@ export default function CompliancePage() {
     setComments(commentsRes.data || [])
     setUniforms(enrichedUniforms)
     setTemperatures(enrichedTemps)
+
+    // Step 4: Load compliance issues + session roster (two-step, no FK joins needed)
+    const [issuesRes, rosterRes] = await Promise.all([
+      supabase.from('compliance_issues')
+        .select('*')
+        .eq('session_id', sessionId)
+        .order('created_at', { ascending: false }),
+      supabase.from('session_roster')
+        .select('employee_id')
+        .eq('session_id', sessionId),
+    ])
+
+    const rawIssues   = issuesRes.data  || []
+    const rawRoster   = rosterRes.data  || []
+    const rosterEmpIds = [...new Set(rawRoster.map((r: any) => r.employee_id).filter(Boolean))]
+
+    const rosterEmpsRes = rosterEmpIds.length > 0
+      ? await supabase.from('employees').select('id, full_name, role, avatar_url').in('id', rosterEmpIds)
+      : { data: [] }
+
+    const employeeMap = new Map((rosterEmpsRes.data || []).map((e: any) => [e.id, e]))
+
+    // Also enrich issue employee names from same map + get employee IDs from issues
+    const issueEmpIds = [...new Set(rawIssues.map((i: any) => i.employee_id).filter(Boolean))]
+    const missingEmpIds = issueEmpIds.filter((id: string) => !employeeMap.has(id))
+    if (missingEmpIds.length > 0) {
+      const { data: extraEmps } = await supabase.from('employees').select('id, full_name, role, avatar_url').in('id', missingEmpIds)
+      ;(extraEmps || []).forEach((e: any) => employeeMap.set(e.id, e))
+    }
+
+    const itemNameMap = new Map(enrichedItems.map((item: any) => [
+      item.id,
+      item.name || item.title || item.checklist_templates?.task_name || 'Checklist item'
+    ]))
+
+    const enrichedIssues: ComplianceIssue[] = rawIssues.map((issue: any) => ({
+      ...issue,
+      employee_name: issue.employee_id ? employeeMap.get(issue.employee_id)?.full_name || 'Unknown employee' : null,
+      checklist_item_name: issue.checklist_item_id ? itemNameMap.get(issue.checklist_item_id) || 'Checklist item' : null,
+    }))
+
+    const rosterMembers: RosterMember[] = rosterEmpIds
+      .map((empId: string) => {
+        const emp = employeeMap.get(empId)
+        return emp ? { employee_id: empId, full_name: emp.full_name, role: emp.role || null, avatar_url: emp.avatar_url || null } : null
+      })
+      .filter(Boolean) as RosterMember[]
+
+    setIssues(enrichedIssues)
+    setRoster(rosterMembers)
   }
 
   // Load on mount + when storeId ready
@@ -287,6 +379,12 @@ export default function CompliancePage() {
     if (sessionData) {
       setSession(sessionData)
       await loadSessionData(item.id)
+      if (sessionData.shift_id) {
+        const { data: shiftData } = await supabase.from('store_shifts').select('id, shift_name, start_time, end_time').eq('id', sessionData.shift_id).single()
+        setShiftInfo(shiftData || null)
+      } else {
+        setShiftInfo(null)
+      }
     }
     setActiveTab('checklist')
     window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -308,6 +406,7 @@ export default function CompliancePage() {
   }
 
   // ─── Computed ──────────────────────────────────────────────────────────────
+  const openIssuesCount    = issues.filter(i => i.status === 'open').length
   const completedCount     = items.filter(i => i.completed === true).length
   const totalItems         = items.length
   const progress           = totalItems > 0 ? Math.round((completedCount / totalItems) * 100) : 0
@@ -428,6 +527,51 @@ export default function CompliancePage() {
           </div>
         )}
 
+        {/* ── Shift + Roster strip ── */}
+        {!loading && session && (shiftInfo || roster.length > 0) && (
+          <div style={{ background: '#fff', border: '1.5px solid #eef2ee', borderRadius: 14, padding: '12px 20px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 16 }}>
+            {shiftInfo && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 16 }}>🕐</span>
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: PRIMARY }}>{shiftInfo.shift_name}</div>
+                  <div style={{ fontSize: 11, color: '#9ca3af' }}>{shiftInfo.start_time?.slice(0,5)}{shiftInfo.end_time ? ` – ${shiftInfo.end_time.slice(0,5)}` : ''}</div>
+                </div>
+              </div>
+            )}
+            {shiftInfo && roster.length > 0 && <div style={{ width: 1, height: 32, background: '#e5e7eb' }} />}
+            {roster.length > 0 && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: '#9ca3af' }}>ON SHIFT:</span>
+                {roster.map(m => (
+                  <div key={m.employee_id} style={{ display: 'flex', alignItems: 'center', gap: 5, background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 100, padding: '3px 10px 3px 5px' }}>
+                    <div style={{ width: 20, height: 20, borderRadius: '50%', background: PRIMARY, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 700, color: '#fff', flexShrink: 0 }}>
+                      {m.full_name.charAt(0).toUpperCase()}
+                    </div>
+                    <span style={{ fontSize: 11, fontWeight: 600, color: '#166534' }}>{m.full_name.split(' ')[0]}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── Open issues warning strip ── */}
+        {!loading && session && openIssuesCount > 0 && (
+          <div style={{ background: '#fff7ed', border: '1.5px solid #fed7aa', borderRadius: 14, padding: '12px 20px', marginBottom: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ fontSize: 20 }}>⚠️</span>
+              <div>
+                <div style={{ fontWeight: 700, color: '#9a3412', fontSize: 14 }}>{openIssuesCount} open issue{openIssuesCount !== 1 ? 's' : ''} flagged</div>
+                <div style={{ fontSize: 12, color: '#ea580c' }}>Review the Issues tab for details and resolution status</div>
+              </div>
+            </div>
+            <button onClick={() => setActiveTab('issues')} style={{ padding: '7px 16px', background: '#ea580c', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>
+              View Issues
+            </button>
+          </div>
+        )}
+
         {loading ? (
           <div style={{ background: '#fff', borderRadius: 20, padding: 60, textAlign: 'center' }}>
             <div style={{ fontSize: 15, color: '#9ca3af' }}>Loading compliance data…</div>
@@ -459,14 +603,14 @@ export default function CompliancePage() {
             {/* ── Tabs ── */}
             <div style={{ background: '#fff', borderRadius: 16, border: '1.5px solid #eef2ee', marginBottom: 20, overflow: 'hidden' }}>
               <div style={{ display: 'flex', borderBottom: '1.5px solid #f3f4f6' }}>
-                {(['checklist', 'uniforms', 'temperatures', 'comments'] as const).map(tab => (
+                {(['checklist', 'uniforms', 'temperatures', 'issues', 'comments'] as const).map(tab => (
                   <button key={tab} onClick={() => setActiveTab(tab)} style={{
                     flex: 1, padding: '14px 10px', border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 700,
                     background: activeTab === tab ? '#f0fdf4' : '#fff',
                     color: activeTab === tab ? PRIMARY : '#6b7280',
                     borderBottom: activeTab === tab ? `2px solid ${PRIMARY}` : '2px solid transparent',
                   }}>
-                    {tab === 'checklist' ? `Checklist (${completedCount}/${totalItems})` : tab === 'uniforms' ? `Uniforms (${uniforms.length})` : tab === 'temperatures' ? `Temps (${temperatures.length})` : `Comments (${comments.length})`}
+                    {tab === 'checklist' ? `Checklist (${completedCount}/${totalItems})` : tab === 'uniforms' ? `Uniforms (${uniforms.length})` : tab === 'temperatures' ? `Temps (${temperatures.length})` : tab === 'issues' ? `Issues (${issues.length})` : `Comments (${comments.length})`}
                   </button>
                 ))}
               </div>
@@ -622,6 +766,90 @@ export default function CompliancePage() {
                             </div>
                           )
                         })}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* ── Issues tab ── */}
+                {activeTab === 'issues' && (
+                  <div>
+                    {issues.length === 0 ? (
+                      <div style={{ textAlign: 'center', padding: '40px 0', color: '#9ca3af' }}>
+                        <div style={{ fontSize: 36, marginBottom: 10 }}>✅</div>
+                        <div style={{ fontSize: 15, fontWeight: 600 }}>No issues flagged for this session</div>
+                        <div style={{ fontSize: 13, marginTop: 6 }}>All checklist items and uniforms were compliant</div>
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                        {/* Open issues first */}
+                        {issues.filter(i => i.status === 'open').length > 0 && (
+                          <div style={{ fontSize: 12, fontWeight: 700, color: '#dc2626', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 4 }}>⚠️ Open Issues</div>
+                        )}
+                        {issues.filter(i => i.status === 'open').map(issue => (
+                          <div key={issue.id} style={{ background: '#fff5f5', border: '1.5px solid #fecaca', borderRadius: 14, padding: '14px 16px', display: 'flex', gap: 14 }}>
+                            {issue.photo_url && (
+                              <img src={issue.photo_url} alt="Issue" style={{ width: 72, height: 72, borderRadius: 10, objectFit: 'cover', flexShrink: 0, border: '1px solid #fca5a5' }} />
+                            )}
+                            <div style={{ flex: 1 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                                {issue.is_uniform_violation && <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 100, background: '#fee2e2', color: '#dc2626' }}>👕 UNIFORM</span>}
+                                {issue.checklist_item_name && <span style={{ fontSize: 11, fontWeight: 700, color: '#6b7280' }}>{issue.checklist_item_name}</span>}
+                              </div>
+                              <div style={{ fontSize: 13, fontWeight: 600, color: '#111', marginBottom: 6 }}>{issue.description}</div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                                {issue.employee_name && (
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                                    <div style={{ width: 18, height: 18, borderRadius: '50%', background: '#dc2626', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, fontWeight: 700, color: '#fff' }}>
+                                      {issue.employee_name.charAt(0)}
+                                    </div>
+                                    <span style={{ fontSize: 11, fontWeight: 600, color: '#dc2626' }}>{issue.employee_name}</span>
+                                  </div>
+                                )}
+                                <span style={{ fontSize: 11, color: '#9ca3af' }}>{new Date(issue.created_at).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })}</span>
+                              </div>
+                            </div>
+                            <div style={{ flexShrink: 0 }}>
+                              <span style={{ fontSize: 10, fontWeight: 700, padding: '3px 10px', borderRadius: 100, background: '#fee2e2', color: '#dc2626' }}>OPEN</span>
+                            </div>
+                          </div>
+                        ))}
+
+                        {/* Resolved issues */}
+                        {issues.filter(i => i.status === 'resolved').length > 0 && (
+                          <div style={{ fontSize: 12, fontWeight: 700, color: '#16a34a', textTransform: 'uppercase', letterSpacing: '0.5px', margin: '8px 0 4px' }}>✓ Resolved</div>
+                        )}
+                        {issues.filter(i => i.status === 'resolved').map(issue => (
+                          <div key={issue.id} style={{ background: '#f0fdf4', border: '1.5px solid #bbf7d0', borderRadius: 14, padding: '14px 16px', display: 'flex', gap: 14 }}>
+                            {issue.photo_url && (
+                              <img src={issue.photo_url} alt="Issue" style={{ width: 72, height: 72, borderRadius: 10, objectFit: 'cover', flexShrink: 0, border: '1px solid #86efac' }} />
+                            )}
+                            <div style={{ flex: 1 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                                {issue.is_uniform_violation && <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 100, background: '#dcfce7', color: '#16a34a' }}>👕 UNIFORM</span>}
+                                {issue.checklist_item_name && <span style={{ fontSize: 11, fontWeight: 700, color: '#6b7280' }}>{issue.checklist_item_name}</span>}
+                              </div>
+                              <div style={{ fontSize: 13, fontWeight: 600, color: '#111', marginBottom: 4 }}>{issue.description}</div>
+                              {issue.resolution_note && (
+                                <div style={{ fontSize: 12, color: '#16a34a', marginBottom: 6 }}>✓ {issue.resolution_note}</div>
+                              )}
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                                {issue.employee_name && (
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                                    <div style={{ width: 18, height: 18, borderRadius: '50%', background: '#16a34a', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, fontWeight: 700, color: '#fff' }}>
+                                      {issue.employee_name.charAt(0)}
+                                    </div>
+                                    <span style={{ fontSize: 11, fontWeight: 600, color: '#16a34a' }}>{issue.employee_name}</span>
+                                  </div>
+                                )}
+                                {issue.resolved_at && <span style={{ fontSize: 11, color: '#9ca3af' }}>Resolved {new Date(issue.resolved_at).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })}</span>}
+                              </div>
+                            </div>
+                            <div style={{ flexShrink: 0 }}>
+                              <span style={{ fontSize: 10, fontWeight: 700, padding: '3px 10px', borderRadius: 100, background: '#dcfce7', color: '#16a34a' }}>RESOLVED</span>
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     )}
                   </div>
