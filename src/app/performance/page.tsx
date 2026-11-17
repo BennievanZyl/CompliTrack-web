@@ -212,11 +212,12 @@ export default function PerformancePage() {
       setAccessDenied(true); setLoading(false); return
     }
 
-    const today   = new Date()
-    const todayStr = fmt(today)
-    const lwStr    = fmt(addDays(today, -7))
-    const lmStr    = fmt(addMonths(today, -1))
-    const lyStr    = fmt(addYears(today, -1))
+    const today     = new Date()
+    const yesterday = addDays(today, -1)
+    const todayStr  = fmt(yesterday)             // reference = yesterday (last completed trading day)
+    const lwStr     = fmt(addDays(yesterday, -7))
+    const lmStr     = fmt(addMonths(yesterday, -1))
+    const lyStr     = fmt(addYears(yesterday, -1))
 
     const { data: mainRows } = await supabase
       .from('cash_ups')
@@ -234,7 +235,7 @@ export default function PerformancePage() {
     setLastYearData(toMetric(byDate.get(lyStr)))
 
     const trendDays = Array.from({ length: 7 }, (_, i) => {
-      const d = addDays(today, -(6 - i))
+      const d = addDays(today, -(7 - i))   // ends at yesterday so all 7 days are completed
       return { thisDay: fmt(d), prevDay: fmt(addDays(d, -7)), label: d.toLocaleDateString('en-ZA', { weekday: 'short' }) }
     })
     const { data: trendRows } = await supabase
@@ -360,12 +361,12 @@ export default function PerformancePage() {
         {/* ── store comparisons ── */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
           <span style={{ fontSize: 18 }}>🏪</span>
-          <h2 style={{ fontSize: 17, fontWeight: 800, color: '#111', margin: 0 }}>Today vs. Previous Periods</h2>
+          <h2 style={{ fontSize: 17, fontWeight: 800, color: '#111', margin: 0 }}>Yesterday vs. Previous Periods</h2>
         </div>
 
         {todayData === null && (
           <div style={{ background: '#fff', borderRadius: 14, padding: '20px 24px', marginBottom: 16, border: '1.5px solid #e8f0e8', color: '#9ca3af', fontSize: 13, textAlign: 'center' }}>
-            No cash-up captured for today yet. Check back after today&apos;s cash-up is done.
+            No cash-up found for yesterday.
           </div>
         )}
 
