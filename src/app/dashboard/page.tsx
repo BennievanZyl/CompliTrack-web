@@ -253,6 +253,16 @@ function DashboardContent() {
       )
     },
     { icon: <span style={{ fontSize: '26px' }}>💰</span>, iconBg: '#eff6ff', title: 'Cash Up', subtitle: 'Daily cash reconciliation', href: '/cashup' },
+    {
+      icon: <span style={{ fontSize: '26px' }}>🔮</span>,
+      iconBg: '#f0fdf4',
+      title: 'Sales Forecast',
+      subtitle: 'AI-powered daily & weekly sales predictions',
+      href: '/predictions',
+      badge: 'AI',
+      badgeColor: '#166534',
+      badgeBg: '#dcfce7',
+    },
     { icon: <span style={{ fontSize: '26px' }}>📊</span>, iconBg: '#f5f3ff', title: 'Analytics', subtitle: 'P&L, breakeven, food cost, daily tracker, compliance trend', href: '/analytics' },
     { icon: <span style={{ fontSize: '26px' }}>📋</span>, iconBg: '#fef3c7', title: 'Reports', subtitle: 'Download Financial, Labour, Stock, Compliance & HR reports — CSV, Excel, PDF', href: '/reports' },
     { icon: <span style={{ fontSize: '26px' }}>📈</span>, iconBg: '#ecfdf5', title: 'Income & Expenses', subtitle: 'Financial tracking and food cost', href: '/finances' },
