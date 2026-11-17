@@ -7,6 +7,10 @@ import { useStoreContext } from '@/lib/store-context'
 /* ── types ─────────────────────────────────────────────────── */
 type MetricPair = { customers: number | null; sales: number | null }
 type Criterion = { key: string; label: string; emoji: string }
+type ComplianceIssue = {
+  id: string; description: string; is_uniform_violation: boolean | null
+  status: string; created_at: string; resolved_at: string | null; resolution_note: string | null
+}
 type EvalRecord = {
   eval_date: string
   overall_score: number | null
@@ -19,10 +23,11 @@ type EvalRecord = {
   scores: Record<string, number> | null
 }
 type AttRecord = { work_date: string; is_late: boolean; clock_in: string | null }
-type EmpDetail = { evals: EvalRecord[]; attendance: AttRecord[] }
+type EmpDetail = { evals: EvalRecord[]; attendance: AttRecord[]; issues: ComplianceIssue[] }
 type StaffStat = {
   id: string; name: string; role: string
   shifts: number; punctualityPct: number | null; lastScore: number | null
+  complianceScore: number | null; openIssues: number; totalIssues: number
 }
 
 /* ── constants ─────────────────────────────────────────────── */
@@ -158,7 +163,7 @@ export default function PerformancePage() {
 
     setDetailLoading(empId)
 
-    const [evalsRes, attRes] = await Promise.all([
+    const [evalsRes, attRes, issuesRes] = await Promise.all([
       supabase
         .from('employee_evaluations')
         .select('eval_date, overall_score, notes, punctuality, attitude, performance, appearance, teamwork, scores')
@@ -172,11 +177,17 @@ export default function PerformancePage() {
         .eq('store_id', STORE_ID)
         .order('work_date', { ascending: false })
         .limit(30),
+      supabase
+        .from('compliance_issues')
+        .select('id, description, is_uniform_violation, status, created_at, resolved_at, resolution_note')
+        .eq('employee_id', empId)
+        .order('created_at', { ascending: false })
+        .limit(20),
     ])
 
     setEmpDetails(prev => ({
       ...prev,
-      [empId]: { evals: evalsRes.data || [], attendance: attRes.data || [] },
+      [empId]: { evals: evalsRes.data || [], attendance: attRes.data || [], issues: (issuesRes.data || []) as ComplianceIssue[] },
     }))
     setDetailLoading(null)
   }, [expandedId, empDetails, STORE_ID])
@@ -256,11 +267,27 @@ export default function PerformancePage() {
     }
 
     /* individual staff stats */
-    const [empsRes, allAttRes, evalsRes] = await Promise.all([
+    const thirtyDaysAgo = fmt(addDays(today, -30))
+    const [empsRes, allAttRes, evalsRes, issueRows30] = await Promise.all([
       supabase.from('employees').select('id, full_name, role').eq('store_id', STORE_ID).eq('is_active', true).order('full_name'),
       supabase.from('attendance').select('employee_id, is_late').eq('store_id', STORE_ID).gte('work_date', monthStart).lte('work_date', todayStr),
       supabase.from('employee_evaluations').select('employee_id, overall_score').eq('store_id', STORE_ID).order('eval_date', { ascending: false }),
+      supabase.from('compliance_issues').select('employee_id, status, is_uniform_violation').eq('store_id', STORE_ID).gte('created_at', thirtyDaysAgo + 'T00:00:00Z'),
     ])
+
+    // Build per-employee compliance map
+    const issuesByEmp = new Map<string, { open: number; resolved: number; uniformOpen: number }>()
+    for (const issue of (issueRows30.data || [])) {
+      if (!issue.employee_id) continue
+      const cur = issuesByEmp.get(issue.employee_id) || { open: 0, resolved: 0, uniformOpen: 0 }
+      if (issue.status === 'open') {
+        cur.open++
+        if (issue.is_uniform_violation) cur.uniformOpen++
+      } else {
+        cur.resolved++
+      }
+      issuesByEmp.set(issue.employee_id, cur)
+    }
 
     if (empsRes.data && empsRes.data.length > 0) {
       const attByEmp = new Map<string, { total: number; late: number }>()
@@ -273,9 +300,20 @@ export default function PerformancePage() {
         if (!evalByEmp.has(e.employee_id)) evalByEmp.set(e.employee_id, e.overall_score)
       }
       setStaffStats(empsRes.data.map(emp => {
-        const att = attByEmp.get(emp.id)
-        const pct = att && att.total > 0 ? Math.round(((att.total - att.late) / att.total) * 100) : null
-        return { id: emp.id, name: emp.full_name, role: emp.role, shifts: att?.total || 0, punctualityPct: pct, lastScore: evalByEmp.get(emp.id) ?? null }
+        const att    = attByEmp.get(emp.id)
+        const pct    = att && att.total > 0 ? Math.round(((att.total - att.late) / att.total) * 100) : null
+        const issues = issuesByEmp.get(emp.id)
+        const complianceScore = issues !== undefined
+          ? Math.max(0, 100 - (issues.open * 10) - (issues.resolved * 5) - (issues.uniformOpen * 5))
+          : null
+        return {
+          id: emp.id, name: emp.full_name, role: emp.role,
+          shifts: att?.total || 0, punctualityPct: pct,
+          lastScore: evalByEmp.get(emp.id) ?? null,
+          complianceScore,
+          openIssues:  issues?.open    || 0,
+          totalIssues: (issues?.open || 0) + (issues?.resolved || 0),
+        }
       }))
     }
 
@@ -428,6 +466,15 @@ export default function PerformancePage() {
                           ★ {s.lastScore.toFixed(1)}/5
                         </div>
                       )}
+                      {s.openIssues > 0 ? (
+                        <div style={{ fontSize: 11, fontWeight: 700, color: '#dc2626', background: '#fee2e2', borderRadius: 6, padding: '2px 8px' }}>
+                          ⚠️ {s.openIssues} open
+                        </div>
+                      ) : s.complianceScore !== null ? (
+                        <div style={{ fontSize: 11, fontWeight: 700, color: s.complianceScore >= 80 ? '#16a34a' : s.complianceScore >= 60 ? '#d97706' : '#dc2626', background: s.complianceScore >= 80 ? '#f0fdf4' : s.complianceScore >= 60 ? '#fff7ed' : '#fef2f2', borderRadius: 6, padding: '2px 8px' }}>
+                          {s.complianceScore >= 80 ? '✓' : '⚠'} {s.complianceScore}% compliant
+                        </div>
+                      ) : null}
                     </div>
                     <div style={{ fontSize: 16, color: '#9ca3af', flexShrink: 0, transform: isExpanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>▾</div>
                   </button>
@@ -462,6 +509,34 @@ export default function PerformancePage() {
                                     </div>
                                   )
                                 })}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* compliance issues */}
+                          <div>
+                            <div style={{ fontSize: 13, fontWeight: 700, color: '#374151', marginBottom: 10 }}>⚠️ Compliance Issues (last 30 days)</div>
+                            {(!detail.issues || detail.issues.length === 0) ? (
+                              <div style={{ fontSize: 12, color: '#16a34a', background: '#f0fdf4', borderRadius: 8, padding: '8px 12px' }}>✅ No issues flagged in the last 30 days</div>
+                            ) : (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                {detail.issues.map((issue, idx) => (
+                                  <div key={idx} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '8px 12px', background: issue.status === 'open' ? '#fff5f5' : '#f0fdf4', borderRadius: 8, border: `1px solid ${issue.status === 'open' ? '#fecaca' : '#bbf7d0'}` }}>
+                                    <span style={{ fontSize: 14, flexShrink: 0 }}>{issue.is_uniform_violation ? '👕' : '☑️'}</span>
+                                    <div style={{ flex: 1 }}>
+                                      <div style={{ fontSize: 12, fontWeight: 600, color: '#111' }}>{issue.description}</div>
+                                      <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>
+                                        {new Date(issue.created_at).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' })}
+                                      </div>
+                                      {issue.resolution_note && (
+                                        <div style={{ fontSize: 11, color: '#16a34a', marginTop: 2 }}>✓ {issue.resolution_note}</div>
+                                      )}
+                                    </div>
+                                    <span style={{ fontSize: 10, fontWeight: 700, color: issue.status === 'open' ? '#dc2626' : '#16a34a', background: issue.status === 'open' ? '#fee2e2' : '#dcfce7', borderRadius: 100, padding: '2px 8px', flexShrink: 0, whiteSpace: 'nowrap' }}>
+                                      {issue.status === 'open' ? 'OPEN' : 'RESOLVED'}
+                                    </span>
+                                  </div>
+                                ))}
                               </div>
                             )}
                           </div>
