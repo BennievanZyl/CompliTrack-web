@@ -23,6 +23,7 @@ function DashboardContent() {
   const [accountStatus, setAccountStatus] = useState<string | null>(null)
   const [unreadMessages, setUnreadMessages] = useState(0)
   const [viewingAsStore, setViewingAsStore] = useState<Store | null>(null)
+  const [openIssuesCount, setOpenIssuesCount] = useState(0)
 
   useEffect(() => { loadDashboard() }, [])
   useEffect(() => { if (selectedStore) loadStoreData(selectedStore.id) }, [selectedStore])
@@ -137,6 +138,12 @@ function DashboardContent() {
       setTotalTasks(0)
       setCompletedTasks(0)
     }
+    const { count: issueCount } = await supabase
+      .from('compliance_issues')
+      .select('*', { count: 'exact', head: true })
+      .eq('store_id', storeId)
+      .eq('status', 'open')
+    setOpenIssuesCount(issueCount || 0)
   }
 
   const handleSignOut = async () => { await supabase.auth.signOut(); router.push('/login') }
@@ -219,17 +226,31 @@ function DashboardContent() {
       badge: isSignedOff ? 'Complete' : hasSession ? 'In Progress' : 'Not Started',
       badgeColor: isSignedOff ? '#166534' : hasSession ? '#92400e' : '#6b7280',
       badgeBg: isSignedOff ? '#dcfce7' : hasSession ? '#fef3c7' : '#f3f4f6',
-      extra: hasSession ? (
-        <div style={{ marginTop: '16px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#6b7280', marginBottom: '8px' }}>
-            <span>Tasks complete</span>
-            <span style={{ fontWeight: '700', color: '#111' }}>{completedTasks}/{totalTasks}</span>
-          </div>
-          <div style={{ height: '6px', background: '#f0f0f0', borderRadius: '100px', overflow: 'hidden' }}>
-            <div style={{ height: '100%', width: `${completionPercent}%`, background: 'linear-gradient(90deg, #1a5c38, #2d8653)', borderRadius: '100px' }}/>
-          </div>
-        </div>
-      ) : null
+      extra: (
+        <>
+          {hasSession && (
+            <div style={{ marginTop: '16px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#6b7280', marginBottom: '8px' }}>
+                <span>Tasks complete</span>
+                <span style={{ fontWeight: '700', color: '#111' }}>{completedTasks}/{totalTasks}</span>
+              </div>
+              <div style={{ height: '6px', background: '#f0f0f0', borderRadius: '100px', overflow: 'hidden' }}>
+                <div style={{ height: '100%', width: `${completionPercent}%`, background: 'linear-gradient(90deg, #1a5c38, #2d8653)', borderRadius: '100px' }}/>
+              </div>
+            </div>
+          )}
+          {openIssuesCount > 0 && (
+            <div onClick={(e) => { e.stopPropagation(); router.push('/compliance/issues') }}
+              style={{ marginTop: hasSession ? 10 : 16, background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 10, padding: '8px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: 14 }}>🚩</span>
+                <span style={{ fontSize: 13, fontWeight: 700, color: '#c2410c' }}>{openIssuesCount} open {openIssuesCount === 1 ? 'issue' : 'issues'}</span>
+              </div>
+              <span style={{ fontSize: 11, color: '#ea580c', fontWeight: 600 }}>View →</span>
+            </div>
+          )}
+        </>
+      )
     },
     { icon: <span style={{ fontSize: '26px' }}>💰</span>, iconBg: '#eff6ff', title: 'Cash Up', subtitle: 'Daily cash reconciliation', href: '/cashup' },
     { icon: <span style={{ fontSize: '26px' }}>📊</span>, iconBg: '#f5f3ff', title: 'Analytics', subtitle: 'P&L, breakeven, food cost, daily tracker, compliance trend', href: '/analytics' },
