@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
+import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 
 const PRIMARY = '#386641'
@@ -34,8 +34,7 @@ type SortKey = 'created_at' | 'employee_name' | 'store_name'
 type FilterStatus = 'open' | 'resolved' | 'all'
 
 export default function IssuesPage() {
-  const supabase = createClientComponentClient()
-  const router   = useRouter()
+  const router = useRouter()
 
   const [issues,         setIssues]         = useState<IssueRow[]>([])
   const [loading,        setLoading]        = useState(true)
