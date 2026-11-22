@@ -348,9 +348,16 @@ export default function PredictionsPage() {
 
   const todayCat = getDomCat(todayStr)
 
-  // Phase 2 blending: weight rises linearly from 0 (no samples) to 1 (8+ samples)
-  // 0 samples → show Phase 1 only; 4 samples → 50/50; 8+ samples → Phase 2 fully
-  const phase2BlendWeight = Math.min(1, ratioSamples / 8)
+  // Blend weights:
+  // - stored predicted_final from snapshot page → use 100% (most accurate: today's sales + ratios)
+  // - same-DOW runtime ratio samples → blend linearly up to 100% at 8 samples
+  // - universal cross-day ratio fallback → blend up to 50% max (less specific but beats ignoring snapshot)
+  const hasStoredSnapPred = !!(todaySnap?.predicted_final)
+  const phase2BlendWeight = hasStoredSnapPred
+    ? 1
+    : usingUniversal
+      ? Math.min(0.5, ratioSamples / 8)
+      : Math.min(1, ratioSamples / 8)
   const finalPred = todayPred
     ? (phase2Pred && phase2BlendWeight > 0
         ? Math.round((todayPred.mid * (1 - phase2BlendWeight) + phase2Pred * phase2BlendWeight) / 10) * 10
@@ -409,9 +416,29 @@ export default function PredictionsPage() {
                 <div style={{ fontSize: 13, color: '#166534', fontWeight: 600 }}>
                   📸 Snapshot at {todaySnap!.snapshot_time} · {cur(todaySnap!.sales_at_time)} trading so far
                   {phase2BlendWeight > 0 ? (
-                    <span style={{ marginLeft: 8 }}>
-                      · blended with {ratioSamples} {usingDomFilter ? `${getDomCat(todayStr)}-month ` : ''}{DOW_FULL[todayDow]} ratio sample{ratioSamples !== 1 ? 's' : ''} ({Math.round(phase2BlendWeight * 100)}% weight)
-                    </span>
+                    hasStoredSnapPred && !usingUniversal ? (
+                      <span style={{ marginLeft: 8 }}>
+                        · snapshot-based prediction
+                        {snapshotPacing !== null && (
+                          <span style={{ marginLeft: 6, fontWeight: 700, color: snapshotPacing >= 0 ? '#15803d' : '#6b7280' }}>
+                            {snapshotPacing >= 0 ? `▲ +${snapshotPacing}%` : `▼ ${snapshotPacing}%`} vs baseline
+                          </span>
+                        )}
+                      </span>
+                    ) : usingUniversal ? (
+                      <span style={{ marginLeft: 8 }}>
+                        · blended {Math.round(phase2BlendWeight * 100)}% with snapshot ({ratioSamples} cross-day ratio{ratioSamples !== 1 ? 's' : ''}, building {DOW_FULL[todayDow]} data)
+                        {snapshotPacing !== null && (
+                          <span style={{ marginLeft: 6, fontWeight: 700, color: snapshotPacing >= 0 ? '#15803d' : '#6b7280' }}>
+                            {snapshotPacing >= 0 ? `▲ +${snapshotPacing}%` : `▼ ${snapshotPacing}%`} vs baseline
+                          </span>
+                        )}
+                      </span>
+                    ) : (
+                      <span style={{ marginLeft: 8 }}>
+                        · blended with {ratioSamples} {usingDomFilter ? `${getDomCat(todayStr)}-month ` : ''}{DOW_FULL[todayDow]} ratio sample{ratioSamples !== 1 ? 's' : ''} ({Math.round(phase2BlendWeight * 100)}% weight)
+                      </span>
+                    )
                   ) : (
                     <>
                       {snapshotPacing !== null && (
@@ -459,7 +486,10 @@ export default function PredictionsPage() {
                       <div style={{ fontSize: 48, fontWeight: 900, color: PRIMARY, lineHeight: 1, letterSpacing: '-1px' }}>{cur(finalPred ?? todayPred.mid)}</div>
                       {phase2BlendWeight > 0 && (
                         <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>
-                          {Math.round(phase2BlendWeight * 100)}% snapshot · {Math.round((1 - phase2BlendWeight) * 100)}% historical pattern
+                          {hasStoredSnapPred && !usingUniversal
+                            ? 'Refined with today\'s snapshot sales'
+                            : `${Math.round(phase2BlendWeight * 100)}% snapshot · ${Math.round((1 - phase2BlendWeight) * 100)}% historical pattern`
+                          }
                         </div>
                       )}
                       <div style={{ fontSize: 15, color: '#9ca3af', marginTop: 6 }}>Range: {cur(todayPred.min)} — {cur(todayPred.max)}</div>
