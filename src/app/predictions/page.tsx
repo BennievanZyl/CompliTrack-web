@@ -156,15 +156,18 @@ function buildPhase2Ratio(cashups: CashupRow[], snaps: SnapshotRow[], todayStr: 
     .filter(Boolean) as { dow: number; cat: DomCat; ratio: number }[]
 
   // Primary: same weekday AND same DOM category (early/mid/late month)
-  const primary  = pairs.filter(p => p.dow === todayDow && p.cat === todayCat)
-  // Fallback: same weekday, any DOM category (not enough DOM+DOW pairs yet)
-  const fallback = pairs.filter(p => p.dow === todayDow)
+  const primary   = pairs.filter(p => p.dow === todayDow && p.cat === todayCat)
+  // Fallback: same weekday, any DOM category
+  const fallback  = pairs.filter(p => p.dow === todayDow)
+  // Universal: any day (ratio final/snapshot consistent across days — last resort)
+  const universal = pairs
 
-  const pool = primary.length >= 2 ? primary : fallback
-  if (pool.length === 0) return { avgRatio: null, ratioSamples: 0, usingDomFilter: false }
+  const usingUniversal = primary.length < 2 && fallback.length === 0 && universal.length > 0
+  const pool = primary.length >= 2 ? primary : fallback.length > 0 ? fallback : universal
+  if (pool.length === 0) return { avgRatio: null, ratioSamples: 0, usingDomFilter: false, usingUniversal: false }
 
   const avgRatio = pool.reduce((s, p) => s + p.ratio, 0) / pool.length
-  return { avgRatio, ratioSamples: pool.length, usingDomFilter: primary.length >= 2 }
+  return { avgRatio, ratioSamples: pool.length, usingDomFilter: primary.length >= 2, usingUniversal }
 }
 
 /* ── date helpers ────────────────────────────────────────────── */
@@ -234,6 +237,7 @@ export default function PredictionsPage() {
   const [phase2Pred,    setPhase2Pred]    = useState<number | null>(null)
   const [ratioSamples,  setRatioSamples]  = useState(0)
   const [usingDomFilter, setUsingDomFilter] = useState(false)
+  const [usingUniversal, setUsingUniversal] = useState(false)
 
   const todayStr = new Date().toISOString().split('T')[0]
   const todayDow = new Date().getDay()
@@ -283,9 +287,10 @@ export default function PredictionsPage() {
     setTodaySnap(todaySnapshot)
 
     /* Phase 2 ratio */
-    const { avgRatio, ratioSamples: rs, usingDomFilter: domF } = buildPhase2Ratio(data, snaps, todayStr, todayDow)
+    const { avgRatio, ratioSamples: rs, usingDomFilter: domF, usingUniversal: uniF } = buildPhase2Ratio(data, snaps, todayStr, todayDow)
     setRatioSamples(rs)
     setUsingDomFilter(domF)
+    setUsingUniversal(uniF)
     if (todaySnapshot && todaySnapshot.predicted_final) {
       setPhase2Pred(todaySnapshot.predicted_final)
     } else if (todaySnapshot && avgRatio) {
