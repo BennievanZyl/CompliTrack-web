@@ -141,21 +141,30 @@ function buildAccuracy(rows: CashupRow[], weeksBack = 8): AccuracyPoint[] {
 
 /* ── Phase 2 ratio ───────────────────────────────────────────── */
 function buildPhase2Ratio(cashups: CashupRow[], snaps: SnapshotRow[], todayStr: string, todayDow: number) {
+  const todayCat  = getDomCat(todayStr)
   const cashupMap = new Map(cashups.map(c => [c.cash_up_date, c.cash_up_total]))
+
   const pairs = snaps
     .filter(s => s.snapshot_date !== todayStr && s.sales_at_time > 0)
     .map(s => {
       const final = cashupMap.get(s.snapshot_date)
       if (!final) return null
       const dow = new Date(s.snapshot_date + 'T12:00:00').getDay()
-      return { dow, ratio: final / s.sales_at_time }
+      const cat = getDomCat(s.snapshot_date)
+      return { dow, cat, ratio: final / s.sales_at_time }
     })
-    .filter(Boolean) as { dow: number; ratio: number }[]
+    .filter(Boolean) as { dow: number; cat: DomCat; ratio: number }[]
 
-  const sameDow = pairs.filter(p => p.dow === todayDow)
-  if (sameDow.length === 0) return { avgRatio: null, ratioSamples: 0 }
-  const avgRatio = sameDow.reduce((s, p) => s + p.ratio, 0) / sameDow.length
-  return { avgRatio, ratioSamples: sameDow.length }
+  // Primary: same weekday AND same DOM category (early/mid/late month)
+  const primary  = pairs.filter(p => p.dow === todayDow && p.cat === todayCat)
+  // Fallback: same weekday, any DOM category (not enough DOM+DOW pairs yet)
+  const fallback = pairs.filter(p => p.dow === todayDow)
+
+  const pool = primary.length >= 2 ? primary : fallback
+  if (pool.length === 0) return { avgRatio: null, ratioSamples: 0, usingDomFilter: false }
+
+  const avgRatio = pool.reduce((s, p) => s + p.ratio, 0) / pool.length
+  return { avgRatio, ratioSamples: pool.length, usingDomFilter: primary.length >= 2 }
 }
 
 /* ── date helpers ────────────────────────────────────────────── */
@@ -224,6 +233,7 @@ export default function PredictionsPage() {
   const [todaySnap,     setTodaySnap]     = useState<SnapshotRow | null>(null)
   const [phase2Pred,    setPhase2Pred]    = useState<number | null>(null)
   const [ratioSamples,  setRatioSamples]  = useState(0)
+  const [usingDomFilter, setUsingDomFilter] = useState(false)
 
   const todayStr = new Date().toISOString().split('T')[0]
   const todayDow = new Date().getDay()
@@ -273,8 +283,9 @@ export default function PredictionsPage() {
     setTodaySnap(todaySnapshot)
 
     /* Phase 2 ratio */
-    const { avgRatio, ratioSamples: rs } = buildPhase2Ratio(data, snaps, todayStr, todayDow)
+    const { avgRatio, ratioSamples: rs, usingDomFilter: domF } = buildPhase2Ratio(data, snaps, todayStr, todayDow)
     setRatioSamples(rs)
+    setUsingDomFilter(domF)
     if (todaySnapshot && todaySnapshot.predicted_final) {
       setPhase2Pred(todaySnapshot.predicted_final)
     } else if (todaySnapshot && avgRatio) {
@@ -390,7 +401,7 @@ export default function PredictionsPage() {
                   </div>
                   <div style={{ fontSize: 42, fontWeight: 900, color: '#166534', letterSpacing: '-1px', lineHeight: 1 }}>{cur(phase2Pred)}</div>
                   <div style={{ fontSize: 13, color: '#16a34a', marginTop: 6 }}>
-                    Based on {cur(todaySnap!.sales_at_time)} at {todaySnap!.snapshot_time} · {ratioSamples} ratio sample{ratioSamples !== 1 ? 's' : ''}
+                    Based on {cur(todaySnap!.sales_at_time)} at {todaySnap!.snapshot_time} · {ratioSamples} {usingDomFilter ? `${getDomCat(todayStr)}-month ` : ''}{DOW_FULL[todayDow]} ratio sample{ratioSamples !== 1 ? 's' : ''}{!usingDomFilter && ratioSamples > 0 ? ' (all month periods — building DOM data)' : ''}
                     {todayPred && (
                       <span style={{ marginLeft: 8, color: phase2Pred > todayPred.mid ? '#15803d' : '#6b7280', fontWeight: 700 }}>
                         {phase2Pred > todayPred.mid ? `▲ +${Math.round((phase2Pred/todayPred.mid-1)*100)}%` : `▼ ${Math.round((phase2Pred/todayPred.mid-1)*100)}%`} vs baseline

@@ -42,8 +42,10 @@ export default function SnapshotPage() {
   const [uploadingPhoto, setUploadingPhoto] = useState(false)
 
   // prediction data
-  const [refinedPred,   setRefinedPred]  = useState<number | null>(null)
-  const [ratioSamples,  setRatioSamples] = useState(0)
+  const [refinedPred,    setRefinedPred]    = useState<number | null>(null)
+  const [ratioSamples,   setRatioSamples]   = useState(0)
+  const [usingDomFilter, setUsingDomFilter] = useState(false)
+  const [domCat,         setDomCat]         = useState<string>('')
   const [basePred,      setBasePred]     = useState<number | null>(null)
 
   const fileRef = useRef<HTMLInputElement>(null)
