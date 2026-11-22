@@ -7,15 +7,25 @@ import { useStoreContext } from '@/lib/store-context'
 const PRIMARY = '#1a5c38'
 const DARK    = '#0a1f12'
 
-const DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
+const DOW     = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
 const DOW_FULL = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
 
+/* ── types ───────────────────────────────────────────────────── */
 type CashupRow = {
   cash_up_date: string
   cash_up_total: number
   customer_count: number
   average_spend: number
 }
+
+type SnapshotRow = {
+  snapshot_date: string
+  snapshot_time: string
+  sales_at_time: number
+  predicted_final: number | null
+}
+
+type DomCat = 'early' | 'mid' | 'late'
 
 type DayPrediction = {
   dow: number
@@ -25,9 +35,11 @@ type DayPrediction = {
   max: number
   customers: number
   avgTicket: number
-  confidence: number  // 0-100
+  confidence: number
   samples: number
-  history: CashupRow[]
+  domCat: DomCat
+  domEffect: number   // % adjustment (positive = boost, negative = drag)
+  domSamples: number
 }
 
 type AccuracyPoint = {
@@ -38,8 +50,27 @@ type AccuracyPoint = {
   errorPct: number
 }
 
-/* ── weighted prediction for one day-of-week ─────────────────── */
-function predictDow(rows: CashupRow[], dow: number, limitWeeks = 12): DayPrediction | null {
+/* ── DOM helpers ─────────────────────────────────────────────── */
+function getDomCat(dateStr: string): DomCat {
+  const day = parseInt(dateStr.split('-')[2], 10)
+  if (day <= 10) return 'early'
+  if (day <= 20) return 'mid'
+  return 'late'
+}
+
+const DOM_LABEL: Record<DomCat, string> = {
+  early: 'Early month (1–10)',
+  mid:   'Mid-month (11–20)',
+  late:  'Month-end (21–31)',
+}
+
+/* ── weighted prediction ─────────────────────────────────────── */
+function predictDow(
+  rows: CashupRow[],
+  dow: number,
+  targetDateStr: string,
+  limitWeeks = 12
+): DayPrediction | null {
   const sameDow = rows
     .filter(r => new Date(r.cash_up_date + 'T12:00:00').getDay() === dow)
     .sort((a, b) => b.cash_up_date.localeCompare(a.cash_up_date))
@@ -47,62 +78,101 @@ function predictDow(rows: CashupRow[], dow: number, limitWeeks = 12): DayPredict
 
   if (sameDow.length === 0) return null
 
-  // exponential decay weights — most recent week weights 1.0, each older week ×0.85
+  /* base weighted mean */
   const weights = sameDow.map((_, i) => Math.pow(0.85, i))
   const tw = weights.reduce((a, b) => a + b, 0)
-
   const wMean = sameDow.reduce((s, r, i) => s + r.cash_up_total * weights[i], 0) / tw
   const wVar  = sameDow.reduce((s, r, i) => s + weights[i] * Math.pow(r.cash_up_total - wMean, 2), 0) / tw
   const wStd  = Math.sqrt(wVar)
-
   const wCust = sameDow.reduce((s, r, i) => s + r.customer_count * weights[i], 0) / tw
 
+  /* DOM adjustment */
+  const targetCat = getDomCat(targetDateStr)
+  const sameCat   = sameDow.filter(r => getDomCat(r.cash_up_date) === targetCat)
+  let domEffect   = 0
+  if (sameCat.length >= 2 && sameDow.length >= 4) {
+    const avgAll = sameDow.reduce((s, r) => s + r.cash_up_total, 0) / sameDow.length
+    const avgCat = sameCat.reduce((s, r) => s + r.cash_up_total, 0) / sameCat.length
+    const rawMult    = avgCat / avgAll
+    const blendWeight = Math.min(1, sameCat.length / 8)
+    const effMult    = 1 + blendWeight * (rawMult - 1)
+    domEffect = Math.round((effMult - 1) * 100)
+  }
+
+  const effMult = 1 + domEffect / 100
   const round10 = (n: number) => Math.round(n / 10) * 10
 
   return {
     dow,
-    label: DOW_FULL[dow],
-    mid:       round10(wMean),
-    min:       round10(Math.max(0, wMean - wStd)),
-    max:       round10(wMean + wStd),
-    customers: Math.round(wCust),
-    avgTicket: wCust > 0 ? Math.round(wMean / wCust) : 0,
+    label:      DOW_FULL[dow],
+    mid:        round10(wMean * effMult),
+    min:        round10(Math.max(0, (wMean - wStd) * effMult)),
+    max:        round10((wMean + wStd) * effMult),
+    customers:  Math.round(wCust),
+    avgTicket:  wCust > 0 ? Math.round((wMean * effMult) / wCust) : 0,
     confidence: Math.min(95, 30 + sameDow.length * 6),
-    samples:   sameDow.length,
-    history:   sameDow,
+    samples:    sameDow.length,
+    domCat:     targetCat,
+    domEffect,
+    domSamples: sameCat.length,
   }
 }
 
-/* ── build past-prediction accuracy using leave-one-out ─────── */
+/* ── accuracy history ────────────────────────────────────────── */
 function buildAccuracy(rows: CashupRow[], weeksBack = 8): AccuracyPoint[] {
   const sorted = [...rows].sort((a, b) => b.cash_up_date.localeCompare(a.cash_up_date))
   const points: AccuracyPoint[] = []
-
   for (const target of sorted.slice(0, weeksBack)) {
-    const dow = new Date(target.cash_up_date + 'T12:00:00').getDay()
-    // exclude the target itself to simulate a true prediction
-    const trainingRows = rows.filter(r => r.cash_up_date !== target.cash_up_date)
-    const pred = predictDow(trainingRows, dow)
+    const dow      = new Date(target.cash_up_date + 'T12:00:00').getDay()
+    const training = rows.filter(r => r.cash_up_date !== target.cash_up_date)
+    const pred     = predictDow(training, dow, target.cash_up_date)
     if (!pred || pred.samples < 2) continue
-
     const errorPct = Math.round(Math.abs(target.cash_up_total - pred.mid) / pred.mid * 100)
     points.push({
-      date: target.cash_up_date,
-      label: `${DOW[dow]} ${target.cash_up_date.substring(5)}`,
+      date:      target.cash_up_date,
+      label:     `${DOW[dow]} ${target.cash_up_date.substring(5)}`,
       predicted: pred.mid,
-      actual: target.cash_up_total,
+      actual:    target.cash_up_total,
       errorPct,
     })
   }
   return points
 }
 
-/* ── currency ───────────────────────────────────────────────── */
+/* ── Phase 2 ratio ───────────────────────────────────────────── */
+function buildPhase2Ratio(cashups: CashupRow[], snaps: SnapshotRow[], todayStr: string, todayDow: number) {
+  const cashupMap = new Map(cashups.map(c => [c.cash_up_date, c.cash_up_total]))
+  const pairs = snaps
+    .filter(s => s.snapshot_date !== todayStr && s.sales_at_time > 0)
+    .map(s => {
+      const final = cashupMap.get(s.snapshot_date)
+      if (!final) return null
+      const dow = new Date(s.snapshot_date + 'T12:00:00').getDay()
+      return { dow, ratio: final / s.sales_at_time }
+    })
+    .filter(Boolean) as { dow: number; ratio: number }[]
+
+  const sameDow = pairs.filter(p => p.dow === todayDow)
+  if (sameDow.length === 0) return { avgRatio: null, ratioSamples: 0 }
+  const avgRatio = sameDow.reduce((s, p) => s + p.ratio, 0) / sameDow.length
+  return { avgRatio, ratioSamples: sameDow.length }
+}
+
+/* ── date helpers ────────────────────────────────────────────── */
+function nextDateForDow(targetDow: number): string {
+  const today = new Date()
+  const diff  = (targetDow - today.getDay() + 7) % 7
+  const d     = new Date(today)
+  d.setDate(d.getDate() + diff)
+  return d.toISOString().split('T')[0]
+}
+
+/* ── currency ────────────────────────────────────────────────── */
 function cur(n: number) {
   return 'R ' + Math.round(n).toLocaleString('en-ZA')
 }
 
-/* ── confidence pill ─────────────────────────────────────────── */
+/* ── sub-components ──────────────────────────────────────────── */
 function ConfPill({ pct }: { pct: number }) {
   const color = pct >= 70 ? '#166534' : pct >= 50 ? '#92400e' : '#6b7280'
   const bg    = pct >= 70 ? '#dcfce7' : pct >= 50 ? '#fef3c7' : '#f3f4f6'
@@ -113,35 +183,50 @@ function ConfPill({ pct }: { pct: number }) {
   )
 }
 
-/* ── range bar ───────────────────────────────────────────────── */
+function DomTag({ effect, samples }: { effect: number; samples: number }) {
+  if (samples < 2 || Math.abs(effect) <= 2) return null
+  const up = effect > 0
+  return (
+    <span style={{ background: up ? '#f0fdf4' : '#f9fafb', color: up ? '#166534' : '#6b7280', border: `1px solid ${up ? '#bbf7d0' : '#e5e7eb'}`, borderRadius: 20, padding: '3px 10px', fontSize: 12, fontWeight: 700, marginLeft: 6 }}>
+      {up ? '↑' : '↓'} {up ? 'Month-end' : 'Early month'} {up ? '+' : ''}{effect}%
+    </span>
+  )
+}
+
 function RangeBar({ min, mid, max, globalMax }: { min: number; mid: number; max: number; globalMax: number }) {
   const pMin = (min / globalMax) * 100
   const pMid = (mid / globalMax) * 100
   const pMax = (max / globalMax) * 100
   return (
     <div style={{ position: 'relative', height: 8, background: '#f0f4f0', borderRadius: 100, overflow: 'visible', marginTop: 8 }}>
-      {/* range band */}
       <div style={{ position: 'absolute', top: 0, left: `${pMin}%`, width: `${pMax - pMin}%`, height: '100%', background: 'rgba(26,92,56,0.18)', borderRadius: 100 }} />
-      {/* mid marker */}
       <div style={{ position: 'absolute', top: -3, left: `${pMid}%`, transform: 'translateX(-50%)', width: 14, height: 14, borderRadius: '50%', background: PRIMARY, border: '2px solid #fff', boxShadow: '0 1px 4px rgba(0,0,0,0.18)' }} />
     </div>
   )
 }
 
-/* ── main page ───────────────────────────────────────────────── */
+/* ══════════════════════════════════════════════════════════════ */
 export default function PredictionsPage() {
   const { storeId: STORE_ID, ready: ctxReady } = useStoreContext() as { storeId: string; ready: boolean }
   const router = useRouter()
 
-  const [loading,     setLoading]     = useState(true)
-  const [history,     setHistory]     = useState<CashupRow[]>([])
-  const [weekPreds,   setWeekPreds]   = useState<(DayPrediction | null)[]>([])
-  const [accuracy,    setAccuracy]    = useState<AccuracyPoint[]>([])
-  const [todayPred,   setTodayPred]   = useState<DayPrediction | null>(null)
-  const [bestDay,     setBestDay]     = useState<DayPrediction | null>(null)
-  const [slowDay,     setSlowDay]     = useState<DayPrediction | null>(null)
-  const [trend4w,     setTrend4w]     = useState<number | null>(null)  // % change last 4w vs prior 4w
-  const [accessDenied, setAccessDenied] = useState(false)
+  const [loading,       setLoading]       = useState(true)
+  const [history,       setHistory]       = useState<CashupRow[]>([])
+  const [weekPreds,     setWeekPreds]     = useState<(DayPrediction | null)[]>([])
+  const [accuracy,      setAccuracy]      = useState<AccuracyPoint[]>([])
+  const [todayPred,     setTodayPred]     = useState<DayPrediction | null>(null)
+  const [bestDay,       setBestDay]       = useState<DayPrediction | null>(null)
+  const [slowDay,       setSlowDay]       = useState<DayPrediction | null>(null)
+  const [trend4w,       setTrend4w]       = useState<number | null>(null)
+  const [accessDenied,  setAccessDenied]  = useState(false)
+
+  /* Phase 2 */
+  const [todaySnap,     setTodaySnap]     = useState<SnapshotRow | null>(null)
+  const [phase2Pred,    setPhase2Pred]    = useState<number | null>(null)
+  const [ratioSamples,  setRatioSamples]  = useState(0)
+
+  const todayStr = new Date().toISOString().split('T')[0]
+  const todayDow = new Date().getDay()
 
   const loadData = useCallback(async () => {
     if (!STORE_ID) return
@@ -150,7 +235,6 @@ export default function PredictionsPage() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) { router.push('/login'); return }
 
-    // permission check (same pattern as performance page)
     const { data: device } = await supabase
       .from('store_devices').select('role').eq('store_id', STORE_ID).eq('user_id', user.id).maybeSingle()
     const userRole = device?.role || 'staff'
@@ -161,59 +245,75 @@ export default function PredictionsPage() {
       setAccessDenied(true); setLoading(false); return
     }
 
-    // fetch last ~90 days of cashups (enough for ~12 of each weekday)
-    const ninetyDaysAgo = new Date()
-    ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 100)
-    const since = ninetyDaysAgo.toISOString().split('T')[0]
+    const since = new Date()
+    since.setDate(since.getDate() - 100)
+    const sinceStr = since.toISOString().split('T')[0]
 
-    const { data: rows } = await supabase
-      .from('cash_ups')
-      .select('cash_up_date, cash_up_total, customer_count, average_spend')
-      .eq('store_id', STORE_ID)
-      .gte('cash_up_date', since)
-      .order('cash_up_date', { ascending: false })
+    const [{ data: rows }, { data: snapRows }] = await Promise.all([
+      supabase.from('cash_ups')
+        .select('cash_up_date, cash_up_total, customer_count, average_spend')
+        .eq('store_id', STORE_ID)
+        .gte('cash_up_date', sinceStr)
+        .order('cash_up_date', { ascending: false }),
+      supabase.from('sales_snapshots')
+        .select('snapshot_date, snapshot_time, sales_at_time, predicted_final')
+        .eq('store_id', STORE_ID)
+        .gte('snapshot_date', sinceStr)
+        .order('snapshot_date', { ascending: false }),
+    ])
 
-    const data = (rows || []).filter(r => r.cash_up_total > 0)
+    const data  = (rows      || []).filter(r => r.cash_up_total > 0)
+    const snaps = (snapRows  || []).filter(s => s.sales_at_time > 0)
     setHistory(data)
 
     if (data.length === 0) { setLoading(false); return }
 
-    const todayDow = new Date().getDay()
-    const preds = Array.from({ length: 7 }, (_, i) => predictDow(data, i))
+    /* today's snapshot */
+    const todaySnapshot = snaps.find(s => s.snapshot_date === todayStr) || null
+    setTodaySnap(todaySnapshot)
 
-    setTodayPred(predictDow(data, todayDow))
-    setWeekPreds(preds)
-
-    const acc = buildAccuracy(data, 10)
-    setAccuracy(acc)
-
-    // best / slowest day
-    const validPreds = preds.filter(Boolean) as DayPrediction[]
-    if (validPreds.length > 0) {
-      setBestDay(validPreds.reduce((a, b) => a.mid > b.mid ? a : b))
-      setSlowDay(validPreds.reduce((a, b) => a.mid < b.mid ? a : b))
+    /* Phase 2 ratio */
+    const { avgRatio, ratioSamples: rs } = buildPhase2Ratio(data, snaps, todayStr, todayDow)
+    setRatioSamples(rs)
+    if (todaySnapshot && todaySnapshot.predicted_final) {
+      setPhase2Pred(todaySnapshot.predicted_final)
+    } else if (todaySnapshot && avgRatio) {
+      setPhase2Pred(Math.round(todaySnapshot.sales_at_time * avgRatio / 10) * 10)
     }
 
-    // 4-week trend
-    const sorted = [...data].sort((a, b) => a.cash_up_date.localeCompare(b.cash_up_date))
-    const fourWeeksMs = 28 * 24 * 60 * 60 * 1000
-    const now = Date.now()
-    const last4w  = sorted.filter(r => now - new Date(r.cash_up_date + 'T12:00:00').getTime() < fourWeeksMs)
-    const prior4w = sorted.filter(r => {
-      const ms = now - new Date(r.cash_up_date + 'T12:00:00').getTime()
-      return ms >= fourWeeksMs && ms < 2 * fourWeeksMs
+    /* predictions for each DOW using next occurrence of that day */
+    const preds = Array.from({ length: 7 }, (_, i) => {
+      const dateStr = nextDateForDow(i)
+      return predictDow(data, i, dateStr)
     })
+
+    setTodayPred(predictDow(data, todayDow, todayStr))
+    setWeekPreds(preds)
+    setAccuracy(buildAccuracy(data, 10))
+
+    const valid = preds.filter(Boolean) as DayPrediction[]
+    if (valid.length > 0) {
+      setBestDay(valid.reduce((a, b) => a.mid > b.mid ? a : b))
+      setSlowDay(valid.reduce((a, b) => a.mid < b.mid ? a : b))
+    }
+
+    /* 4-week trend */
+    const fourWMs  = 28 * 24 * 60 * 60 * 1000
+    const now      = Date.now()
+    const last4w   = data.filter(r => now - new Date(r.cash_up_date + 'T12:00:00').getTime() < fourWMs)
+    const prior4w  = data.filter(r => { const ms = now - new Date(r.cash_up_date + 'T12:00:00').getTime(); return ms >= fourWMs && ms < 2 * fourWMs })
     if (last4w.length > 0 && prior4w.length > 0) {
-      const avg4  = last4w.reduce((s, r)  => s + r.cash_up_total, 0) / last4w.length
-      const avgP  = prior4w.reduce((s, r) => s + r.cash_up_total, 0) / prior4w.length
+      const avg4 = last4w.reduce((s, r)  => s + r.cash_up_total, 0) / last4w.length
+      const avgP = prior4w.reduce((s, r) => s + r.cash_up_total, 0) / prior4w.length
       setTrend4w(Math.round(((avg4 - avgP) / avgP) * 100))
     }
 
     setLoading(false)
-  }, [STORE_ID, router])
+  }, [STORE_ID, router, todayStr, todayDow])
 
   useEffect(() => { if (ctxReady) loadData() }, [ctxReady, loadData])
 
+  /* ── loading / access ──────────────────────────────────────── */
   if (loading) return (
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f0f4f0' }}>
       <div style={{ textAlign: 'center' }}>
@@ -229,14 +329,13 @@ export default function PredictionsPage() {
     </div>
   )
 
-  const noData = history.length === 0
-  const todayDow = new Date().getDay()
+  const noData    = history.length === 0
   const globalMax = Math.max(...(weekPreds.filter(Boolean) as DayPrediction[]).map(p => p.max), 1)
-
-  // avg accuracy
   const avgAccuracy = accuracy.length > 0
     ? Math.round(accuracy.reduce((s, a) => s + (100 - a.errorPct), 0) / accuracy.length)
     : null
+
+  const todayCat = getDomCat(todayStr)
 
   return (
     <div style={{ minHeight: '100vh', background: '#f0f4f0', fontFamily: 'system-ui, sans-serif', color: '#111' }}>
@@ -251,15 +350,21 @@ export default function PredictionsPage() {
             </button>
             <div>
               <div style={{ color: '#fff', fontWeight: 900, fontSize: 20 }}>🔮 Sales Forecast</div>
-              <div style={{ color: 'rgba(255,255,255,0.55)', fontSize: 12 }}>AI-powered predictions from your trading history</div>
+              <div style={{ color: 'rgba(255,255,255,0.55)', fontSize: 12 }}>AI-powered predictions · {DOM_LABEL[todayCat]}</div>
             </div>
           </div>
-          {avgAccuracy !== null && (
-            <div style={{ textAlign: 'right' }}>
-              <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Model Accuracy</div>
-              <div style={{ color: '#fff', fontSize: 24, fontWeight: 900 }}>{avgAccuracy}%</div>
-            </div>
-          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <button onClick={() => router.push('/predictions/snapshot')}
+              style={{ background: 'rgba(255,255,255,0.12)', border: '1.5px solid rgba(255,255,255,0.3)', borderRadius: 10, padding: '8px 16px', color: '#fff', cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>
+              📸 15:00 Snapshot
+            </button>
+            {avgAccuracy !== null && (
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Model Accuracy</div>
+                <div style={{ color: '#fff', fontSize: 24, fontWeight: 900 }}>{avgAccuracy}%</div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -270,11 +375,49 @@ export default function PredictionsPage() {
             <div style={{ fontSize: 64, marginBottom: 16 }}>📊</div>
             <h2 style={{ fontSize: 22, fontWeight: 800, marginBottom: 8 }}>Not enough data yet</h2>
             <p style={{ color: '#6b7280', fontSize: 15, lineHeight: 1.6, maxWidth: 480, margin: '0 auto' }}>
-              The forecast engine needs at least a few completed cash-ups to learn from. Keep capturing your daily cash-ups and predictions will start appearing within a week.
+              Keep capturing daily cash-ups and predictions will start appearing within a week.
             </p>
           </div>
         ) : (
           <>
+            {/* ── Phase 2 snapshot card ── */}
+            {phase2Pred ? (
+              /* snapshot exists — show refined prediction */
+              <div style={{ background: 'linear-gradient(135deg, #f0fdf4, #dcfce7)', borderRadius: 20, border: '2px solid #86efac', padding: '24px 28px', marginBottom: 28, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: '#166534', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 4 }}>
+                    🔮 Phase 2 — Refined prediction
+                  </div>
+                  <div style={{ fontSize: 42, fontWeight: 900, color: '#166534', letterSpacing: '-1px', lineHeight: 1 }}>{cur(phase2Pred)}</div>
+                  <div style={{ fontSize: 13, color: '#16a34a', marginTop: 6 }}>
+                    Based on {cur(todaySnap!.sales_at_time)} at {todaySnap!.snapshot_time} · {ratioSamples} ratio sample{ratioSamples !== 1 ? 's' : ''}
+                    {todayPred && (
+                      <span style={{ marginLeft: 8, color: phase2Pred > todayPred.mid ? '#15803d' : '#6b7280', fontWeight: 700 }}>
+                        {phase2Pred > todayPred.mid ? `▲ +${Math.round((phase2Pred/todayPred.mid-1)*100)}%` : `▼ ${Math.round((phase2Pred/todayPred.mid-1)*100)}%`} vs baseline
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <button onClick={() => router.push('/predictions/snapshot')}
+                  style={{ background: '#16a34a', color: '#fff', border: 'none', borderRadius: 12, padding: '10px 20px', cursor: 'pointer', fontWeight: 700, fontSize: 14, fontFamily: 'inherit' }}>
+                  Update snapshot →
+                </button>
+              </div>
+            ) : (
+              /* no snapshot yet — prompt */
+              <div onClick={() => router.push('/predictions/snapshot')}
+                style={{ background: '#fffbeb', borderRadius: 20, border: '2px solid #fde68a', padding: '20px 28px', marginBottom: 28, display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', flexWrap: 'wrap', gap: 12 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                  <div style={{ fontSize: 36 }}>📸</div>
+                  <div>
+                    <div style={{ fontSize: 15, fontWeight: 800, color: '#92400e' }}>Take your 15:00 Snapshot</div>
+                    <div style={{ fontSize: 13, color: '#b45309', marginTop: 2 }}>Enter your running sales total to get a refined same-day prediction</div>
+                  </div>
+                </div>
+                <span style={{ fontSize: 13, fontWeight: 700, color: '#d97706' }}>Open →</span>
+              </div>
+            )}
+
             {/* ── Today's forecast ── */}
             <div style={{ marginBottom: 32 }}>
               <h2 style={{ fontSize: 15, fontWeight: 800, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 16 }}>
@@ -284,44 +427,33 @@ export default function PredictionsPage() {
               {todayPred ? (
                 <div style={{ background: '#fff', borderRadius: 24, padding: '32px', border: '1.5px solid #e8f0e8', boxShadow: '0 4px 24px rgba(0,0,0,0.06)' }}>
                   <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 20 }}>
-
-                    {/* main number */}
                     <div>
-                      <div style={{ fontSize: 13, color: '#6b7280', fontWeight: 600, marginBottom: 6 }}>Predicted sales today</div>
-                      <div style={{ fontSize: 48, fontWeight: 900, color: PRIMARY, lineHeight: 1, letterSpacing: '-1px' }}>
-                        {cur(todayPred.mid)}
-                      </div>
-                      <div style={{ fontSize: 15, color: '#9ca3af', marginTop: 6 }}>
-                        Range: {cur(todayPred.min)} — {cur(todayPred.max)}
-                      </div>
-                      <div style={{ marginTop: 12 }}>
+                      <div style={{ fontSize: 13, color: '#6b7280', fontWeight: 600, marginBottom: 6 }}>Weekday baseline prediction</div>
+                      <div style={{ fontSize: 48, fontWeight: 900, color: PRIMARY, lineHeight: 1, letterSpacing: '-1px' }}>{cur(todayPred.mid)}</div>
+                      <div style={{ fontSize: 15, color: '#9ca3af', marginTop: 6 }}>Range: {cur(todayPred.min)} — {cur(todayPred.max)}</div>
+                      <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
                         <ConfPill pct={todayPred.confidence} />
-                        <span style={{ fontSize: 12, color: '#9ca3af', marginLeft: 8 }}>based on {todayPred.samples} previous {DOW_FULL[todayDow]}s</span>
+                        <DomTag effect={todayPred.domEffect} samples={todayPred.domSamples} />
+                        <span style={{ fontSize: 12, color: '#9ca3af' }}>based on {todayPred.samples} previous {DOW_FULL[todayDow]}s</span>
                       </div>
                     </div>
-
-                    {/* sub-metrics */}
                     <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
                       <div style={{ background: '#f8faf8', borderRadius: 16, padding: '16px 20px', minWidth: 120 }}>
                         <div style={{ fontSize: 11, color: '#6b7280', fontWeight: 700, textTransform: 'uppercase', marginBottom: 4 }}>Customers</div>
-                        <div style={{ fontSize: 28, fontWeight: 900, color: '#111' }}>~{todayPred.customers}</div>
+                        <div style={{ fontSize: 28, fontWeight: 900 }}>~{todayPred.customers}</div>
                       </div>
                       <div style={{ background: '#f8faf8', borderRadius: 16, padding: '16px 20px', minWidth: 120 }}>
                         <div style={{ fontSize: 11, color: '#6b7280', fontWeight: 700, textTransform: 'uppercase', marginBottom: 4 }}>Avg Ticket</div>
-                        <div style={{ fontSize: 28, fontWeight: 900, color: '#111' }}>{cur(todayPred.avgTicket)}</div>
+                        <div style={{ fontSize: 28, fontWeight: 900 }}>{cur(todayPred.avgTicket)}</div>
                       </div>
                       {trend4w !== null && (
                         <div style={{ background: trend4w >= 0 ? '#f0fdf4' : '#fef2f2', borderRadius: 16, padding: '16px 20px', minWidth: 120 }}>
                           <div style={{ fontSize: 11, color: '#6b7280', fontWeight: 700, textTransform: 'uppercase', marginBottom: 4 }}>4-Week Trend</div>
-                          <div style={{ fontSize: 28, fontWeight: 900, color: trend4w >= 0 ? '#16a34a' : '#dc2626' }}>
-                            {trend4w > 0 ? '+' : ''}{trend4w}%
-                          </div>
+                          <div style={{ fontSize: 28, fontWeight: 900, color: trend4w >= 0 ? '#16a34a' : '#dc2626' }}>{trend4w > 0 ? '+' : ''}{trend4w}%</div>
                         </div>
                       )}
                     </div>
                   </div>
-
-                  {/* range bar */}
                   <div style={{ marginTop: 24 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#9ca3af', marginBottom: 4 }}>
                       <span>{cur(todayPred.min)}</span>
@@ -330,6 +462,15 @@ export default function PredictionsPage() {
                     </div>
                     <RangeBar min={todayPred.min} mid={todayPred.mid} max={todayPred.max} globalMax={todayPred.max * 1.1} />
                   </div>
+                  {/* DOM context note */}
+                  {todayPred.domSamples >= 2 && Math.abs(todayPred.domEffect) > 2 && (
+                    <div style={{ marginTop: 16, padding: '10px 14px', background: todayPred.domEffect > 0 ? '#f0fdf4' : '#f9fafb', borderRadius: 10, fontSize: 13, color: todayPred.domEffect > 0 ? '#166534' : '#6b7280', border: `1px solid ${todayPred.domEffect > 0 ? '#bbf7d0' : '#e5e7eb'}` }}>
+                      {todayPred.domEffect > 0
+                        ? `📅 Month-end effect: historically ${DOW_FULL[todayDow]}s in the last 10 days of the month trade ${todayPred.domEffect}% above average.`
+                        : `📅 Early-month pattern: historically ${DOW_FULL[todayDow]}s in the first 10 days trade ${Math.abs(todayPred.domEffect)}% below average.`
+                      }
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div style={{ background: '#fff', borderRadius: 20, padding: '24px', border: '1.5px solid #e8f0e8', color: '#9ca3af', textAlign: 'center' }}>
@@ -348,22 +489,27 @@ export default function PredictionsPage() {
                   const isToday = dow === todayDow
                   if (!pred) return (
                     <div key={dow} style={{ background: '#fff', borderRadius: 16, padding: '16px 12px', textAlign: 'center', border: '1.5px solid #e8f0e8', opacity: 0.5 }}>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: '#111', marginBottom: 8 }}>{DOW[dow]}</div>
+                      <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>{DOW[dow]}</div>
                       <div style={{ fontSize: 11, color: '#9ca3af' }}>No data</div>
                     </div>
                   )
                   return (
                     <div key={dow} style={{ background: isToday ? PRIMARY : '#fff', borderRadius: 16, padding: '16px 12px', textAlign: 'center', border: `1.5px solid ${isToday ? PRIMARY : '#e8f0e8'}`, boxShadow: isToday ? '0 4px 20px rgba(26,92,56,0.25)' : 'none' }}>
                       <div style={{ fontSize: 13, fontWeight: 800, color: isToday ? '#fff' : '#111', marginBottom: 2 }}>{DOW[dow]}</div>
-                      {isToday && <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.7)', marginBottom: 8, fontWeight: 600 }}>TODAY</div>}
-                      {!isToday && <div style={{ marginBottom: 8 }} />}
+                      {isToday && <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.7)', marginBottom: 6, fontWeight: 600 }}>TODAY</div>}
+                      {!isToday && <div style={{ marginBottom: 6 }} />}
                       <div style={{ fontSize: 15, fontWeight: 900, color: isToday ? '#fff' : PRIMARY }}>{cur(pred.mid)}</div>
                       <div style={{ fontSize: 11, color: isToday ? 'rgba(255,255,255,0.65)' : '#9ca3af', marginTop: 2 }}>~{pred.customers} cust</div>
                       <RangeBar min={pred.min} mid={pred.mid} max={pred.max} globalMax={globalMax} />
-                      <div style={{ marginTop: 8 }}>
+                      <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
                         <span style={{ fontSize: 10, background: isToday ? 'rgba(255,255,255,0.15)' : '#f0f4f0', color: isToday ? '#fff' : '#6b7280', borderRadius: 20, padding: '2px 7px', fontWeight: 700 }}>
                           {pred.confidence}%
                         </span>
+                        {pred.domSamples >= 2 && Math.abs(pred.domEffect) > 2 && (
+                          <span style={{ fontSize: 9, color: isToday ? 'rgba(255,255,255,0.8)' : (pred.domEffect > 0 ? '#16a34a' : '#9ca3af'), fontWeight: 700 }}>
+                            {pred.domEffect > 0 ? `↑ +${pred.domEffect}%` : `↓ ${pred.domEffect}%`}
+                          </span>
+                        )}
                       </div>
                     </div>
                   )
@@ -394,9 +540,7 @@ export default function PredictionsPage() {
                   <div style={{ background: trend4w >= 0 ? '#f0fdf4' : '#fef2f2', borderRadius: 20, padding: '24px', border: `1.5px solid ${trend4w >= 0 ? '#bbf7d0' : '#fecaca'}` }}>
                     <div style={{ fontSize: 24, marginBottom: 8 }}>{trend4w >= 0 ? '📈' : '📉'}</div>
                     <div style={{ fontSize: 12, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Sales Trend</div>
-                    <div style={{ fontSize: 22, fontWeight: 900, color: trend4w >= 0 ? '#166534' : '#dc2626' }}>
-                      {trend4w > 0 ? '+' : ''}{trend4w}%
-                    </div>
+                    <div style={{ fontSize: 22, fontWeight: 900, color: trend4w >= 0 ? '#166534' : '#dc2626' }}>{trend4w > 0 ? '+' : ''}{trend4w}%</div>
                     <div style={{ fontSize: 13, color: '#6b7280' }}>Last 4 weeks vs prior 4 weeks</div>
                   </div>
                 )}
@@ -424,9 +568,7 @@ export default function PredictionsPage() {
                         <div style={{ fontSize: 13, fontWeight: 600 }}>{cur(pt.predicted)}</div>
                         <div style={{ fontSize: 13, fontWeight: 700 }}>{cur(pt.actual)}</div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <span style={{ fontSize: 13, fontWeight: 700, color: good ? '#16a34a' : ok ? '#d97706' : '#dc2626' }}>
-                            {pt.errorPct}% off
-                          </span>
+                          <span style={{ fontSize: 13, fontWeight: 700, color: good ? '#16a34a' : ok ? '#d97706' : '#dc2626' }}>{pt.errorPct}% off</span>
                           <span style={{ fontSize: 11, background: good ? '#dcfce7' : ok ? '#fef3c7' : '#fee2e2', color: good ? '#166534' : ok ? '#92400e' : '#991b1b', borderRadius: 20, padding: '2px 8px', fontWeight: 700 }}>
                             {good ? '✓ Good' : ok ? '~ Fair' : '× Wide'}
                           </span>
@@ -445,7 +587,7 @@ export default function PredictionsPage() {
             )}
 
             {/* ── Day-by-day breakdown ── */}
-            <div>
+            <div style={{ marginBottom: 32 }}>
               <h2 style={{ fontSize: 15, fontWeight: 800, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 16 }}>
                 Historical Averages by Day
               </h2>
@@ -460,11 +602,16 @@ export default function PredictionsPage() {
                       <div style={{ flex: 1 }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
                           <span style={{ fontSize: 16, fontWeight: 800 }}>{cur(pred.mid)}</span>
-                          <span style={{ fontSize: 12, color: '#9ca3af' }}>{pred.samples} data points</span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                            {pred.domSamples >= 2 && Math.abs(pred.domEffect) > 2 && (
+                              <span style={{ fontSize: 11, color: pred.domEffect > 0 ? '#16a34a' : '#9ca3af', fontWeight: 700 }}>
+                                {pred.domEffect > 0 ? `↑ +${pred.domEffect}%` : `↓ ${pred.domEffect}%`}
+                              </span>
+                            )}
+                            <span style={{ fontSize: 12, color: '#9ca3af' }}>{pred.samples} pts</span>
+                          </div>
                         </div>
-                        <div style={{ fontSize: 12, color: '#6b7280' }}>
-                          ~{pred.customers} customers · {cur(pred.avgTicket)} avg ticket
-                        </div>
+                        <div style={{ fontSize: 12, color: '#6b7280' }}>~{pred.customers} customers · {cur(pred.avgTicket)} avg ticket</div>
                         <RangeBar min={pred.min} mid={pred.mid} max={pred.max} globalMax={globalMax} />
                       </div>
                     </div>
@@ -473,8 +620,8 @@ export default function PredictionsPage() {
               </div>
             </div>
 
-            <div style={{ marginTop: 24, padding: '14px 20px', background: '#fffbeb', borderRadius: 14, border: '1.5px solid #fde68a', fontSize: 13, color: '#92400e', lineHeight: 1.6 }}>
-              <strong>How this works:</strong> Predictions use a weighted average of your last {Math.max(...weekPreds.filter(Boolean).map(p => p!.samples))} trading days on the same weekday, with more recent weeks given higher weight. The confidence score and accuracy improve automatically as more cash-ups are captured. Phase 2 (15:00 snapshot + AI photo analysis) unlocks once enough baseline data exists.
+            <div style={{ padding: '14px 20px', background: '#fffbeb', borderRadius: 14, border: '1.5px solid #fde68a', fontSize: 13, color: '#92400e', lineHeight: 1.6 }}>
+              <strong>How this works:</strong> Phase 1 uses weighted weekday averages + day-of-month adjustments (early/mid/month-end). Phase 2 activates when you submit a 15:00 snapshot — the model learns your store's afternoon-to-close ratio and refines the same-day prediction automatically.
             </div>
           </>
         )}
