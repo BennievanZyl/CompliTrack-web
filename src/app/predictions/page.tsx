@@ -470,6 +470,13 @@ export default function PredictionsPage() {
                       </div>
                     </div>
                     <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                      {todaySnap && (
+                        <div style={{ background: '#f0fdf4', borderRadius: 16, padding: '16px 20px', minWidth: 120, border: '1px solid #bbf7d0' }}>
+                          <div style={{ fontSize: 11, color: '#166534', fontWeight: 700, textTransform: 'uppercase', marginBottom: 4 }}>📸 {todaySnap.snapshot_time} Sales</div>
+                          <div style={{ fontSize: 24, fontWeight: 900, color: '#166534' }}>{cur(todaySnap.sales_at_time)}</div>
+                          <div style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }}>captured at {todaySnap.snapshot_time}</div>
+                        </div>
+                      )}
                       <div style={{ background: '#f8faf8', borderRadius: 16, padding: '16px 20px', minWidth: 120 }}>
                         <div style={{ fontSize: 11, color: '#6b7280', fontWeight: 700, textTransform: 'uppercase', marginBottom: 4 }}>Customers</div>
                         <div style={{ fontSize: 28, fontWeight: 900 }}>~{todayPred.customers}</div>
