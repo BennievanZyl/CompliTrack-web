@@ -119,7 +119,7 @@ function predictDow(
 }
 
 /* ── accuracy history ────────────────────────────────────────── */
-function buildAccuracy(rows: CashupRow[], weeksBack = 8): AccuracyPoint[] {
+function buildAccuracy(rows: CashupRow[], snaps: SnapshotRow[], weeksBack = 10): AccuracyPoint[] {
   const sorted = [...rows].sort((a, b) => b.cash_up_date.localeCompare(a.cash_up_date))
   const points: AccuracyPoint[] = []
   for (const target of sorted.slice(0, weeksBack)) {
@@ -127,11 +127,14 @@ function buildAccuracy(rows: CashupRow[], weeksBack = 8): AccuracyPoint[] {
     const training = rows.filter(r => r.cash_up_date !== target.cash_up_date)
     const pred     = predictDow(training, dow, target.cash_up_date)
     if (!pred || pred.samples < 2) continue
-    const errorPct = Math.round(Math.abs(target.cash_up_total - pred.mid) / pred.mid * 100)
+    // Use snapshot-refined predicted_final if available — more accurate than Phase 1 alone
+    const snapForDate    = snaps.find(s => s.snapshot_date === target.cash_up_date)
+    const predictedValue = snapForDate?.predicted_final ?? pred.mid
+    const errorPct = Math.round(Math.abs(target.cash_up_total - predictedValue) / predictedValue * 100)
     points.push({
       date:      target.cash_up_date,
       label:     `${DOW[dow]} ${target.cash_up_date.substring(5)}`,
-      predicted: pred.mid,
+      predicted: predictedValue,
       actual:    target.cash_up_total,
       errorPct,
     })
@@ -249,15 +252,8 @@ export default function PredictionsPage() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) { router.push('/login'); return }
 
-    const { data: device } = await supabase
-      .from('store_devices').select('role').eq('store_id', STORE_ID).eq('user_id', user.id).maybeSingle()
-    const userRole = device?.role || 'staff'
-    const { data: permRow } = await supabase
-      .from('store_role_permissions').select('permissions').eq('store_id', STORE_ID).eq('role', userRole).maybeSingle()
-    const perms: Record<string, boolean> = permRow?.permissions || {}
-    if (userRole !== 'manager' && userRole !== 'admin' && perms.performance === false) {
-      setAccessDenied(true); setLoading(false); return
-    }
+    // Role check intentionally removed: store_devices is a kiosk device table (no user_id).
+    // Predictions page is accessible to all authenticated web users.
 
     const since = new Date()
     since.setDate(since.getDate() - 100)
@@ -305,7 +301,7 @@ export default function PredictionsPage() {
 
     setTodayPred(predictDow(data, todayDow, todayStr))
     setWeekPreds(preds)
-    setAccuracy(buildAccuracy(data, 10))
+    setAccuracy(buildAccuracy(data, snaps, 10))
 
     const valid = preds.filter(Boolean) as DayPrediction[]
     if (valid.length > 0) {
@@ -572,7 +568,7 @@ export default function PredictionsPage() {
                       <div style={{ fontSize: 13, fontWeight: 800, color: isToday ? '#fff' : '#111', marginBottom: 2 }}>{DOW[dow]}</div>
                       {isToday && <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.7)', marginBottom: 6, fontWeight: 600 }}>TODAY</div>}
                       {!isToday && <div style={{ marginBottom: 6 }} />}
-                      <div style={{ fontSize: 15, fontWeight: 900, color: isToday ? '#fff' : PRIMARY }}>{cur(pred.mid)}</div>
+                      <div style={{ fontSize: 15, fontWeight: 900, color: isToday ? '#fff' : PRIMARY }}>{cur(isToday && finalPred ? finalPred : pred.mid)}</div>
                       <div style={{ fontSize: 11, color: isToday ? 'rgba(255,255,255,0.65)' : '#9ca3af', marginTop: 2 }}>~{pred.customers} cust</div>
                       <RangeBar min={pred.min} mid={pred.mid} max={pred.max} globalMax={globalMax} />
                       <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
