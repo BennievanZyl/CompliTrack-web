@@ -907,6 +907,51 @@ export default function WagesPage() {
                   {employees.map(e => <option key={e.id} value={e.id}>{e.full_name} ({e.role})</option>)}
                 </select>
               </div>
+              {/* Balance summary — appears as soon as an employee is chosen */}
+              {paymentForm.employee_id && (() => {
+                const empRun      = periodRuns.find(r => r.employee_id === paymentForm.employee_id)
+                const empPayments = directPaymentsThisPeriod.filter(a => a.employee_id === paymentForm.employee_id)
+                const alreadyPaid = empPayments.reduce((s, a) => s + a.amount, 0)
+                const grossPay    = empRun?.gross_pay ?? null
+                const remaining   = grossPay !== null ? grossPay - alreadyPaid : null
+                const overPaid    = remaining !== null && remaining < 0
+                return (
+                  <div style={{ background: overPaid ? '#fef2f2' : '#f0fdf4', border: `1.5px solid ${overPaid ? '#fecaca' : '#86efac'}`, borderRadius: '12px', padding: '14px 16px' }}>
+                    {grossPay !== null ? (
+                      <>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '13px' }}>
+                          <span style={{ color: '#6b7280' }}>Earned this period</span>
+                          <span style={{ fontWeight: '700', color: '#111' }}>R {grossPay.toFixed(2)}</span>
+                        </div>
+                        {alreadyPaid > 0 && (
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '13px' }}>
+                            <span style={{ color: '#6b7280' }}>Already paid ({empPayments.length} payment{empPayments.length !== 1 ? 's' : ''})</span>
+                            <span style={{ fontWeight: '700', color: '#dc2626' }}>−R {alreadyPaid.toFixed(2)}</span>
+                          </div>
+                        )}
+                        <div style={{ borderTop: '1px solid rgba(0,0,0,0.08)', paddingTop: '8px', marginTop: '4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ fontSize: '13px', fontWeight: '800', color: overPaid ? '#dc2626' : '#065f46' }}>
+                            {overPaid ? '⚠ Overpaid this period' : 'Balance still owed'}
+                          </span>
+                          <span style={{ fontSize: '17px', fontWeight: '900', color: overPaid ? '#dc2626' : '#065f46' }}>
+                            R {Math.abs(remaining!).toFixed(2)}
+                          </span>
+                        </div>
+                      </>
+                    ) : (
+                      <div style={{ fontSize: '12px', color: '#6b7280', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        {alreadyPaid > 0 && (
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', marginBottom: '4px' }}>
+                            <span>Already paid this period</span>
+                            <span style={{ fontWeight: '700', color: '#dc2626' }}>R {alreadyPaid.toFixed(2)}</span>
+                          </div>
+                        )}
+                        <span>💡 Calculate payroll on the Payroll tab to see the exact amount owed</span>
+                      </div>
+                    )}
+                  </div>
+                )
+              })()}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                 <div>
                   <label style={LABEL_STYLE}>Amount (R) *</label>
