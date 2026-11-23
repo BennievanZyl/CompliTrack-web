@@ -247,6 +247,7 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
   const [signedByName, setSignedByName] = useState('');
   const [otherName, setOtherName] = useState('');
   const [cashierName, setCashierName] = useState('');
+  const [cashupPredValue, setCashupPredValue] = useState<number | null>(null);
 
   useEffect(() => { checkAuthAndLoad(); }, []);
 
@@ -323,6 +324,14 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
     }
     const { data: hist } = await supabase.from('cash_ups').select('*').eq('store_id', storeId).order('cash_up_date', { ascending: false }).limit(14);
     setHistory(hist || []);
+    // Compute prediction for the viewed date (Phase 1 weighted avg)
+    const trainingRows = (hist || []).filter((r: CashUp) => r.cash_up_date !== targetDate);
+    const dow = new Date(targetDate + 'T12:00:00').getDay();
+    const phase1Pred = predictDowLocal(trainingRows, dow, targetDate);
+    // Try to get snapshot-refined prediction (Phase 2)
+    const { data: snapData } = await supabase.from('sales_snapshots').select('predicted_final').eq('store_id', storeId).eq('snapshot_date', targetDate).limit(1);
+    const snapPred: number | null = snapData?.[0]?.predicted_final ?? null;
+    setCashupPredValue(snapPred ?? phase1Pred);
     setLoading(false);
   }
 
@@ -526,6 +535,35 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
     await saveDraft();
   }
 
+  // ── Prediction helpers (Phase 1) ──────────────────────────────────────────
+  function getDomCatLocal(dateStr: string): 'early' | 'mid' | 'late' {
+    const day = parseInt(dateStr.split('-')[2], 10);
+    if (day <= 10) return 'early';
+    if (day <= 20) return 'mid';
+    return 'late';
+  }
+
+  function predictDowLocal(rows: CashUp[], dow: number, targetDateStr: string): number | null {
+    const sameDow = rows
+      .filter(r => new Date(r.cash_up_date + 'T12:00:00').getDay() === dow)
+      .sort((a, b) => b.cash_up_date.localeCompare(a.cash_up_date))
+      .slice(0, 12);
+    if (sameDow.length < 2) return null;
+    const weights = sameDow.map((_, i) => Math.pow(0.85, i));
+    const tw = weights.reduce((a, b) => a + b, 0);
+    const wMean = sameDow.reduce((s, r, i) => s + r.cash_up_total * weights[i], 0) / tw;
+    const targetCat = getDomCatLocal(targetDateStr);
+    const sameCat = sameDow.filter(r => getDomCatLocal(r.cash_up_date) === targetCat);
+    let domEffect = 0;
+    if (sameCat.length >= 2 && sameDow.length >= 4) {
+      const avgAll = sameDow.reduce((s, r) => s + r.cash_up_total, 0) / sameDow.length;
+      const avgCat = sameCat.reduce((s, r) => s + r.cash_up_total, 0) / sameCat.length;
+      const effMult = 1 + Math.min(1, sameCat.length / 8) * (avgCat / avgAll - 1);
+      domEffect = Math.round((effMult - 1) * 100);
+    }
+    return Math.round((wMean * (1 + domEffect / 100)) / 10) * 10;
+  }
+
   function printCashUp() {
     const c = cashUp; if (!c) return;
     const vColor = (c.variance || 0) === 0 ? '#1a5c38' : (c.variance || 0) > 0 ? '#f59e0b' : '#ef4444';
@@ -537,6 +575,14 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
       return `<tr><td>${d.label}</td><td class="right">${floatQty}</td><td class="right">R ${(floatQty * d.value).toFixed(2)}</td><td class="divider"></td><td class="right">${bankQty}</td><td class="right">R ${(bankQty * d.value).toFixed(2)}</td></tr>`;
     }).join('');
     const payoutRows = payouts.map(p => `<tr><td>${p.category}</td><td>${p.description || '—'}</td><td>${p.employee_name || '—'}</td><td class="right">R ${p.amount.toFixed(2)}</td></tr>`).join('');
+    const predRow = cashupPredValue !== null ? (() => {
+      const diff = (c.cash_up_total || 0) - cashupPredValue;
+      const errPct = Math.round(Math.abs(diff) / cashupPredValue * 100);
+      const accLabel = errPct === 0 ? '✓ Spot on' : `${errPct}% ${diff > 0 ? 'above' : 'below'} forecast`;
+      const accColor = errPct <= 5 ? '#1a5c38' : errPct <= 10 ? '#f59e0b' : '#ef4444';
+      return `<div class="recon-row"><span>Sales Prediction</span><span>R ${cashupPredValue.toFixed(2)}</span></div>`
+        + `<div class="recon-row subtotal"><span style="color:${accColor}"><strong>Forecast Accuracy</strong></span><span style="color:${accColor};font-weight:900">${accLabel}</span></div>`;
+    })() : '';
     const win = window.open('', '_blank'); if (!win) return;
     win.document.write(`<!DOCTYPE html><html><head><title>Cash Up - ${c.cash_up_date}</title><style>
       @page{size:A4;margin:10mm 14mm}*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,sans-serif;font-size:10px;color:#111}
@@ -613,6 +659,7 @@ function CashUpWizard({ storeId, orgId, storeName }: { storeId: string; orgId: s
         <div class="recon-row"><span>Customers</span><span>${c.customer_count}</span></div>
         <div class="recon-row"><span>Cash Up Total</span><span>R ${(c.cash_up_total||0).toFixed(2)}</span></div>
         <div class="recon-row subtotal"><span><strong>Avg per Customer</strong></span><span><strong>${c.customer_count>0?`R ${(c.average_spend||0).toFixed(2)}`:'—'}</strong></span></div>
+        ${predRow}
         <br/>
         <div class="section-title">Notes</div>
         <div class="notes-box">${c.notes||'No notes recorded.'}</div>
