@@ -383,7 +383,7 @@ export default function CompliancePage() {
       .select('id, full_name, role')
       .eq('store_id', STORE_ID)
       .order('full_name')
-    const unique = (contacts || []).filter((p, i, arr) => arr.findIndex(x => x.id === p.id) === i)
+    const unique = (contacts || []).filter((p, i, arr) => arr.findIndex(x => x.full_name === p.full_name) === i)
     setAlertContacts(unique)
   }
 
