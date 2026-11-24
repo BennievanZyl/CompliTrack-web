@@ -168,7 +168,15 @@ export default function CompliancePage() {
 
   // UI state
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState<'checklist' | 'uniforms' | 'temperatures' | 'issues' | 'comments'>('checklist')
+  const [activeTab, setActiveTab] = useState<'checklist' | 'uniforms' | 'temperatures' | 'issues' | 'comments' | 'alert'>('checklist')
+
+  // ── Alert settings state ────────────────────────────────────────────────────
+  type AlertSettings = { id?: string; is_enabled: boolean; alert_time: string; recipient_ids: string[] }
+  type ContactProfile = { id: string; full_name: string; role: string }
+  const [alertSettings, setAlertSettings] = useState<AlertSettings>({ is_enabled: false, alert_time: '15:30', recipient_ids: [] })
+  const [alertContacts, setAlertContacts] = useState<ContactProfile[]>([])
+  const [alertSaving, setAlertSaving] = useState(false)
+  const [alertSaved, setAlertSaved] = useState(false)
   const [selectedItem, setSelectedItem] = useState<ChecklistItem | null>(null)
   const [newComment, setNewComment] = useState('')
   const [postingComment, setPostingComment] = useState(false)
@@ -346,8 +354,57 @@ export default function CompliancePage() {
 
   // Load on mount + when storeId ready
   useEffect(() => {
-    if (ctxReady && STORE_ID) loadData(sessionType)
+    if (ctxReady && STORE_ID) {
+      loadData(sessionType)
+      loadAlertSettings()
+    }
   }, [ctxReady, STORE_ID])
+
+  async function loadAlertSettings() {
+    if (!STORE_ID) return
+    // Load saved alert config
+    const { data: saved } = await supabase
+      .from('compliance_alert_settings')
+      .select('*')
+      .eq('store_id', STORE_ID)
+      .single()
+    if (saved) {
+      setAlertSettings({
+        id:            saved.id,
+        is_enabled:    saved.is_enabled,
+        alert_time:    saved.alert_time?.substring(0, 5) ?? '15:30',
+        recipient_ids: saved.recipient_ids ?? [],
+      })
+    }
+    // Load contacts (all profiles linked to this store)
+    const { data: contacts } = await supabase
+      .from('profiles')
+      .select('id, full_name, role')
+      .eq('store_id', STORE_ID)
+      .order('full_name')
+    setAlertContacts(contacts || [])
+  }
+
+  async function saveAlertSettings() {
+    if (!STORE_ID) return
+    setAlertSaving(true)
+    const payload = {
+      store_id:      STORE_ID,
+      is_enabled:    alertSettings.is_enabled,
+      alert_time:    alertSettings.alert_time + ':00',
+      recipient_ids: alertSettings.recipient_ids,
+      updated_at:    new Date().toISOString(),
+    }
+    if (alertSettings.id) {
+      await supabase.from('compliance_alert_settings').update(payload).eq('id', alertSettings.id)
+    } else {
+      const { data } = await supabase.from('compliance_alert_settings').insert(payload).select('id').single()
+      if (data) setAlertSettings(p => ({ ...p, id: data.id }))
+    }
+    setAlertSaving(false)
+    setAlertSaved(true)
+    setTimeout(() => setAlertSaved(false), 2500)
+  }
 
   // Polling
   useEffect(() => {
@@ -602,15 +659,15 @@ export default function CompliancePage() {
 
             {/* ── Tabs ── */}
             <div style={{ background: '#fff', borderRadius: 16, border: '1.5px solid #eef2ee', marginBottom: 20, overflow: 'hidden' }}>
-              <div style={{ display: 'flex', borderBottom: '1.5px solid #f3f4f6' }}>
-                {(['checklist', 'uniforms', 'temperatures', 'issues', 'comments'] as const).map(tab => (
+              <div style={{ display: 'flex', borderBottom: '1.5px solid #f3f4f6', overflowX: 'auto' }}>
+                {(['checklist', 'uniforms', 'temperatures', 'issues', 'comments', 'alert'] as const).map(tab => (
                   <button key={tab} onClick={() => setActiveTab(tab)} style={{
-                    flex: 1, padding: '14px 10px', border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 700,
+                    flex: 1, padding: '14px 10px', border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 700, whiteSpace: 'nowrap',
                     background: activeTab === tab ? '#f0fdf4' : '#fff',
                     color: activeTab === tab ? PRIMARY : '#6b7280',
                     borderBottom: activeTab === tab ? `2px solid ${PRIMARY}` : '2px solid transparent',
                   }}>
-                    {tab === 'checklist' ? `Checklist (${completedCount}/${totalItems})` : tab === 'uniforms' ? `Uniforms (${uniforms.length})` : tab === 'temperatures' ? `Temps (${temperatures.length})` : tab === 'issues' ? `Issues (${issues.length})` : `Comments (${comments.length})`}
+                    {tab === 'checklist' ? `Checklist (${completedCount}/${totalItems})` : tab === 'uniforms' ? `Uniforms (${uniforms.length})` : tab === 'temperatures' ? `Temps (${temperatures.length})` : tab === 'issues' ? `Issues (${issues.length})` : tab === 'comments' ? `Comments (${comments.length})` : `🔔 Alert`}
                   </button>
                 ))}
               </div>
@@ -887,6 +944,89 @@ export default function CompliancePage() {
                         </button>
                       </div>
                     )}
+                  </div>
+                )}
+
+                {/* ── Alert settings tab ── */}
+                {activeTab === 'alert' && (
+                  <div>
+                    <div style={{ marginBottom: 20 }}>
+                      <div style={{ fontSize: 15, fontWeight: 800, color: '#111', marginBottom: 4 }}>Compliance Alert</div>
+                      <div style={{ fontSize: 13, color: '#6b7280' }}>
+                        Automatically notify selected staff when unresolved compliance issues exist at the chosen time.
+                      </div>
+                    </div>
+
+                    {/* Enable toggle */}
+                    <div style={{ background: alertSettings.is_enabled ? '#f0fdf4' : '#f9fafb', border: `1.5px solid ${alertSettings.is_enabled ? '#86efac' : '#e5e7eb'}`, borderRadius: 14, padding: '16px 18px', marginBottom: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div>
+                        <div style={{ fontWeight: 700, fontSize: 14, color: '#111' }}>Enable daily alert</div>
+                        <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>Sends a push notification and in-app message if issues are still open at the alert time</div>
+                      </div>
+                      <button
+                        onClick={() => setAlertSettings(p => ({ ...p, is_enabled: !p.is_enabled }))}
+                        style={{ width: 48, height: 26, borderRadius: 13, border: 'none', cursor: 'pointer', position: 'relative', background: alertSettings.is_enabled ? PRIMARY : '#d1d5db', transition: 'background 0.2s' }}
+                      >
+                        <span style={{ position: 'absolute', top: 3, left: alertSettings.is_enabled ? 24 : 3, width: 20, height: 20, borderRadius: '50%', background: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,0.3)', transition: 'left 0.2s', display: 'block' }} />
+                      </button>
+                    </div>
+
+                    {/* Alert time */}
+                    <div style={{ marginBottom: 16 }}>
+                      <label style={{ display: 'block', fontSize: 13, fontWeight: 700, color: '#374151', marginBottom: 6 }}>Alert time</label>
+                      <input
+                        type="time"
+                        value={alertSettings.alert_time}
+                        onChange={e => setAlertSettings(p => ({ ...p, alert_time: e.target.value }))}
+                        style={{ padding: '10px 14px', borderRadius: 10, border: '1.5px solid #d1d5db', fontSize: 14, fontWeight: 700, color: '#111', outline: 'none', background: '#fff' }}
+                      />
+                      <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 4 }}>The alert fires at this time every day if there are open issues</div>
+                    </div>
+
+                    {/* Contact selector */}
+                    <div style={{ marginBottom: 24 }}>
+                      <label style={{ display: 'block', fontSize: 13, fontWeight: 700, color: '#374151', marginBottom: 10 }}>
+                        Send alert to ({alertSettings.recipient_ids.length} selected)
+                      </label>
+                      {alertContacts.length === 0 ? (
+                        <div style={{ fontSize: 13, color: '#9ca3af', padding: '12px 0' }}>No contacts found for this store</div>
+                      ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                          {alertContacts.map(contact => {
+                            const selected = alertSettings.recipient_ids.includes(contact.id)
+                            return (
+                              <div
+                                key={contact.id}
+                                onClick={() => setAlertSettings(p => ({
+                                  ...p,
+                                  recipient_ids: selected
+                                    ? p.recipient_ids.filter(id => id !== contact.id)
+                                    : [...p.recipient_ids, contact.id],
+                                }))}
+                                style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', borderRadius: 10, border: `1.5px solid ${selected ? '#86efac' : '#e5e7eb'}`, background: selected ? '#f0fdf4' : '#fff', cursor: 'pointer' }}
+                              >
+                                <div style={{ width: 20, height: 20, borderRadius: 5, border: `2px solid ${selected ? PRIMARY : '#d1d5db'}`, background: selected ? PRIMARY : '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                  {selected && <span style={{ color: '#fff', fontSize: 13, fontWeight: 900, lineHeight: 1 }}>✓</span>}
+                                </div>
+                                <div style={{ flex: 1 }}>
+                                  <div style={{ fontSize: 13, fontWeight: 700, color: '#111' }}>{contact.full_name}</div>
+                                  <div style={{ fontSize: 11, color: '#9ca3af', textTransform: 'capitalize' }}>{contact.role}</div>
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Save button */}
+                    <button
+                      onClick={saveAlertSettings}
+                      disabled={alertSaving}
+                      style={{ padding: '12px 28px', background: alertSaved ? '#16a34a' : PRIMARY, color: '#fff', border: 'none', borderRadius: 12, fontSize: 14, fontWeight: 800, cursor: alertSaving ? 'not-allowed' : 'pointer', opacity: alertSaving ? 0.7 : 1 }}
+                    >
+                      {alertSaving ? 'Saving…' : alertSaved ? '✓ Saved' : 'Save Alert Settings'}
+                    </button>
                   </div>
                 )}
               </div>
