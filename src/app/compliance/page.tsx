@@ -184,9 +184,9 @@ export default function CompliancePage() {
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
 
   // ─── Load data ─────────────────────────────────────────────────────────────
-  const loadData = useCallback(async (type: SessionType) => {
+  const loadData = useCallback(async (type: SessionType, silent = false) => {
     if (!STORE_ID) return
-    setLoading(true)
+    if (!silent) setLoading(true)
     setIsHistoricalView(false)
 
     const today = new Date().toISOString().split('T')[0]
@@ -231,7 +231,7 @@ export default function CompliancePage() {
       .limit(25)
 
     setHistoryItems(historyData || [])
-    setLoading(false)
+    if (!silent) setLoading(false)
   }, [STORE_ID])
 
   const loadSessionData = async (sessionId: string) => {
@@ -410,7 +410,7 @@ export default function CompliancePage() {
   useEffect(() => {
     if (!ctxReady || !STORE_ID) return
     const iv = setInterval(() => {
-      if (!isHistoricalView) loadData(sessionType)
+      if (!isHistoricalView) loadData(sessionType, true)
     }, 30000)
     return () => clearInterval(iv)
   }, [ctxReady, STORE_ID, sessionType, isHistoricalView, loadData])
