@@ -177,6 +177,7 @@ export default function CompliancePage() {
   const [alertContacts, setAlertContacts] = useState<ContactProfile[]>([])
   const [alertSaving, setAlertSaving] = useState(false)
   const [alertSaved, setAlertSaved] = useState(false)
+  const [alertError, setAlertError] = useState<string | null>(null)
   const [selectedItem, setSelectedItem] = useState<ChecklistItem | null>(null)
   const [newComment, setNewComment] = useState('')
   const [postingComment, setPostingComment] = useState(false)
@@ -382,12 +383,14 @@ export default function CompliancePage() {
       .select('id, full_name, role')
       .eq('store_id', STORE_ID)
       .order('full_name')
-    setAlertContacts(contacts || [])
+    const unique = (contacts || []).filter((p, i, arr) => arr.findIndex(x => x.id === p.id) === i)
+    setAlertContacts(unique)
   }
 
   async function saveAlertSettings() {
     if (!STORE_ID) return
     setAlertSaving(true)
+    setAlertError(null)
     const payload = {
       store_id:      STORE_ID,
       is_enabled:    alertSettings.is_enabled,
@@ -395,15 +398,22 @@ export default function CompliancePage() {
       recipient_ids: alertSettings.recipient_ids,
       updated_at:    new Date().toISOString(),
     }
+    let errMsg: string | null = null
     if (alertSettings.id) {
-      await supabase.from('compliance_alert_settings').update(payload).eq('id', alertSettings.id)
+      const { error } = await supabase.from('compliance_alert_settings').update(payload).eq('id', alertSettings.id)
+      if (error) errMsg = error.message
     } else {
-      const { data } = await supabase.from('compliance_alert_settings').insert(payload).select('id').single()
-      if (data) setAlertSettings(p => ({ ...p, id: data.id }))
+      const { data, error } = await supabase.from('compliance_alert_settings').insert(payload).select('id').single()
+      if (error) errMsg = error.message
+      else if (data) setAlertSettings(p => ({ ...p, id: data.id }))
     }
     setAlertSaving(false)
-    setAlertSaved(true)
-    setTimeout(() => setAlertSaved(false), 2500)
+    if (errMsg) {
+      setAlertError(errMsg)
+    } else {
+      setAlertSaved(true)
+      setTimeout(() => setAlertSaved(false), 2500)
+    }
   }
 
   // Polling
@@ -1027,6 +1037,11 @@ export default function CompliancePage() {
                     >
                       {alertSaving ? 'Saving…' : alertSaved ? '✓ Saved' : 'Save Alert Settings'}
                     </button>
+                    {alertError && (
+                      <div style={{ marginTop: 10, padding: '10px 14px', background: '#fef2f2', border: '1px solid #fca5a5', borderRadius: 8, color: '#dc2626', fontSize: 13 }}>
+                        ⚠️ Save failed: {alertError}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
