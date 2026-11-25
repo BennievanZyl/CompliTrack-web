@@ -92,11 +92,21 @@ serve(async () => {
 
       const reportUrl   = `https://complitrack.co.za/compliance/report/${sessionId}`;
       const alertTitle = `🔴 Compliance Alert — ${storeName}`;
-      const alertBody  =
-        `${issues.length} unresolved issue${issues.length !== 1 ? "s" : ""} before shift end:\n\n` +
-        issueLines +
-        `\n\n📄 View full report:\n${reportUrl}`;
-      const fullMessage = `${alertTitle}\n\n${alertBody}`;
+      // Structured payload so the chat UI can render a rich card with a clickable link
+      const alertPayload = {
+        store:      storeName,
+        session_id: sessionId,
+        count:      issues.length,
+        issues:     issues.map((issue, i) => {
+          const emp  = issue.employee_id ? empMap[issue.employee_id] : null;
+          const time = new Date(issue.created_at)
+            .toLocaleTimeString("en-ZA", { hour: "2-digit", minute: "2-digit", timeZone: "Africa/Johannesburg" });
+          const badge = issue.is_uniform_violation ? " 👕" : "";
+          return `${i + 1}. ${issue.description}${emp ? ` (${emp})` : ""}${badge} — flagged ${time}`;
+        }),
+        report_url: reportUrl,
+      };
+      const fullMessage = `[COMPLIANCE_ALERT]:${JSON.stringify(alertPayload)}`;
 
       console.log(`[compliance-alert] sending alert for store ${storeName}: ${issues.length} issues`);
 

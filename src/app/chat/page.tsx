@@ -414,6 +414,7 @@ export default function ChatPage() {
                   const isMe = msg.sender_id === currentUser?.id;
                   const isPhoto = msg.message.startsWith('[PHOTO]:');
                   const isShoppingList = msg.message.startsWith('[SHOPPING_LIST]:');
+                  const isComplianceAlert = msg.message.startsWith('[COMPLIANCE_ALERT]:');
                   const photoUrl = isPhoto ? msg.message.replace('[PHOTO]:', '').split('\n')[0].trim() : null;
                   const photoCaption = isPhoto ? msg.message.split('\n').slice(1).join('\n').trim() : null;
 
@@ -421,6 +422,11 @@ export default function ChatPage() {
                   let listData: any = null;
                   if (isShoppingList) {
                     try { listData = JSON.parse(msg.message.replace('[SHOPPING_LIST]:', '')); } catch {}
+                  }
+                  // Parse compliance alert
+                  let alertData: { store: string; count: number; issues: string[]; report_url: string; session_id: string } | null = null;
+                  if (isComplianceAlert) {
+                    try { alertData = JSON.parse(msg.message.replace('[COMPLIANCE_ALERT]:', '')); } catch {}
                   }
 
                   return (
@@ -433,6 +439,24 @@ export default function ChatPage() {
                           </>
                         ) : isShoppingList && listData ? (
                           <ShoppingListCard listData={listData} />
+                        ) : isComplianceAlert && alertData ? (
+                          <div style={{ minWidth: 240 }}>
+                            <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 6 }}>🔴 Compliance Alert</div>
+                            <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 8 }}>{alertData.store} · {alertData.count} unresolved issue{alertData.count !== 1 ? 's' : ''} before shift end</div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 12 }}>
+                              {alertData.issues.map((line: string, i: number) => (
+                                <div key={i} style={{ fontSize: 12, color: '#374151', background: '#fef2f2', borderRadius: 6, padding: '4px 8px', borderLeft: '3px solid #fca5a5' }}>{line}</div>
+                              ))}
+                            </div>
+                            <a
+                              href={alertData.report_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              style={{ display: 'block', textAlign: 'center', background: '#1a5c38', color: '#fff', borderRadius: 8, padding: '8px 14px', fontSize: 13, fontWeight: 700, textDecoration: 'none' }}
+                            >
+                              📄 View Full Report →
+                            </a>
+                          </div>
                         ) : (
                           msg.message
                         )}
