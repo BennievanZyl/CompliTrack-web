@@ -138,14 +138,11 @@ function DashboardContent() {
       setTotalTasks(0)
       setCompletedTasks(0)
     }
-    // Only count open issues from today's session (not stale issues from prior days)
-    const { count: issueCount } = session
-      ? await supabase
-          .from('compliance_issues')
-          .select('*', { count: 'exact', head: true })
-          .eq('session_id', session.id)
-          .in('status', ['open', 'in_progress'])
-      : { count: 0 }
+    const { count: issueCount } = await supabase
+      .from('compliance_issues')
+      .select('*', { count: 'exact', head: true })
+      .eq('store_id', storeId)
+      .in('status', ['open', 'in_progress'])
     setOpenIssuesCount(issueCount || 0)
   }
 
