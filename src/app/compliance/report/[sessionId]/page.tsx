@@ -45,7 +45,7 @@ export default async function ReportPage({ params }: { params: { sessionId: stri
 
   const { data: issues } = await client
     .from('compliance_issues')
-    .select('id, description, photo_url, resolution_photo_url, is_uniform_violation, status, created_at, employee_id')
+    .select('id, description, photo_url, resolution_photo_url, resolution_note, is_uniform_violation, status, created_at, resolved_at, employee_id, resolved_by_employee_id')
     .eq('session_id', sessionId)
     .order('created_at', { ascending: true })
 
@@ -56,6 +56,21 @@ export default async function ReportPage({ params }: { params: { sessionId: stri
   const empMap: Record<string, string> = Object.fromEntries(
     (employees || []).map((e: any) => [e.id, e.full_name])
   )
+
+  // Fetch names for anyone who resolved an issue (may differ from the person responsible)
+  const resolverIds = [...new Set(
+    (issues || [])
+      .filter((i: any) => i.resolved_by_employee_id && !empIds.includes(i.resolved_by_employee_id))
+      .map((i: any) => i.resolved_by_employee_id)
+  )]
+  const { data: resolvers } = resolverIds.length
+    ? await client.from('employees').select('id, full_name').in('id', resolverIds)
+    : { data: [] }
+  // Combined map covers both responsible employees AND resolvers
+  const resolverMap: Record<string, string> = {
+    ...empMap,
+    ...Object.fromEntries((resolvers || []).map((e: any) => [e.id, e.full_name]))
+  }
 
   const openIssues     = (issues || []).filter((i: any) => !['resolved', 'closed'].includes(i.status))
   const resolvedIssues = (issues || []).filter((i: any) =>  ['resolved', 'closed'].includes(i.status))
@@ -195,11 +210,17 @@ export default async function ReportPage({ params }: { params: { sessionId: stri
                   <div className="issue-body">
                     <div className="issue-desc-resolved">{issue.description}</div>
                     <div className="issue-meta">
-                      <span>🕐 {formatTime(issue.created_at)}</span>
+                      <span>🕐 Flagged {formatTime(issue.created_at)}</span>
                       {issue.employee_id && empMap[issue.employee_id] && (
-                        <span>👤 {empMap[issue.employee_id]}</span>
+                        <span>👤 Responsible: {empMap[issue.employee_id]}</span>
                       )}
                       <span className="badge-resolved">resolved</span>
+                      {issue.resolved_by_employee_id && resolverMap[issue.resolved_by_employee_id] && (
+                        <span style={{ color: '#16a34a' }}>
+                          🔧 Fixed by {resolverMap[issue.resolved_by_employee_id]}
+                          {issue.resolved_at ? ` · ${formatTime(issue.resolved_at)}` : ''}
+                        </span>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -210,15 +231,24 @@ export default async function ReportPage({ params }: { params: { sessionId: stri
                     <div className="photo-label">📷 Original issue photo</div>
                   </>
                 )}
-                {issue.resolution_photo_url && (
+                {(issue.resolution_note || issue.resolution_photo_url) && (
                   <div className="resolution-section">
-                    <div className="resolution-label">✅ Resolution Photo</div>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={issue.resolution_photo_url}
-                      alt="Resolution photo"
-                      style={{ width: '100%', maxHeight: 220, objectFit: 'cover', borderRadius: 8 }}
-                    />
+                    {issue.resolution_note && (
+                      <div style={{ fontSize: 13, color: '#374151', marginBottom: 10 }}>
+                        📝 {issue.resolution_note}
+                      </div>
+                    )}
+                    {issue.resolution_photo_url && (
+                      <>
+                        <div className="resolution-label">✅ Resolution Photo</div>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={issue.resolution_photo_url}
+                          alt="Resolution photo"
+                          style={{ width: '100%', maxHeight: 220, objectFit: 'cover', borderRadius: 8 }}
+                        />
+                      </>
+                    )}
                   </div>
                 )}
               </div>

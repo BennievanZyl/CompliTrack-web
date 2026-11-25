@@ -110,7 +110,9 @@ type ComplianceIssue = {
   resolved_at: string | null
   resolution_note: string | null
   resolution_photo_url: string | null
+  resolved_by_employee_id: string | null
   employee_name?: string | null
+  resolver_name?: string | null
   checklist_item_name?: string | null
 }
 
@@ -336,9 +338,18 @@ export default function CompliancePage() {
       item.name || item.title || item.checklist_templates?.task_name || 'Checklist item'
     ]))
 
+    // Fetch any resolver employees not already in the map
+    const resolverIds = [...new Set(rawIssues.map((i: any) => i.resolved_by_employee_id).filter(Boolean))]
+    const missingResolverIds = resolverIds.filter((id: string) => !employeeMap.has(id))
+    if (missingResolverIds.length > 0) {
+      const { data: resolverEmps } = await supabase.from('employees').select('id, full_name, role, avatar_url').in('id', missingResolverIds)
+      ;(resolverEmps || []).forEach((e: any) => employeeMap.set(e.id, e))
+    }
+
     const enrichedIssues: ComplianceIssue[] = rawIssues.map((issue: any) => ({
       ...issue,
       employee_name: issue.employee_id ? employeeMap.get(issue.employee_id)?.full_name || 'Unknown employee' : null,
+      resolver_name: issue.resolved_by_employee_id ? employeeMap.get(issue.resolved_by_employee_id)?.full_name || null : null,
       checklist_item_name: issue.checklist_item_id ? itemNameMap.get(issue.checklist_item_id) || 'Checklist item' : null,
     }))
 
@@ -903,13 +914,21 @@ export default function CompliancePage() {
                               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                                 {issue.employee_name && (
                                   <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                                    <div style={{ width: 18, height: 18, borderRadius: '50%', background: '#16a34a', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, fontWeight: 700, color: '#fff' }}>
+                                    <div style={{ width: 18, height: 18, borderRadius: '50%', background: '#6b7280', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, fontWeight: 700, color: '#fff' }}>
                                       {issue.employee_name.charAt(0)}
                                     </div>
-                                    <span style={{ fontSize: 11, fontWeight: 600, color: '#16a34a' }}>{issue.employee_name}</span>
+                                    <span style={{ fontSize: 11, color: '#6b7280' }}>👤 {issue.employee_name}</span>
                                   </div>
                                 )}
-                                {issue.resolved_at && <span style={{ fontSize: 11, color: '#9ca3af' }}>Resolved {new Date(issue.resolved_at).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })}</span>}
+                                {issue.resolver_name && (
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                                    <div style={{ width: 18, height: 18, borderRadius: '50%', background: '#16a34a', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, fontWeight: 700, color: '#fff' }}>
+                                      {issue.resolver_name.charAt(0)}
+                                    </div>
+                                    <span style={{ fontSize: 11, fontWeight: 600, color: '#16a34a' }}>🔧 {issue.resolver_name}</span>
+                                  </div>
+                                )}
+                                {issue.resolved_at && <span style={{ fontSize: 11, color: '#9ca3af' }}>Fixed {new Date(issue.resolved_at).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })}</span>}
                               </div>
                             </div>
                             <div style={{ flexShrink: 0 }}>
