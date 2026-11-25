@@ -606,7 +606,7 @@ export default function CompliancePage() {
         const e = empTotals.get(row.employee_id)!
         e.points += row.points
         const tag: Record<string, string> = {
-          resolved_others_issue: 'fixed another's issue (+3)',
+          resolved_others_issue: "fixed another's issue (+3)",
           resolved_own_issue: 'fixed own issue',
           cross_shift_fix: 'left issue for next shift (-2)',
           issue_left_unresolved: 'issue not resolved (-3)',
