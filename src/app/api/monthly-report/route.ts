@@ -370,7 +370,7 @@ Keep the tone professional but plain-spoken — this is for a restaurant manager
 
   } catch (err: any) {
     console.error('[monthly-report] error:', err)
-    return NextResponse.json({ error: err.message ?? 'Unknown error' }, { status: 500 })
+    return NextResponse.json({ error: err.message ?? "Unknown error", stack: err.stack?.split("\n").slice(0,5) }, { status: 500 })
   }
 }
 
