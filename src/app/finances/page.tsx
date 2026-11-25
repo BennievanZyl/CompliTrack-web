@@ -2191,7 +2191,12 @@ export default function FinancesPage() {
                   <div style={{ display: 'grid', gridTemplateColumns: '28px 1fr 160px 120px 120px 100px 80px', gap: 12, padding: '8px 16px', fontSize: 11, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase' as const }}>
                     <div></div><div>Name</div><div>Category</div><div>Date</div><div style={{ textAlign: 'right' }}>Amount (R)</div><div style={{ textAlign: 'center' }}>Status</div><div></div>
                   </div>
-                  {debitOrders.map(order => {
+                  {[...debitOrders].sort((a, b) => {
+                    const aAlloc = debitOrderMonths.find(m => m.debit_order_id === a.id)?.is_allocated ?? false
+                    const bAlloc = debitOrderMonths.find(m => m.debit_order_id === b.id)?.is_allocated ?? false
+                    if (aAlloc !== bAlloc) return aAlloc ? 1 : -1
+                    return a.sort_order - b.sort_order
+                  }).map(order => {
                     const dom = debitOrderMonths.find(m => m.debit_order_id === order.id)
                     const included = dom?.is_included ?? true
                     const allocated = dom?.is_allocated ?? false
