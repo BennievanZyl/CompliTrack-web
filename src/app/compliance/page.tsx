@@ -166,6 +166,9 @@ export default function CompliancePage() {
   const [temperatures, setTemperatures] = useState<TempLog[]>([])
   const [issues, setIssues] = useState<ComplianceIssue[]>([])
   const [roster, setRoster] = useState<RosterMember[]>([])
+  const [pointsCalculated, setPointsCalculated] = useState(false)
+  const [pointsCalculating, setPointsCalculating] = useState(false)
+  const [pointsSummary, setPointsSummary] = useState<{ name: string; points: number; reason: string }[] | null>(null)
   const [shiftInfo, setShiftInfo] = useState<ShiftInfo | null>(null)
 
   // UI state
@@ -362,6 +365,8 @@ export default function CompliancePage() {
 
     setIssues(enrichedIssues)
     setRoster(rosterMembers)
+    setPointsCalculated(false)
+    setPointsSummary(null)
   }
 
   // Load on mount + when storeId ready
@@ -536,6 +541,90 @@ export default function CompliancePage() {
       </div>
     )
   }
+
+  async function calculatePoints() {
+    if (!currentSessionId || !STORE_ID) return
+    setPointsCalculating(true)
+    try {
+      // Guard: skip if already calculated for this session
+      const { data: existing } = await supabase
+        .from('employee_compliance_points')
+        .select('id')
+        .eq('session_id', currentSessionId)
+        .limit(1)
+      if (existing && existing.length > 0) {
+        setPointsCalculated(true)
+        setPointsCalculating(false)
+        return
+      }
+
+      const rows: {
+        store_id: string; employee_id: string; issue_id: string | null;
+        session_id: string; points: number; reason: string;
+      }[] = []
+
+      for (const issue of issues) {
+        if (!issue.employee_id) continue
+        if (issue.status === 'resolved' && issue.resolved_by_employee_id) {
+          if (issue.resolved_by_employee_id === issue.employee_id) {
+            rows.push({ store_id: STORE_ID, employee_id: issue.employee_id, issue_id: issue.id,
+              session_id: currentSessionId, points: 0, reason: 'resolved_own_issue' })
+          } else {
+            rows.push({ store_id: STORE_ID, employee_id: issue.resolved_by_employee_id, issue_id: issue.id,
+              session_id: currentSessionId, points: 3, reason: 'resolved_others_issue' })
+            rows.push({ store_id: STORE_ID, employee_id: issue.employee_id, issue_id: issue.id,
+              session_id: currentSessionId, points: -2, reason: 'cross_shift_fix' })
+          }
+        } else if (issue.status !== 'resolved') {
+          rows.push({ store_id: STORE_ID, employee_id: issue.employee_id, issue_id: issue.id,
+            session_id: currentSessionId, points: -3, reason: 'issue_left_unresolved' })
+        }
+      }
+
+      // Clean shift bonus for anyone on the roster with no issues attributed to them
+      const responsibleIds = new Set(issues.map(i => i.employee_id).filter(Boolean))
+      for (const member of roster) {
+        if (!responsibleIds.has(member.employee_id)) {
+          rows.push({ store_id: STORE_ID, employee_id: member.employee_id, issue_id: null,
+            session_id: currentSessionId, points: 1, reason: 'clean_shift_bonus' })
+        }
+      }
+
+      if (rows.length > 0) {
+        await supabase.from('employee_compliance_points').insert(rows)
+      }
+
+      // Build a tidy summary to show inline
+      const empTotals = new Map<string, { name: string; points: number; tags: string[] }>()
+      const findName = (id: string) =>
+        roster.find(r => r.employee_id === id)?.full_name ||
+        issues.find(i => i.employee_id === id)?.employee_name ||
+        issues.find(i => i.resolved_by_employee_id === id)?.resolver_name ||
+        'Unknown'
+      for (const row of rows) {
+        if (!empTotals.has(row.employee_id)) empTotals.set(row.employee_id, { name: findName(row.employee_id), points: 0, tags: [] })
+        const e = empTotals.get(row.employee_id)!
+        e.points += row.points
+        const tag: Record<string, string> = {
+          resolved_others_issue: 'fixed another's issue (+3)',
+          resolved_own_issue: 'fixed own issue',
+          cross_shift_fix: 'left issue for next shift (-2)',
+          issue_left_unresolved: 'issue not resolved (-3)',
+          clean_shift_bonus: 'clean shift (+1)',
+        }
+        if (tag[row.reason]) e.tags.push(tag[row.reason])
+      }
+      setPointsSummary([...empTotals.values()].sort((a, b) => b.points - a.points).map(e => ({
+        name: e.name, points: e.points, reason: [...new Set(e.tags)].join(' · ')
+      })))
+      setPointsCalculated(true)
+    } catch (err) {
+      console.error('Points calculation error:', err)
+    } finally {
+      setPointsCalculating(false)
+    }
+  }
+
 
   return (
     <div style={{ minHeight: '100vh', background: LIGHT, fontFamily: 'system-ui, sans-serif' }}>
@@ -852,6 +941,47 @@ export default function CompliancePage() {
                 {/* ── Issues tab ── */}
                 {activeTab === 'issues' && (
                   <div>
+                    {/* Points calculation panel */}
+                    <div style={{ marginBottom: 16, padding: '14px 16px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 12, display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: '#1e293b', marginBottom: 2 }}>🏆 Staff Points</div>
+                        <div style={{ fontSize: 12, color: '#64748b' }}>
+                          {pointsCalculated ? 'Points calculated for this session.' : 'Calculate staff points based on issues raised, resolved, and left open.'}
+                        </div>
+                        {pointsSummary && pointsSummary.length > 0 && (
+                          <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                            {pointsSummary.map(emp => (
+                              <div key={emp.name} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <div style={{ width: 24, height: 24, borderRadius: '50%', background: emp.points > 0 ? '#16a34a' : emp.points < 0 ? '#dc2626' : '#6b7280', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 700, color: '#fff', flexShrink: 0 }}>
+                                  {emp.name.charAt(0)}
+                                </div>
+                                <span style={{ fontSize: 13, fontWeight: 600, color: '#1e293b', minWidth: 100 }}>{emp.name}</span>
+                                <span style={{ fontSize: 14, fontWeight: 700, color: emp.points > 0 ? '#16a34a' : emp.points < 0 ? '#dc2626' : '#6b7280', minWidth: 36 }}>
+                                  {emp.points > 0 ? '+' : ''}{emp.points}
+                                </span>
+                                <span style={{ fontSize: 11, color: '#94a3b8' }}>{emp.reason}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {pointsCalculated && (!pointsSummary || pointsSummary.length === 0) && (
+                          <div style={{ marginTop: 6, fontSize: 12, color: '#16a34a' }}>✓ No pointable events this session.</div>
+                        )}
+                      </div>
+                      {!pointsCalculated && (
+                        <button
+                          onClick={calculatePoints}
+                          disabled={pointsCalculating}
+                          style={{ flexShrink: 0, padding: '8px 16px', borderRadius: 8, border: 'none', cursor: pointsCalculating ? 'default' : 'pointer', background: pointsCalculating ? '#94a3b8' : '#1a3a2a', color: '#fff', fontSize: 13, fontWeight: 600 }}
+                        >
+                          {pointsCalculating ? 'Calculating…' : 'Calculate Points'}
+                        </button>
+                      )}
+                      {pointsCalculated && (
+                        <div style={{ flexShrink: 0, padding: '8px 12px', borderRadius: 8, background: '#dcfce7', color: '#16a34a', fontSize: 12, fontWeight: 600 }}>✓ Done</div>
+                      )}
+                    </div>
+
                     {issues.length === 0 ? (
                       <div style={{ textAlign: 'center', padding: '40px 0', color: '#9ca3af' }}>
                         <div style={{ fontSize: 36, marginBottom: 10 }}>✅</div>
