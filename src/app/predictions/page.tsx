@@ -287,10 +287,12 @@ export default function PredictionsPage() {
     setRatioSamples(rs)
     setUsingDomFilter(domF)
     setUsingUniversal(uniF)
-    if (todaySnapshot && todaySnapshot.predicted_final) {
-      setPhase2Pred(todaySnapshot.predicted_final)
-    } else if (todaySnapshot && avgRatio) {
-      setPhase2Pred(Math.round(todaySnapshot.sales_at_time * avgRatio / 10) * 10)
+    if (todaySnapshot) {
+      // Always prefer live ratio when we have enough samples; stored is fallback only.
+      const liveRatio = avgRatio && ratioSamples >= 2
+        ? Math.round(todaySnapshot.sales_at_time * avgRatio / 10) * 10
+        : null
+      setPhase2Pred(liveRatio ?? todaySnapshot.predicted_final)
     }
 
     /* predictions for each DOW using next occurrence of that day */
@@ -354,11 +356,16 @@ export default function PredictionsPage() {
   // - same-DOW runtime ratio samples → blend linearly up to 100% at 8 samples
   // - universal cross-day ratio fallback → blend up to 50% max (less specific but beats ignoring snapshot)
   const hasStoredSnapPred = !!(todaySnap?.predicted_final)
-  const phase2BlendWeight = hasStoredSnapPred
-    ? 1
-    : usingUniversal
-      ? Math.min(0.5, ratioSamples / 8)
-      : Math.min(1, ratioSamples / 8)
+  // Conservative blend: live ratio capped at 40% (same-DOW) or 20% (universal).
+  // Phase 1 (historical pattern) always retains at least 60% influence.
+  const hasLiveRatio = ratioSamples >= 2 && !!avgRatio
+  const phase2BlendWeight = !todaySnap
+    ? 0
+    : hasLiveRatio
+      ? usingUniversal
+        ? Math.min(0.2, ratioSamples * 0.04)   // cross-day: 4% per sample, max 20%
+        : Math.min(0.4, ratioSamples * 0.08)   // same-DOW:  8% per sample, max 40%
+      : (hasStoredSnapPred ? 0.15 : 0)          // stored only: modest 15% nudge
   const finalPred = todayPred
     ? (phase2Pred && phase2BlendWeight > 0
         ? Math.round((todayPred.mid * (1 - phase2BlendWeight) + phase2Pred * phase2BlendWeight) / 10) * 10
