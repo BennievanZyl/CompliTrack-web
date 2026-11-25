@@ -107,6 +107,50 @@ export default function ReportsPage() {
 
   const dateLabel = `${startDate} to ${endDate}`
 
+  // ── AI Monthly Report state ───────────────────────────────────────────────
+  const now = new Date()
+  const [aiMonth, setAiMonth] = React.useState(now.getMonth() === 0 ? 12 : now.getMonth())
+  const [aiYear, setAiYear] = React.useState(now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear())
+  const [aiLoading, setAiLoading] = React.useState(false)
+  const [aiReport, setAiReport] = React.useState<string | null>(null)
+  const [aiError, setAiError] = React.useState<string | null>(null)
+  const [savedReports, setSavedReports] = React.useState<any[]>([])
+  const [aiTab, setAiTab] = React.useState<'generate' | 'history'>('generate')
+  const [userId, setUserId] = React.useState<string | null>(null)
+
+  React.useEffect(() => {
+    supabase.auth.getUser().then(({ data: { user } }) => { if (user) setUserId(user.id) })
+  }, [])
+
+  React.useEffect(() => {
+    if (!STORE_ID) return
+    fetch(`/api/monthly-report?storeId=${STORE_ID}&limit=12`)
+      .then(r => r.json()).then(d => { if (d.reports) setSavedReports(d.reports) })
+      .catch(() => {})
+  }, [STORE_ID])
+
+  async function generateAIReport() {
+    if (!STORE_ID) { alert('Store not ready'); return }
+    setAiLoading(true); setAiError(null); setAiReport(null)
+    try {
+      const res = await fetch('/api/monthly-report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ storeId: STORE_ID, month: aiMonth, year: aiYear, userId }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error ?? 'Generation failed')
+      setAiReport(data.report)
+      // Refresh history
+      fetch(`/api/monthly-report?storeId=${STORE_ID}&limit=12`)
+        .then(r => r.json()).then(d => { if (d.reports) setSavedReports(d.reports) })
+    } catch (e: any) {
+      setAiError(e.message)
+    } finally {
+      setAiLoading(false)
+    }
+  }
+
   async function run(key: string, fn: () => Promise<void>) {
     if (!guard()) return
     setLoading(key); try { await fn() } catch (e: any) { alert('Error: ' + e.message) } finally { setLoading(null) }
@@ -710,6 +754,131 @@ ${supRows.length ? `<table>
       </div>
 
       <div style={{ padding: '24px 32px', maxWidth: 1400, margin: '0 auto' }}>
+        {/* ── AI MONTHLY REPORT ────────────────────────────────────────────── */}
+        <div style={{ background: '#fff', borderRadius: 16, border: '2px solid #1a5c38', marginBottom: 28, overflow: 'hidden' }}>
+          {/* Title bar */}
+          <div style={{ background: 'linear-gradient(135deg,#0a1f12,#1a5c38)', padding: '18px 24px', display: 'flex', alignItems: 'center', gap: 14 }}>
+            <div style={{ fontSize: 32 }}>🤖</div>
+            <div style={{ flex: 1 }}>
+              <div style={{ color: '#fff', fontWeight: 800, fontSize: 17 }}>AI Monthly Business Report</div>
+              <div style={{ color: 'rgba(255,255,255,0.65)', fontSize: 12 }}>Powered by Claude · Full narrative with P&L, compliance, HR, stock and recommendations</div>
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              {(['generate', 'history'] as const).map(t => (
+                <button key={t} onClick={() => setAiTab(t)}
+                  style={{ padding: '7px 16px', background: aiTab === t ? '#fff' : 'rgba(255,255,255,0.15)', color: aiTab === t ? '#1a5c38' : '#fff', border: 'none', borderRadius: 8, fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>
+                  {t === 'generate' ? '✨ Generate' : `📂 History (${savedReports.length})`}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {aiTab === 'generate' && (
+            <div style={{ padding: '20px 24px' }}>
+              {/* Month/Year picker */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+                <div style={{ fontWeight: 700, fontSize: 13, color: '#374151' }}>Report for:</div>
+                <select value={aiMonth} onChange={e => setAiMonth(Number(e.target.value))}
+                  style={{ padding: '8px 12px', borderRadius: 8, border: '1.5px solid #d1d5db', fontSize: 13, fontWeight: 600, background: '#f9fafb', cursor: 'pointer' }}>
+                  {['January','February','March','April','May','June','July','August','September','October','November','December'].map((m, i) => (
+                    <option key={i+1} value={i+1}>{m}</option>
+                  ))}
+                </select>
+                <select value={aiYear} onChange={e => setAiYear(Number(e.target.value))}
+                  style={{ padding: '8px 12px', borderRadius: 8, border: '1.5px solid #d1d5db', fontSize: 13, fontWeight: 600, background: '#f9fafb', cursor: 'pointer' }}>
+                  {[new Date().getFullYear() - 2, new Date().getFullYear() - 1, new Date().getFullYear()].map(y => (
+                    <option key={y} value={y}>{y}</option>
+                  ))}
+                </select>
+                <button onClick={generateAIReport} disabled={aiLoading}
+                  style={{ padding: '9px 22px', background: aiLoading ? '#9ca3af' : '#1a5c38', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 800, fontSize: 13, cursor: aiLoading ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  {aiLoading ? (
+                    <><span style={{ display: 'inline-block', width: 14, height: 14, border: '2px solid rgba(255,255,255,0.4)', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />Generating…</>
+                  ) : '✨ Generate Report'}
+                </button>
+                {aiLoading && <div style={{ fontSize: 12, color: '#6b7280' }}>Analysing all data for the month… this takes ~15 seconds</div>}
+              </div>
+
+              {aiError && (
+                <div style={{ background: '#fef2f2', border: '1px solid #fca5a5', borderRadius: 10, padding: '12px 16px', marginBottom: 16, color: '#dc2626', fontSize: 13, fontWeight: 600 }}>
+                  ⚠️ {aiError}
+                </div>
+              )}
+
+              {aiReport && (
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: '#16a34a' }}>✅ Report ready</div>
+                    <button onClick={() => {
+                      const blob = new Blob([aiReport], { type: 'text/plain;charset=utf-8' })
+                      const a = document.createElement('a'); a.href = URL.createObjectURL(blob)
+                      a.download = `CompliTrack-Report-${['January','February','March','April','May','June','July','August','September','October','November','December'][aiMonth-1]}-${aiYear}.txt`
+                      a.click()
+                    }} style={{ padding: '5px 12px', background: '#f0fdf4', color: '#16a34a', border: '1px solid #bbf7d0', borderRadius: 7, fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
+                      ⬇️ Save as text
+                    </button>
+                    <button onClick={() => {
+                      const win = window.open('', '_blank')!
+                      const escaped = aiReport.replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                      const withBreaks = escaped.replace(/\n/g, '<br/>').replace(/^(#{1,3} .+)$/gm, '<b style="font-size:1.1em">$1</b>').replace(/^\*\*(.+)\*\*$/gm, '<b>$1</b>').replace(/^(- .+)$/gm, '&nbsp;&nbsp;• $1')
+                      win.document.write('<!DOCTYPE html><html><head><title>Business Report</title><style>body{font-family:Georgia,serif;max-width:800px;margin:40px auto;line-height:1.7;color:#111;font-size:14px}@media print{body{margin:20px}}</style></head><body>' + withBreaks + '<script>window.onload=()=>window.print()<\/script></body></html>')
+                      win.document.close()
+                    }} style={{ padding: '5px 12px', background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', borderRadius: 7, fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
+                      🖨️ Print PDF
+                    </button>
+                  </div>
+                  <div style={{ background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 12, padding: '20px 24px', maxHeight: 600, overflowY: 'auto', whiteSpace: 'pre-wrap', fontFamily: 'Georgia,serif', fontSize: 13.5, lineHeight: 1.75, color: '#111' }}>
+                    {aiReport}
+                  </div>
+                </div>
+              )}
+
+              {!aiReport && !aiLoading && !aiError && (
+                <div style={{ textAlign: 'center', padding: '32px 0', color: '#9ca3af' }}>
+                  <div style={{ fontSize: 40, marginBottom: 8 }}>📊</div>
+                  <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>Select a month and click Generate</div>
+                  <div style={{ fontSize: 12 }}>Claude will analyse all your sales, costs, compliance, stock and HR data for the month and write a full business review</div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {aiTab === 'history' && (
+            <div style={{ padding: '20px 24px' }}>
+              {savedReports.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '32px 0', color: '#9ca3af', fontSize: 13 }}>
+                  No reports generated yet. Generate your first one above.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {savedReports.map((r: any) => {
+                    const d = new Date(r.report_month + 'T12:00:00')
+                    const label = d.toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' })
+                    const snap = r.data_snapshot
+                    return (
+                      <div key={r.id} style={{ background: '#f9fafb', borderRadius: 10, border: '1px solid #e5e7eb', padding: '14px 18px', cursor: 'pointer' }}
+                        onClick={() => { setAiReport(r.report_text); setAiTab('generate') }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+                          <div style={{ fontWeight: 800, fontSize: 14, color: '#111' }}>📅 {label}</div>
+                          <div style={{ fontSize: 11, color: '#9ca3af' }}>Generated {new Date(r.generated_at).toLocaleDateString('en-ZA')}</div>
+                          <div style={{ marginLeft: 'auto', fontSize: 11, color: '#6b7280', fontWeight: 600 }}>Click to view →</div>
+                        </div>
+                        {snap?.sales && (
+                          <div style={{ display: 'flex', gap: 16, fontSize: 12, color: '#6b7280' }}>
+                            <span>Sales: <strong style={{ color: '#111' }}>R {Number(snap.sales.total).toLocaleString('en-ZA', { minimumFractionDigits: 0 })}</strong></span>
+                            <span>Customers: <strong style={{ color: '#111' }}>{Number(snap.sales.customers).toLocaleString()}</strong></span>
+                            {snap.profitability && <span>Op. Profit: <strong style={{ color: snap.profitability.operatingProfit >= 0 ? '#16a34a' : '#dc2626' }}>R {Number(snap.profitability.operatingProfit).toLocaleString('en-ZA', { minimumFractionDigits: 0 })}</strong></span>}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
         {/* Accountant Pack — prominent CTA */}
         <div style={{ ...card, background: `linear-gradient(135deg,${DARK},${PRIMARY})`, marginBottom: 28, display: 'flex', alignItems: 'center', gap: 20 }}>
           <div style={{ flex: 1 }}>
