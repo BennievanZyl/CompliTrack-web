@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
-import Anthropic from '@anthropic-ai/sdk'
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!
@@ -20,7 +19,6 @@ export async function POST(req: NextRequest) {
     }
 
     const sb = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY)
-    const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY })
 
     const monthStr = `${year}-${String(month).padStart(2, '0')}`
     const startDate = `${monthStr}-01`
@@ -342,13 +340,25 @@ Write the report in this exact structure:
 Keep the tone professional but plain-spoken — this is for a restaurant manager, not a banker. Use South African Rand (R) for all amounts. Be specific with numbers throughout.`
 
     // ── Call Claude API ────────────────────────────────────────────────────────
-    const message = await anthropic.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 4096,
-      messages: [{ role: 'user', content: prompt }],
+    const anthropicRes = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 4096,
+        messages: [{ role: 'user', content: prompt }],
+      }),
     })
-
-    const reportText = message.content[0].type === 'text' ? message.content[0].text : ''
+    if (!anthropicRes.ok) {
+      const errBody = await anthropicRes.text()
+      throw new Error(`Anthropic API error ${anthropicRes.status}: ${errBody}`)
+    }
+    const anthropicData = await anthropicRes.json()
+    const reportText = anthropicData.content?.[0]?.text ?? ''
 
     // ── Save to database ───────────────────────────────────────────────────────
     const { error: saveErr } = await sb
