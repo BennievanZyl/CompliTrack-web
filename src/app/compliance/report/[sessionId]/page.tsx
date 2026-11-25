@@ -4,10 +4,10 @@ import { createClient } from '@supabase/supabase-js'
 import { notFound } from 'next/navigation'
 
 const SUPABASE_URL  = process.env.NEXT_PUBLIC_SUPABASE_URL!
-const SUPABASE_ANON = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 
 function sb() {
-  return createClient(SUPABASE_URL, SUPABASE_ANON)
+  return createClient(SUPABASE_URL, SUPABASE_KEY)
 }
 
 export const dynamic = 'force-dynamic'
