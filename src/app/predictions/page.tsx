@@ -616,7 +616,7 @@ export default function PredictionsPage() {
                       {isToday && <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.7)', marginBottom: 6, fontWeight: 600 }}>TODAY</div>}
                       {!isToday && <div style={{ marginBottom: 6 }} />}
                       <div style={{ fontSize: 15, fontWeight: 900, color: isToday ? '#fff' : PRIMARY }}>{cur(isToday && finalPred ? finalPred : pred.mid)}</div>
-                      <div style={{ fontSize: 11, color: isToday ? 'rgba(255,255,255,0.65)' : '#9ca3af', marginTop: 2 }}>~{pred.customers} cust</div>
+                      <div style={{ fontSize: 11, color: isToday ? 'rgba(255,255,255,0.65)' : '#9ca3af', marginTop: 2 }}>~{isToday && phase2CustPred ? phase2CustPred : pred.customers} cust</div>
                       <RangeBar min={pred.min} mid={pred.mid} max={pred.max} globalMax={globalMax} />
                       <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
                         <span style={{ fontSize: 10, background: isToday ? 'rgba(255,255,255,0.15)' : '#f0f4f0', color: isToday ? '#fff' : '#6b7280', borderRadius: 20, padding: '2px 7px', fontWeight: 700 }}>
