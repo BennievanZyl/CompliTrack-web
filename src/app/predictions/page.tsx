@@ -49,6 +49,8 @@ type AccuracyPoint = {
   predicted: number
   actual: number
   errorPct: number
+  predictedCustomers: number
+  actualCustomers: number
 }
 
 /* ── DOM helpers ─────────────────────────────────────────────── */
@@ -133,11 +135,13 @@ function buildAccuracy(rows: CashupRow[], snaps: SnapshotRow[], weeksBack = 10):
     const predictedValue = snapForDate?.predicted_final ?? pred.mid
     const errorPct = Math.round(Math.abs(target.cash_up_total - predictedValue) / predictedValue * 100)
     points.push({
-      date:      target.cash_up_date,
-      label:     `${DOW[dow]} ${target.cash_up_date.substring(5)}`,
-      predicted: predictedValue,
-      actual:    target.cash_up_total,
+      date:               target.cash_up_date,
+      label:              `${DOW[dow]} ${target.cash_up_date.substring(5)}`,
+      predicted:          predictedValue,
+      actual:             target.cash_up_total,
       errorPct,
+      predictedCustomers: pred.customers,
+      actualCustomers:    target.customer_count,
     })
   }
   return points
@@ -673,19 +677,35 @@ export default function PredictionsPage() {
                     ))}
                   </div>
                   {accuracy.map((pt, i) => {
-                    const good = pt.errorPct <= 10
-                    const ok   = pt.errorPct <= 20
+                    const good     = pt.errorPct <= 10
+                    const ok       = pt.errorPct <= 20
+                    const custDiff = pt.actualCustomers && pt.predictedCustomers
+                      ? pt.actualCustomers - pt.predictedCustomers : null
+                    const custGood = custDiff !== null && Math.abs(custDiff) <= Math.round(pt.predictedCustomers * 0.1)
                     return (
-                      <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', padding: '14px 24px', borderBottom: i < accuracy.length - 1 ? '1px solid #f0f4f0' : 'none', alignItems: 'center' }}>
-                        <div style={{ fontSize: 13, color: '#6b7280' }}>{pt.label}</div>
-                        <div style={{ fontSize: 13, fontWeight: 600 }}>{cur(pt.predicted)}</div>
-                        <div style={{ fontSize: 13, fontWeight: 700 }}>{cur(pt.actual)}</div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <span style={{ fontSize: 13, fontWeight: 700, color: good ? '#16a34a' : ok ? '#d97706' : '#dc2626' }}>{pt.errorPct}% off</span>
-                          <span style={{ fontSize: 11, background: good ? '#dcfce7' : ok ? '#fef3c7' : '#fee2e2', color: good ? '#166534' : ok ? '#92400e' : '#991b1b', borderRadius: 20, padding: '2px 8px', fontWeight: 700 }}>
-                            {good ? '✓ Good' : ok ? '~ Fair' : '× Wide'}
-                          </span>
+                      <div key={i} style={{ padding: '14px 24px', borderBottom: i < accuracy.length - 1 ? '1px solid #f0f4f0' : 'none' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', alignItems: 'center' }}>
+                          <div style={{ fontSize: 13, color: '#6b7280' }}>{pt.label}</div>
+                          <div style={{ fontSize: 13, fontWeight: 600 }}>{cur(pt.predicted)}</div>
+                          <div style={{ fontSize: 13, fontWeight: 700 }}>{cur(pt.actual)}</div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <span style={{ fontSize: 13, fontWeight: 700, color: good ? '#16a34a' : ok ? '#d97706' : '#dc2626' }}>{pt.errorPct}% off</span>
+                            <span style={{ fontSize: 11, background: good ? '#dcfce7' : ok ? '#fef3c7' : '#fee2e2', color: good ? '#166534' : ok ? '#92400e' : '#991b1b', borderRadius: 20, padding: '2px 8px', fontWeight: 700 }}>
+                              {good ? '✓ Good' : ok ? '~ Fair' : '\u00d7 Wide'}
+                            </span>
+                          </div>
                         </div>
+                        {pt.actualCustomers > 0 && (
+                          <div style={{ marginTop: 4, fontSize: 11, color: '#9ca3af', display: 'flex', gap: 10 }}>
+                            <span>&#128101; ~{pt.predictedCustomers} predicted</span>
+                            <span style={{ color: '#6b7280', fontWeight: 600 }}>{pt.actualCustomers} actual</span>
+                            {custDiff !== null && (
+                              <span style={{ color: custGood ? '#16a34a' : '#d97706', fontWeight: 700 }}>
+                                {custDiff >= 0 ? `+${custDiff}` : custDiff}
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </div>
                     )
                   })}
