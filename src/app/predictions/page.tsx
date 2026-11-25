@@ -241,6 +241,7 @@ export default function PredictionsPage() {
   const [ratioSamples,  setRatioSamples]  = useState(0)
   const [usingDomFilter, setUsingDomFilter] = useState(false)
   const [usingUniversal, setUsingUniversal] = useState(false)
+  const [avgRatioState, setAvgRatioState] = useState<number | null>(null)
 
   const todayStr = new Date().toISOString().split('T')[0]
   const todayDow = new Date().getDay()
@@ -287,9 +288,10 @@ export default function PredictionsPage() {
     setRatioSamples(rs)
     setUsingDomFilter(domF)
     setUsingUniversal(uniF)
+    setAvgRatioState(avgRatio)
     if (todaySnapshot) {
       // Always prefer live ratio when we have enough samples; stored is fallback only.
-      const liveRatio = avgRatio && ratioSamples >= 2
+      const liveRatio = avgRatio && rs >= 2
         ? Math.round(todaySnapshot.sales_at_time * avgRatio / 10) * 10
         : null
       setPhase2Pred(liveRatio ?? todaySnapshot.predicted_final)
@@ -358,7 +360,7 @@ export default function PredictionsPage() {
   const hasStoredSnapPred = !!(todaySnap?.predicted_final)
   // Conservative blend: live ratio capped at 40% (same-DOW) or 20% (universal).
   // Phase 1 (historical pattern) always retains at least 60% influence.
-  const hasLiveRatio = ratioSamples >= 2 && !!avgRatio
+  const hasLiveRatio = ratioSamples >= 2 && !!avgRatioState
   const phase2BlendWeight = !todaySnap
     ? 0
     : hasLiveRatio
