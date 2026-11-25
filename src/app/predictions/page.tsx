@@ -22,6 +22,7 @@ type SnapshotRow = {
   snapshot_date: string
   snapshot_time: string
   sales_at_time: number
+  customer_count_at_time: number | null
   predicted_final: number | null
 }
 
@@ -242,6 +243,7 @@ export default function PredictionsPage() {
   const [usingDomFilter, setUsingDomFilter] = useState(false)
   const [usingUniversal, setUsingUniversal] = useState(false)
   const [avgRatioState, setAvgRatioState] = useState<number | null>(null)
+  const [phase2CustPred, setPhase2CustPred] = useState<number | null>(null)
 
   const todayStr = new Date().toISOString().split('T')[0]
   const todayDow = new Date().getDay()
@@ -267,7 +269,7 @@ export default function PredictionsPage() {
         .gte('cash_up_date', sinceStr)
         .order('cash_up_date', { ascending: false }),
       supabase.from('sales_snapshots')
-        .select('snapshot_date, snapshot_time, sales_at_time, predicted_final')
+        .select('snapshot_date, snapshot_time, sales_at_time, customer_count_at_time, predicted_final')
         .eq('store_id', STORE_ID)
         .gte('snapshot_date', sinceStr)
         .order('snapshot_date', { ascending: false }),
@@ -295,6 +297,27 @@ export default function PredictionsPage() {
         ? Math.round(todaySnapshot.sales_at_time * avgRatio / 10) * 10
         : null
       setPhase2Pred(liveRatio ?? todaySnapshot.predicted_final)
+
+      // Customer ratio: same-DOW snapshot customer_count → cashup customer_count pairs
+      if (todaySnapshot.customer_count_at_time && todaySnapshot.customer_count_at_time > 0) {
+        const cashupMap = new Map(data.map(c => [c.cash_up_date, c.customer_count]))
+        const custPairs = snaps
+          .filter(s => s.snapshot_date !== todayStr && s.customer_count_at_time && s.customer_count_at_time > 0)
+          .map(s => {
+            const finalCust = cashupMap.get(s.snapshot_date)
+            if (!finalCust || finalCust <= 0) return null
+            const dow = new Date(s.snapshot_date + 'T12:00:00').getDay()
+            return { dow, ratio: finalCust / s.customer_count_at_time! }
+          })
+          .filter(Boolean) as { dow: number; ratio: number }[]
+        const sameDowCust = custPairs.filter(p => p.dow === todayDow)
+        const allCust     = custPairs
+        const custRatioPairs = sameDowCust.length >= 2 ? sameDowCust : allCust.length >= 2 ? allCust : []
+        if (custRatioPairs.length >= 2) {
+          const avgCustRatio = custRatioPairs.reduce((s, p) => s + p.ratio, 0) / custRatioPairs.length
+          setPhase2CustPred(Math.round(todaySnapshot.customer_count_at_time * avgCustRatio))
+        }
+      }
     }
 
     /* predictions for each DOW using next occurrence of that day */
@@ -517,9 +540,20 @@ export default function PredictionsPage() {
                           <div style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }}>captured at {todaySnap.snapshot_time}</div>
                         </div>
                       )}
-                      <div style={{ background: '#f8faf8', borderRadius: 16, padding: '16px 20px', minWidth: 120 }}>
-                        <div style={{ fontSize: 11, color: '#6b7280', fontWeight: 700, textTransform: 'uppercase', marginBottom: 4 }}>Customers</div>
-                        <div style={{ fontSize: 28, fontWeight: 900 }}>~{todayPred.customers}</div>
+                      <div style={{ background: todaySnap?.customer_count_at_time ? '#f0fdf4' : '#f8faf8', borderRadius: 16, padding: '16px 20px', minWidth: 120, border: todaySnap?.customer_count_at_time ? '1px solid #bbf7d0' : undefined }}>
+                        <div style={{ fontSize: 11, color: todaySnap?.customer_count_at_time ? '#166534' : '#6b7280', fontWeight: 700, textTransform: 'uppercase', marginBottom: 4 }}>
+                          {todaySnap?.customer_count_at_time ? '👥 Customers' : 'Customers'}
+                        </div>
+                        <div style={{ fontSize: 28, fontWeight: 900, color: todaySnap?.customer_count_at_time ? '#166534' : undefined }}>
+                          ~{phase2CustPred ?? todayPred.customers}
+                        </div>
+                        {todaySnap?.customer_count_at_time ? (
+                          <div style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }}>
+                            {todaySnap.customer_count_at_time} at {todaySnap.snapshot_time} · projected
+                          </div>
+                        ) : (
+                          <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>historical avg</div>
+                        )}
                       </div>
                       <div style={{ background: '#f8faf8', borderRadius: 16, padding: '16px 20px', minWidth: 120 }}>
                         <div style={{ fontSize: 11, color: '#6b7280', fontWeight: 700, textTransform: 'uppercase', marginBottom: 4 }}>Avg Ticket</div>
