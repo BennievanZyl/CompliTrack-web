@@ -37,17 +37,17 @@ serve(async () => {
       const { store_id, recipient_ids } = setting;
       if (!recipient_ids?.length) continue;
 
-      // Find today's open session for this store
+      // Find today's session for this store (any status — alert fires even after sign-off)
       const { data: sessions } = await sb
         .from("daily_sessions")
-        .select("id")
+        .select("id, status")
         .eq("store_id", store_id)
         .eq("session_date", today)
-.in("status", ["open", "in_progress"])
+        .order("created_at", { ascending: false })
         .limit(1);
 
       if (!sessions?.length) {
-        console.log(`[compliance-alert] no open session for store ${store_id}`);
+        console.log(`[compliance-alert] no session found today for store ${store_id}`);
         continue;
       }
       const sessionId = sessions[0].id;
