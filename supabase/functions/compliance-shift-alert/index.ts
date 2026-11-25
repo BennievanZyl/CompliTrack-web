@@ -43,7 +43,7 @@ serve(async () => {
         .select("id")
         .eq("store_id", store_id)
         .eq("session_date", today)
-        .eq("status", "open")
+.in("status", ["open", "in_progress"])
         .limit(1);
 
       if (!sessions?.length) {
@@ -57,7 +57,7 @@ serve(async () => {
         .from("compliance_issues")
         .select("id, description, employee_id, created_at, is_uniform_violation")
         .eq("session_id", sessionId)
-        .eq("status", "open");
+.in("status", ["open", "in_progress"]);
 
       if (!issues?.length) {
         console.log(`[compliance-alert] no open issues for session ${sessionId}`);
@@ -90,10 +90,12 @@ serve(async () => {
         return `${i + 1}. ${issue.description}${emp ? ` (${emp})` : ""}${badge} — flagged ${time}`;
       }).join("\n");
 
+      const reportUrl   = `https://complitrack.co.za/compliance/report/${sessionId}`;
       const alertTitle = `🔴 Compliance Alert — ${storeName}`;
       const alertBody  =
         `${issues.length} unresolved issue${issues.length !== 1 ? "s" : ""} before shift end:\n\n` +
-        issueLines;
+        issueLines +
+        `\n\n📄 View full report:\n${reportUrl}`;
       const fullMessage = `${alertTitle}\n\n${alertBody}`;
 
       console.log(`[compliance-alert] sending alert for store ${storeName}: ${issues.length} issues`);
@@ -101,14 +103,14 @@ serve(async () => {
       // Send to each selected recipient
       for (const recipientId of recipient_ids) {
         // Get recipient's profile (expo_push_token + name)
-        const { data: profile } = await sb
+        const { data: profile, error: profileErr } = await sb
           .from("profiles")
-          .select("id, full_name, expo_push_token, org_id")
+          .select("id, full_name, expo_push_token")
           .eq("id", recipientId)
           .single();
 
-        if (!profile) {
-          console.log(`[compliance-alert] recipient ${recipientId} not found in profiles`);
+        if (profileErr || !profile) {
+          console.log(`[compliance-alert] recipient ${recipientId} not found in profiles`, profileErr?.message ?? "");
           continue;
         }
 
