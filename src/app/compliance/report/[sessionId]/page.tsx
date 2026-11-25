@@ -29,13 +29,26 @@ export default async function ReportPage({ params }: { params: { sessionId: stri
   const client = sb()
   const { sessionId } = params
 
-  const { data: session } = await client
+  const { data: session, error: sessionError } = await client
     .from('daily_sessions')
     .select('id, session_date, status, store_id, signed_off_at')
     .eq('id', sessionId)
     .single()
 
-  if (!session) return notFound()
+  if (!session) {
+    const errMsg = (sessionError as any)?.message ?? 'no message'
+    const errCode = (sessionError as any)?.code ?? 'no code'
+    const keySet = !!SUPABASE_KEY
+    return (
+      <div style={{background:'#111',color:'#fff',padding:'2rem',fontFamily:'monospace'}}>
+        <h2>Debug — session not found</h2>
+        <p>Session ID: {sessionId}</p>
+        <p>Key set: {String(keySet)}</p>
+        <p>Error code: {errCode}</p>
+        <p>Error message: {errMsg}</p>
+      </div>
+    )
+  }
 
   const { data: store } = await client
     .from('stores')
